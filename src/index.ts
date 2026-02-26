@@ -5,6 +5,12 @@ import morgan from "morgan"
 import { z } from "zod"
 import { randomUUID } from "crypto"
 import type { Request, Response } from "express"
+import { createRequire } from "module"
+
+
+
+const require = createRequire(import.meta.url)
+const { version } = require("../package.json")
 
 const envSchema = z.object({
   PORT: z.coerce.number().default(4000),
@@ -41,9 +47,9 @@ app.use(
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({
-    ok: true,
-    service: "shelterflex-backend",
-    env: env.NODE_ENV,
+    status: "ok",
+    version,
+    uptimeSeconds: Math.floor(process.uptime()),
   })
 })
 
