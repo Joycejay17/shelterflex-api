@@ -3,6 +3,7 @@ import cors from "cors"
 import express from "express"
 import morgan from "morgan"
 import { z } from "zod"
+import { randomUUID } from "crypto"
 import type { Request, Response } from "express"
 
 const envSchema = z.object({
@@ -18,7 +19,19 @@ const env = envSchema.parse(process.env)
 
 const app = express()
 
-app.use(morgan("dev"))
+morgan.token("id", (req: Request) => {
+  req.headers["x-request-id"] ??= randomUUID()
+  return req.headers["x-request-id"] as string
+})
+
+if (env.NODE_ENV !== "production") {
+  app.use(
+    morgan(":id :method :url :status :response-time ms", {
+      skip: (req) => req.path === "/health",
+    }),
+  )
+}
+
 app.use(express.json())
 app.use(
   cors({
