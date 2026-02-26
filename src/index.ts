@@ -7,7 +7,19 @@ import { env } from "./schemas/env.js"
 
 const app = express()
 
-app.use(morgan("dev"))
+morgan.token("id", (req: Request) => {
+  req.headers["x-request-id"] ??= randomUUID()
+  return req.headers["x-request-id"] as string
+})
+
+if (env.NODE_ENV !== "production") {
+  app.use(
+    morgan(":id :method :url :status :response-time ms", {
+      skip: (req) => req.path === "/health",
+    }),
+  )
+}
+
 app.use(express.json())
 app.use(
   cors({
@@ -17,9 +29,9 @@ app.use(
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({
-    ok: true,
-    service: "shelterflex-backend",
-    env: env.NODE_ENV,
+    status: "ok",
+    version,
+    uptimeSeconds: Math.floor(process.uptime()),
   })
 })
 
