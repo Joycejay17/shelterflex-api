@@ -1,5 +1,7 @@
 import { ZodSchema } from 'zod'
 import { Request, Response, NextFunction } from 'express'
+import { ErrorCode, type ErrorResponse } from '../errors/index.js'
+import { formatZodIssues } from '../errors/utils.js'
 
 type ValidateTarget = 'body' | 'query' | 'params'
 
@@ -9,13 +11,14 @@ export const validate =
     const result = schema.safeParse(req[target])
 
     if (!result.success) {
-      return res.status(400).json({
-        error: 'Validation failed',
-        details: result.error.issues.map(issue => ({
-          field: issue.path.join('.') || target,
-          message: issue.message,
-        })),
-      })
+      const body: ErrorResponse = {
+        error: {
+          code: ErrorCode.VALIDATION_ERROR,
+          message: 'Invalid request data',
+          details: formatZodIssues(result.error.issues, target),
+        },
+      }
+      return res.status(400).json(body)
     }
 
     // Assign the coerced/defaulted data back so handlers see clean types

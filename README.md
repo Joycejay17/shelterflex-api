@@ -10,6 +10,13 @@ cp .env.example .env
 npm run dev
 ```
 
+## Documentation
+
+| Topic | File |
+|---|---|
+| Endpoints & request validation | this file |
+| Error handling contract | [src/docs/ERROR-INFO.md](src/docs/ERROR-INFO.md) |
+
 ## Endpoints
 
 | Method | Path | Description |
@@ -55,10 +62,13 @@ Returns **400** with structured field-level errors on invalid input.
 
 ```json
 {
-  "error": "Validation failed",
-  "details": [
-    { "field": "contractId", "message": "contractId must be a 56-character Stellar strkey" }
-  ]
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request data",
+    "details": {
+      "contractId": "contractId must be a 56-character Stellar strkey"
+    }
+  }
 }
 ```
 
@@ -81,6 +91,10 @@ router.get('/route', validate(mySchema, 'query'), handler)
 
 Schemas live in `src/schemas/` and export both the Zod schema and the
 inferred TypeScript type.
+
+## Error handling
+
+See [src/docs/ERROR-INFO.md](src/docs/ERROR-INFO.md) for the full error contract, code catalog, and usage examples.
 
 ## Soroban integration
 
