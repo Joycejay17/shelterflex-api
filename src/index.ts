@@ -7,10 +7,10 @@ import morgan from "morgan"
 import type { Request, Response } from "express"
 import { createPublicRateLimiter } from "./middleware/rateLimit.js"
 import { env } from "./schemas/env.js"
-import { errorHandler } from "./middleware/index.js"
+import { errorHandler, validate } from "./middleware/index.js"
 import { AppError } from "./errors/index.js"
 import { ErrorCode } from "./errors/index.js"
-import { randomUUID } from "crypto"
+import { echoRequestSchema, type EchoResponse } from "./schemas/echo.js"
 
 const require = createRequire(import.meta.url)
 const { version } = require("../package.json") as { version: string }
@@ -54,6 +54,22 @@ publicRouter.get("/soroban/config", (_req: Request, res: Response) => {
     contractId: env.SOROBAN_CONTRACT_ID ?? null,
   })
 })
+
+// Example endpoint demonstrating Zod validation
+publicRouter.post(
+  "/api/example/echo",
+  validate(echoRequestSchema, "body"),
+  (req: Request, res: Response) => {
+    const { message, timestamp } = req.body
+    const response: EchoResponse = {
+      echo: message,
+      receivedAt: new Date().toISOString(),
+      ...(timestamp ? { originalTimestamp: timestamp } : {}),
+    }
+    res.json(response)
+  },
+)
+
 app.use("/", publicRouter)
 
 // 404 catch-all — must be after all routes, before errorHandler
