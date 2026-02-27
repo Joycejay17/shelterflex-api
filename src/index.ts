@@ -4,6 +4,10 @@ import express from "express"
 import morgan from "morgan"
 import type { Request, Response } from "express"
 import { env } from "./schemas/env.js"
+import { errorHandler } from "./middleware/index.js"
+import { AppError } from "./errors/index.js"
+import { ErrorCode } from "./errors/index.js"
+import { randomUUID } from "crypto"
 
 const app = express()
 
@@ -30,7 +34,7 @@ app.use(
 app.get("/health", (_req: Request, res: Response) => {
   res.json({
     status: "ok",
-    version,
+    version: env.VERSION,
     uptimeSeconds: Math.floor(process.uptime()),
   })
 })
@@ -42,6 +46,14 @@ app.get("/soroban/config", (_req: Request, res: Response) => {
     contractId: env.SOROBAN_CONTRACT_ID ?? null,
   })
 })
+
+// 404 catch-all — must be after all routes, before errorHandler
+app.use('*', (_req, _res, next) => {
+  next(new AppError(ErrorCode.NOT_FOUND, 404, 'Route not found'))
+})
+
+// Global error handler — must be last
+app.use(errorHandler)
 
 app.listen(env.PORT, () => {
   console.log(`[backend] listening on http://localhost:${env.PORT}`)
