@@ -1,9 +1,15 @@
 import "dotenv/config"
+import { createRequire } from "node:module"
+import { randomUUID } from "node:crypto"
 import cors from "cors"
 import express from "express"
 import morgan from "morgan"
 import type { Request, Response } from "express"
+import { createPublicRateLimiter } from "./middleware/rateLimit.js"
 import { env } from "./schemas/env.js"
+
+const require = createRequire(import.meta.url)
+const { version } = require("../package.json") as { version: string }
 
 const app = express()
 
@@ -27,21 +33,24 @@ app.use(
   }),
 )
 
-app.get("/health", (_req: Request, res: Response) => {
+// Public routes: rate limited
+const publicRouter = express.Router()
+publicRouter.use(createPublicRateLimiter(env))
+publicRouter.get("/health", (_req: Request, res: Response) => {
   res.json({
     status: "ok",
     version,
     uptimeSeconds: Math.floor(process.uptime()),
   })
 })
-
-app.get("/soroban/config", (_req: Request, res: Response) => {
+publicRouter.get("/soroban/config", (_req: Request, res: Response) => {
   res.json({
     rpcUrl: env.SOROBAN_RPC_URL,
     networkPassphrase: env.SOROBAN_NETWORK_PASSPHRASE,
     contractId: env.SOROBAN_CONTRACT_ID ?? null,
   })
 })
+app.use("/", publicRouter)
 
 app.listen(env.PORT, () => {
   console.log(`[backend] listening on http://localhost:${env.PORT}`)
