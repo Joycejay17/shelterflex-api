@@ -10,9 +10,16 @@ import publicRouter from "./routes/publicRoutes.js"
 import { AppError } from "./errors/AppError.js"
 import { ErrorCode } from "./errors/errorCodes.js"
 import { requestLogger } from "./middleware/requestLogger.js"
+import { getSorobanConfigFromEnv } from "./soroban/client.js"
+import { createSorobanAdapter } from "./soroban/index.js"
+import { createBalanceRouter } from "./routes/balance.js"
 
 export function createApp() {
   const app = express()
+
+  // Initialize Soroban adapter using your existing config function
+  const sorobanConfig = getSorobanConfigFromEnv(process.env)
+  const sorobanAdapter = createSorobanAdapter(sorobanConfig)
 
   // Core middleware
   app.use(requestIdMiddleware)
@@ -36,6 +43,7 @@ export function createApp() {
   app.use("/health", healthRouter)
   app.use(createPublicRateLimiter(env))
   app.use("/", publicRouter)
+  app.use('/api', createBalanceRouter(sorobanAdapter))
 
 
 
