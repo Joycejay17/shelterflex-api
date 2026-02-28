@@ -108,6 +108,30 @@ Environment variables:
 - `SOROBAN_NETWORK_PASSPHRASE`
 - `SOROBAN_CONTRACT_ID` (optional)
 
+
+## Request IDs
+
+Every incoming request is assigned a unique request ID to help track and debug requests across the system.
+
+- If the client sends `x-request-id` in the request header, it is reused.
+- Otherwise, a UUID is generated automatically.
+- The request ID is returned in the response header (`x-request-id`).
+- Error responses include the request ID in both the header and the JSON body.
+- Logs include the request ID for easier correlation between requests and system logs.
+
+Example:
+
+Request:
+GET /health
+x-request-id: abc-123
+
+Response:
+HTTP/1.1 200 OK
+x-request-id: abc-123
+{
+  "status": "ok",
+  "requestId": "abc-123"
+}
 ## Rate limiting
 
 Public endpoints (`GET /health`, `GET /soroban/config`) are rate limited per IP to reduce abuse and protect uptime.
@@ -126,3 +150,4 @@ When a client exceeds the limit, the server responds with **429 Too Many Request
 ```
 
 Defaults are suitable for local development; set lower limits in production if needed.
+
