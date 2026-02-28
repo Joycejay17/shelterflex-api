@@ -1,70 +1,98 @@
-import { ZodError } from 'zod'
 import type { Request, Response, NextFunction } from 'express'
+import { ZodError } from 'zod'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode, type ErrorResponse } from '../errors/errorCodes.js'
 import { formatZodIssues } from '../errors/utils.js'
 
-/**
- * Global Express error-handling middleware.
- * Must be registered AFTER all routes: `app.use(errorHandler)`
- *
- * Handled cases:
- *  - `AppError`   → controlled domain error, uses its own metadata
- *  - `ZodError`   → schema.parse() thrown inside a route handler → 400
- *  - `SyntaxError` with `body` → malformed JSON body → 400
- *  - Unknown      → safe 500, never leaks internals
- */
+const isProduction = process.env.NODE_ENV === 'production'
+
 export function errorHandler(
   err: unknown,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction,
 ): void {
-  // AppError controlled domain error
+  const requestId = req.requestId
+
+  /**
+   * Centralized response sender
+   */
+  const send = (status: number, body: ErrorResponse) => {
+    res
+      .status(status)
+      .setHeader('x-request-id', requestId)
+      .json(body)
+  }
+
+  /**
+   * 1️⃣ Controlled domain error
+   */
   if (err instanceof AppError) {
-    const body: ErrorResponse = {
+    send(err.status, {
       error: {
         code: err.code,
         message: err.message,
         ...(err.details ? { details: err.details } : {}),
       },
-    }
-    res.status(err.status).json(body)
+    })
     return
   }
 
-  // ZodError schema.parse() thrown directly inside a route handler
+  /**
+   * 2️⃣ Zod validation error
+   */
   if (err instanceof ZodError) {
-    const body: ErrorResponse = {
+    send(400, {
       error: {
         code: ErrorCode.VALIDATION_ERROR,
         message: 'Invalid request data',
         details: formatZodIssues(err.issues),
       },
-    }
-    res.status(400).json(body)
+    })
     return
   }
 
-  // SyntaxError malformed JSON body (thrown by express.json())
+  /**
+   * 3️⃣ Malformed JSON body
+   */
   if (err instanceof SyntaxError && 'body' in err) {
-    const body: ErrorResponse = {
+    send(400, {
       error: {
         code: ErrorCode.VALIDATION_ERROR,
         message: 'Malformed JSON in request body',
       },
-    }
-    res.status(400).json(body)
+    })
     return
   }
 
-  // Unknown never leak internals to the client
-  console.error('[errorHandler] Unhandled error:', err)
-  const body: ErrorResponse = {
+  /**
+   * 4️⃣ Unknown / Unhandled Error
+   */
+  const safeMessage = 'An unexpected error occurred'
+
+  // Structured logging (never log secrets)
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      requestId,
+      message: 'Unhandled error',
+      errorName: err instanceof Error ? err.name : 'Unknown',
+      errorMessage: err instanceof Error ? err.message : String(err),
+      stack: !isProduction && err instanceof Error ? err.stack : undefined,
+      path: req.originalUrl,
+      method: req.method,
+      timestamp: new Date().toISOString(),
+    }),
+  )
+
+  send(500, {
     error: {
       code: ErrorCode.INTERNAL_ERROR,
-      message: 'An unexpected error occurred',
+      message: isProduction
+        ? safeMessage
+        : err instanceof Error
+        ? err.message
+        : safeMessage,
     },
-  }
-  res.status(500).json(body)
+  })
 }
