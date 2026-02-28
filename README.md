@@ -14,10 +14,10 @@ npm run dev
 
 | Topic | File |
 |---|---|
-| Endpoints & request validation | this file |
+| API specification (OpenAPI) | [openapi.yml](openapi.yml) |
 | Error handling contract | [src/docs/ERROR-INFO.md](src/docs/ERROR-INFO.md) |
 
-## Endpoints
+## API Specification
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -137,6 +137,13 @@ Returns **400** with structured field-level errors on invalid input.
   }
 }
 ```
+The complete API specification is available in [OpenAPI format](openapi.yml). It includes:
+- All available endpoints
+- Request/response schemas
+- Error response formats
+- Example requests and responses
+
+You can view the OpenAPI spec in tools like Swagger UI or Redoc, or use it to generate client code.
 
 ## Request validation pattern
 
