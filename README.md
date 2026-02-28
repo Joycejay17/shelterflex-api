@@ -19,6 +19,124 @@ npm run dev
 
 ## API Specification
 
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Service liveness check |
+| `GET` | `/soroban/config` | Returns the active Soroban RPC configuration |
+| `POST` | `/api/example/echo` | Example endpoint demonstrating Zod validation |
+| `POST` | `/soroban/simulate` | Validates and queues a Soroban contract simulation |
+
+### POST `/api/example/echo`
+
+Example endpoint demonstrating Zod request validation. Use this as a reference pattern when adding new endpoints.
+
+**Request body**
+
+```json
+{
+  "message": "Hello, world!",
+  "timestamp": 1234567890
+}
+```
+
+| Field | Type | Required | Validation |
+|-------|------|----------|------------|
+| `message` | `string` | ✅ | 1-100 characters |
+| `timestamp` | `number` | ❌ | Positive integer |
+
+**Success – 200**
+
+```json
+{
+  "echo": "Hello, world!",
+  "receivedAt": "2026-02-27T10:30:00.000Z",
+  "originalTimestamp": 1234567890
+}
+```
+
+**Validation error – 400**
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request data",
+    "details": {
+      "message": "Message cannot be empty"
+    }
+  }
+}
+```
+
+**Example curl commands**
+
+Valid request:
+```bash
+curl -X POST http://localhost:3001/api/example/echo \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello, world!", "timestamp": 1234567890}'
+```
+
+Invalid request (empty message):
+```bash
+curl -X POST http://localhost:3001/api/example/echo \
+  -H "Content-Type: application/json" \
+  -d '{"message": ""}'
+```
+
+Invalid request (wrong type):
+```bash
+curl -X POST http://localhost:3001/api/example/echo \
+  -H "Content-Type: application/json" \
+  -d '{"message": 123}'
+```
+
+### POST `/soroban/simulate`
+
+Validates the request body with Zod before forwarding to the Soroban RPC node.
+Returns **400** with structured field-level errors on invalid input.
+
+**Request body**
+
+```json
+{
+  "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+  "method": "deposit",
+  "args": [1000, "GABC..."]
+}
+```
+
+| Field | Type | Required | Validation |
+|-------|------|----------|------------|
+| `contractId` | `string` | ✅ | Exactly 56 characters (Stellar strkey) |
+| `method` | `string` | ✅ | Non-empty string |
+| `args` | `unknown[]` | ❌ | Defaults to `[]` |
+
+**Success – 200**
+
+```json
+{
+  "contractId": "CAAA...",
+  "method": "deposit",
+  "args": [1000, "GABC..."],
+  "status": "pending",
+  "message": "Simulation queued – RPC integration coming soon"
+}
+```
+
+**Validation error – 400**
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request data",
+    "details": {
+      "contractId": "contractId must be a 56-character Stellar strkey"
+    }
+  }
+}
+```
 The complete API specification is available in [OpenAPI format](openapi.yml). It includes:
 - All available endpoints
 - Request/response schemas
