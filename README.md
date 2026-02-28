@@ -14,63 +14,18 @@ npm run dev
 
 | Topic | File |
 |---|---|
-| Endpoints & request validation | this file |
+| API specification (OpenAPI) | [openapi.yml](openapi.yml) |
 | Error handling contract | [src/docs/ERROR-INFO.md](src/docs/ERROR-INFO.md) |
 
-## Endpoints
+## API Specification
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Service liveness check |
-| `GET` | `/soroban/config` | Returns the active Soroban RPC configuration |
-| `POST` | `/soroban/simulate` | Validates and queues a Soroban contract simulation |
+The complete API specification is available in [OpenAPI format](openapi.yml). It includes:
+- All available endpoints
+- Request/response schemas
+- Error response formats
+- Example requests and responses
 
-### POST `/soroban/simulate`
-
-Validates the request body with Zod before forwarding to the Soroban RPC node.
-Returns **400** with structured field-level errors on invalid input.
-
-**Request body**
-
-```json
-{
-  "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-  "method": "deposit",
-  "args": [1000, "GABC..."]
-}
-```
-
-| Field | Type | Required | Validation |
-|-------|------|----------|------------|
-| `contractId` | `string` | ✅ | Exactly 56 characters (Stellar strkey) |
-| `method` | `string` | ✅ | Non-empty string |
-| `args` | `unknown[]` | ❌ | Defaults to `[]` |
-
-**Success – 200**
-
-```json
-{
-  "contractId": "CAAA...",
-  "method": "deposit",
-  "args": [1000, "GABC..."],
-  "status": "pending",
-  "message": "Simulation queued – RPC integration coming soon"
-}
-```
-
-**Validation error – 400**
-
-```json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Invalid request data",
-    "details": {
-      "contractId": "contractId must be a 56-character Stellar strkey"
-    }
-  }
-}
-```
+You can view the OpenAPI spec in tools like Swagger UI or Redoc, or use it to generate client code.
 
 ## Request validation pattern
 

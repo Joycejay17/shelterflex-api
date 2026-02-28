@@ -1,0 +1,145 @@
+openapi: 3.0.3
+info:
+  title: ShelterFlex Backend API
+  description: API for ShelterFlex backend service
+  version: 0.1.0
+  contact:
+    name: ShelterFlex Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:4000
+    description: Development server
+  - url: https://api.shelterflex.io
+    description: Production server
+
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Returns the current health status and basic service information
+      operationId: getHealth
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - version
+                  - uptimeSeconds
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                    example: ok
+                  version:
+                    type: string
+                    example: "0.1.0"
+                  uptimeSeconds:
+                    type: number
+                    format: int64
+                    example: 3600
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /soroban/config:
+    get:
+      summary: Get Soroban configuration
+      description: Returns the current Soroban blockchain configuration
+      operationId: getSorobanConfig
+      tags:
+        - Soroban
+      responses:
+        '200':
+          description: Soroban configuration retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - rpcUrl
+                  - networkPassphrase
+                  - contractId
+                properties:
+                  rpcUrl:
+                    type: string
+                    format: uri
+                    example: "https://soroban-testnet.stellar.org"
+                  networkPassphrase:
+                    type: string
+                    example: "Test SDF Network ; September 2015"
+                  contractId:
+                    type: string
+                    nullable: true
+                    example: null
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/Error'
+
+components:
+  schemas:
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              enum:
+                - VALIDATION_ERROR
+                - UNAUTHORIZED
+                - FORBIDDEN
+                - NOT_FOUND
+                - CONFLICT
+                - SOROBAN_ERROR
+                - INTERNAL_ERROR
+              example: NOT_FOUND
+            message:
+              type: string
+              example: "Resource not found"
+            details:
+              type: object
+              description: Optional structured context for the error
+              additionalProperties: true
+
+  responses:
+    Error:
+      description: Unexpected error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: "TOO_MANY_REQUESTS"
+              message: "Rate limit exceeded"
+
+  securitySchemes: {}
+
+tags:
+  - name: Health
+    description: Health check operations
+  - name: Soroban
+    description: Soroban blockchain configuration
