@@ -10,6 +10,28 @@ cp .env.example .env
 npm run dev
 ```
 
+## Testing
+
+Run the integration test suite:
+
+```bash
+npm test
+```
+
+Run tests in watch mode (useful during development):
+
+```bash
+npm run test:watch
+```
+
+Run tests with coverage report:
+
+```bash
+npm run test:coverage
+```
+
+Tests are located in `src/**/*.test.ts` files and use Vitest + Supertest. They do not require external network access — all blockchain interactions are stubbed.
+
 ## Documentation
 
 | Topic | File |
