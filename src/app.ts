@@ -9,12 +9,16 @@ import { createPublicRateLimiter } from "./middleware/rateLimit.js"
 import publicRouter from "./routes/publicRoutes.js"
 import { AppError } from "./errors/AppError.js"
 import { ErrorCode } from "./errors/errorCodes.js"
+import { requestLogger } from "./middleware/requestLogger.js"
 
 export function createApp() {
   const app = express()
 
   // Core middleware
   app.use(requestIdMiddleware)
+
+  //  Logger 
+  app.use(requestLogger);
 
   if (env.NODE_ENV !== "production") {
     app.use(createLogger())
