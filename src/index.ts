@@ -1,16 +1,11 @@
 import "dotenv/config"
-import { createRequire } from "node:module"
-import { randomUUID } from "node:crypto"
-import cors from "cors"
-import express from "express"
-import morgan from "morgan"
-import type { Request, Response } from "express"
-import { createPublicRateLimiter } from "./middleware/rateLimit.js"
+import { createApp } from "./app.js"
 import { env } from "./schemas/env.js"
 import { errorHandler, validate } from "./middleware/index.js"
 import { AppError } from "./errors/index.js"
 import { ErrorCode } from "./errors/index.js"
 import { echoRequestSchema, type EchoResponse } from "./schemas/echo.js"
+import { createRequire } from "module"
 
 const require = createRequire(import.meta.url)
 const { version } = require("../package.json") as { version: string }
@@ -79,6 +74,7 @@ app.use('*', (_req, _res, next) => {
 
 // Global error handler — must be last
 app.use(errorHandler)
+const app = createApp()
 
 app.listen(env.PORT, () => {
   console.log(`[backend] listening on http://localhost:${env.PORT}`)
