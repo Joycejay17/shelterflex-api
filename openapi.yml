@@ -583,6 +583,142 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/admin/rewards/{rewardId}/mark-paid:
+    post:
+      summary: Mark reward as paid
+      description: |
+        Mark a whistleblower reward as paid and record receipt on-chain.
+        
+        Rules:
+        - Reward must be in 'payable' status
+        - Creates on-chain receipt with WHISTLEBLOWER_REWARD type
+        - Idempotent by external reference (duplicate refs return same txId)
+        - Receipt contains dealId and listingId
+      operationId: markRewardPaid
+      tags:
+        - Admin
+      parameters:
+        - name: rewardId
+          in: path
+          description: Reward ID
+          required: true
+          schema:
+            type: string
+            format: uuid
+            example: 550e8400-e29b-41d4-a716-446655440000
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkRewardPaidRequest'
+      responses:
+        '200':
+          description: Reward marked as paid and receipt written to chain
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - reward
+                  - receipt
+                  - message
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  reward:
+                    type: object
+                    required:
+                      - rewardId
+                      - status
+                    properties:
+                      rewardId:
+                        type: string
+                        format: uuid
+                      status:
+                        type: string
+                        enum: [paid]
+                      paidAt:
+                        type: string
+                        format: date-time
+                      paymentTxId:
+                        type: string
+                        description: Transaction ID on blockchain
+                  receipt:
+                    type: object
+                    required:
+                      - outboxId
+                      - txId
+                      - status
+                    properties:
+                      outboxId:
+                        type: string
+                        format: uuid
+                      txId:
+                        type: string
+                        description: 32-byte transaction ID as hex
+                      status:
+                        type: string
+                        enum: [pending, sent, failed]
+                  message:
+                    type: string
+                    example: Reward marked as paid and receipt written to chain
+        '202':
+          description: Reward marked as paid, receipt queued for retry
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - reward
+                  - receipt
+                  - message
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  reward:
+                    type: object
+                  receipt:
+                    type: object
+                  message:
+                    type: string
+                    example: Reward marked as paid, receipt queued for retry
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Reward not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: NOT_FOUND
+                  message: Reward with ID '550e8400-e29b-41d4-a716-446655440000' not found
+        '409':
+          description: Reward not in payable status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: CONFLICT
+                  message: Reward cannot be marked as paid. Current status pending
+                  details:
+                    currentStatus: pending
+                    requiredStatus: payable
+        default:
+          $ref: '#/components/responses/Error'
+
 components:
   schemas:
     PaymentTxType:
@@ -1069,6 +1205,44 @@ components:
           description: Total number of pages
           example: 3
 
+    MarkRewardPaidRequest:
+      type: object
+      required:
+        - amountUsdc
+        - tokenAddress
+        - externalRefSource
+        - externalRef
+      properties:
+        amountUsdc:
+          type: number
+          description: Payment amount in USDC
+          minimum: 0.01
+          example: 100
+        tokenAddress:
+          type: string
+          description: USDC token contract address
+          example: USDC_CONTRACT_ADDRESS
+        externalRefSource:
+          type: string
+          description: Source of external reference (e.g., "stripe", "manual")
+          example: stripe
+        externalRef:
+          type: string
+          description: External payment reference ID
+          example: pi_abc123
+        amountNgn:
+          type: number
+          description: Optional payment amount in Nigerian Naira
+          example: 150000
+        fxRateNgnPerUsdc:
+          type: number
+          description: Optional FX rate (NGN per USDC)
+          example: 1500
+        fxProvider:
+          type: string
+          description: Optional FX rate provider
+          example: coinbase
+
     Error:
       type: object
       required:
@@ -1131,3 +1305,5 @@ tags:
     description: Whistleblower listing operations
   - name: Deals
     description: Deal management and repayment schedule operations
+  - name: Admin
+    description: Administrative operations including reward payouts
