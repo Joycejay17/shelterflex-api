@@ -25,6 +25,9 @@ export class OutboxSender {
       // Route to appropriate handler based on tx type
       switch (item.txType) {
         case TxType.RECEIPT:
+        case TxType.TENANT_REPAYMENT:
+        case TxType.LANDLORD_PAYOUT:
+        case TxType.WHISTLEBLOWER_REWARD:
           await this.sendReceipt(item)
           break
         default:
@@ -58,42 +61,39 @@ export class OutboxSender {
   }
 
   /**
-   * Send a receipt transaction
-   * 
-   * Note: In production, this would call the actual Soroban contract method
-   * to create a receipt. For now, we simulate with a credit operation.
+   * Send a receipt transaction via the Soroban adapter.
+   * The adapter's recordReceipt is idempotent: the contract rejects duplicate txId.
    */
   private async sendReceipt(item: OutboxItem): Promise<void> {
     const { payload } = item
 
-    // Validate payload structure
-    if (!payload.dealId || !payload.amount || !payload.payer) {
-      throw new Error('Invalid receipt payload: missing required fields')
+    if (!payload.dealId || !payload.amountUsdc || !payload.tokenAddress || !payload.txType) {
+      throw new Error('Invalid receipt payload: missing required fields (dealId, amountUsdc, tokenAddress, txType)')
     }
 
-    const dealId = String(payload.dealId)
-    const amount = BigInt(String(payload.amount))
-    const payer = String(payload.payer)
+    const { createHash } = await import('node:crypto')
+    const externalRefHash = createHash('sha256')
+      .update(item.canonicalExternalRefV1)
+      .digest('hex')
 
-    // TODO: Replace with actual contract call to create_receipt
-    // For MVP, we simulate by crediting the payer's account
-    // In production: client.create_receipt(dealId, amount, payer, txId)
-    
-    logger.debug('Simulating receipt creation', {
-      dealId,
-      amount: amount.toString(),
-      payer,
+    await this.adapter.recordReceipt({
       txId: item.txId,
+      txType: item.txType as import('./types.js').TxType,
+      amountUsdc: String(payload.amountUsdc),
+      tokenAddress: String(payload.tokenAddress),
+      dealId: String(payload.dealId),
+      listingId: payload.listingId ? String(payload.listingId) : undefined,
+      externalRefHash,
+      amountNgn: payload.amountNgn != null ? Number(payload.amountNgn) : undefined,
+      fxRate: payload.fxRateNgnPerUsdc != null ? Number(payload.fxRateNgnPerUsdc) : undefined,
+      fxProvider: payload.fxProvider ? String(payload.fxProvider) : undefined,
     })
 
-    // Simulate network call with potential failure
-    if (Math.random() < 0.1) {
-      // 10% simulated failure rate for testing
-      throw new Error('Simulated network failure')
-    }
-
-    // For now, just log the operation
-    // await this.adapter.credit(payer, amount)
+    logger.debug('Receipt recorded on-chain', {
+      dealId: String(payload.dealId),
+      txId: item.txId,
+      txType: item.txType,
+    })
   }
 
   /**

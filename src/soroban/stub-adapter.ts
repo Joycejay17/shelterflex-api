@@ -1,4 +1,4 @@
-import { SorobanAdapter } from './adapter.js'
+import { SorobanAdapter, RecordReceiptParams } from './adapter.js'
 import { SorobanConfig } from './client.js'
 
 // In-memory store for stub balances
@@ -17,16 +17,11 @@ export class StubSorobanAdapter implements SorobanAdapter {
      }
 
      async getBalance(account: string): Promise<bigint> {
-          // Return deterministic balance based on account address
-          // This creates predictable but unique balances for testing
           if (!stubBalances.has(account)) {
-               // Generate a deterministic "balance" based on the account string
                const hash = this.simpleHash(account)
-               // Make it a reasonable token amount (between 1000 and 10000)
                const balance = BigInt(1000 + (hash % 9000))
                stubBalances.set(account, balance)
           }
-
           const balance = stubBalances.get(account)!
           console.log(`[Stub] getBalance(${account}) -> ${balance.toString()}`)
           return balance
@@ -49,17 +44,22 @@ export class StubSorobanAdapter implements SorobanAdapter {
           console.log(`[Stub] debit(${account}, ${amount.toString()}) -> new balance: ${newBalance.toString()}`)
      }
 
+     async recordReceipt(params: RecordReceiptParams): Promise<void> {
+          // Stub: log the receipt recording. In production, calls the Soroban contract.
+          // TODO: Replace with: client.invoke('record_receipt', params)
+          console.log(`[Stub] recordReceipt txId=${params.txId} txType=${params.txType} amountUsdc=${params.amountUsdc} dealId=${params.dealId}`)
+     }
+
      getConfig(): SorobanConfig {
           return { ...this.config }
      }
 
-     // Simple string hash function for deterministic "randomness"
      private simpleHash(str: string): number {
           let hash = 0
           for (let i = 0; i < str.length; i++) {
                const char = str.charCodeAt(i)
                hash = ((hash << 5) - hash) + char
-               hash = hash & hash // Convert to 32-bit integer
+               hash = hash & hash
           }
           return Math.abs(hash)
      }

@@ -11,6 +11,9 @@ export enum OutboxStatus {
 
 export enum TxType {
   RECEIPT = 'receipt',
+  TENANT_REPAYMENT = 'tenant_repayment',
+  LANDLORD_PAYOUT = 'landlord_payout',
+  WHISTLEBLOWER_REWARD = 'whistleblower_reward',
 }
 
 /**
