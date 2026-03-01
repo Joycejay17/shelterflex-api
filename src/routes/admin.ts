@@ -1,9 +1,13 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
-import { outboxStore, OutboxSender, OutboxStatus } from '../outbox/index.js'
+import { outboxStore, OutboxSender, OutboxStatus, TxType } from '../outbox/index.js'
 import { SorobanAdapter } from '../soroban/adapter.js'
 import { logger } from '../utils/logger.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
+import { validate } from '../middleware/validate.js'
+import { markRewardPaidSchema } from '../schemas/reward.js'
+import { rewardStore } from '../models/rewardStore.js'
+import { RewardStatus } from '../models/reward.js'
 
 export function createAdminRouter(adapter: SorobanAdapter) {
   const router = Router()
@@ -152,6 +156,151 @@ export function createAdminRouter(adapter: SorobanAdapter) {
       next(error)
     }
   })
+
+  /**
+   * POST /api/admin/rewards/:rewardId/mark-paid
+   * 
+   * Mark a reward as paid and record receipt on-chain
+   * 
+   * Rules:
+   * - Reward must be in 'payable' status
+   * - Creates on-chain receipt with WHISTLEBLOWER_REWARD type
+   * - Idempotent by external reference
+   */
+  router.post(
+    '/rewards/:rewardId/mark-paid',
+    validate(markRewardPaidSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { rewardId } = req.params
+        const {
+          amountUsdc,
+          tokenAddress,
+          externalRefSource,
+          externalRef,
+          amountNgn,
+          fxRateNgnPerUsdc,
+          fxProvider,
+        } = req.body
+
+        logger.info('Marking reward as paid', {
+          rewardId,
+          externalRefSource,
+          externalRef,
+          requestId: req.requestId,
+        })
+
+        // Get reward
+        const reward = await rewardStore.getById(rewardId)
+        if (!reward) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, `Reward with ID '${rewardId}' not found`)
+        }
+
+        // Check if reward is payable
+        if (reward.status !== RewardStatus.PAYABLE) {
+          throw new AppError(
+            ErrorCode.CONFLICT,
+            409,
+            `Reward cannot be marked as paid. Current status: ${reward.status}`,
+            {
+              currentStatus: reward.status,
+              requiredStatus: RewardStatus.PAYABLE,
+            },
+          )
+        }
+
+        // Create canonical external reference
+        const canonicalExternalRef = `${externalRefSource.toLowerCase()}:${externalRef}`
+
+        // Create outbox item for on-chain receipt (idempotent)
+        const outboxItem = await outboxStore.create({
+          txType: TxType.WHISTLEBLOWER_REWARD,
+          canonicalExternalRefV1: canonicalExternalRef,
+          payload: {
+            txType: TxType.WHISTLEBLOWER_REWARD,
+            dealId: reward.dealId,
+            listingId: reward.listingId,
+            whistleblowerId: reward.whistleblowerId,
+            amountUsdc,
+            tokenAddress,
+            externalRefSource,
+            externalRef,
+            ...(amountNgn && { amountNgn }),
+            ...(fxRateNgnPerUsdc && { fxRateNgnPerUsdc }),
+            ...(fxProvider && { fxProvider }),
+          },
+        })
+
+        logger.info('Outbox item created for reward receipt', {
+          rewardId,
+          outboxId: outboxItem.id,
+          txId: outboxItem.txId,
+          requestId: req.requestId,
+        })
+
+        // Attempt to send to chain
+        const sent = await sender.send(outboxItem)
+
+        // Update reward status
+        const updatedReward = await rewardStore.markAsPaid(
+          rewardId,
+          outboxItem.txId,
+          externalRefSource,
+          externalRef,
+          {
+            amountNgn,
+            fxRateNgnPerUsdc,
+            fxProvider,
+          },
+        )
+
+        if (!updatedReward) {
+          throw new AppError(
+            ErrorCode.INTERNAL_ERROR,
+            500,
+            'Failed to update reward status',
+          )
+        }
+
+        // Fetch updated outbox item
+        const updatedOutbox = await outboxStore.getById(outboxItem.id)
+        if (!updatedOutbox) {
+          throw new AppError(
+            ErrorCode.INTERNAL_ERROR,
+            500,
+            'Failed to retrieve outbox item after send attempt',
+          )
+        }
+
+        logger.info('Reward marked as paid', {
+          rewardId,
+          txId: outboxItem.txId,
+          outboxStatus: updatedOutbox.status,
+          requestId: req.requestId,
+        })
+
+        res.status(sent ? 200 : 202).json({
+          success: true,
+          reward: {
+            rewardId: updatedReward.rewardId,
+            status: updatedReward.status,
+            paidAt: updatedReward.paidAt?.toISOString(),
+            paymentTxId: updatedReward.paymentTxId,
+          },
+          receipt: {
+            outboxId: updatedOutbox.id,
+            txId: updatedOutbox.txId,
+            status: updatedOutbox.status,
+          },
+          message: sent
+            ? 'Reward marked as paid and receipt written to chain'
+            : 'Reward marked as paid, receipt queued for retry',
+        })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
 
   return router
 }
