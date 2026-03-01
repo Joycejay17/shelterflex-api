@@ -275,6 +275,81 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/payments/confirm:
+    post:
+      summary: Confirm a payment and write a USDC receipt on-chain
+      description: |
+        Confirm an off-chain (bank/card/PSP) or on-chain (Stellar) payment and record an
+        idempotent USDC receipt on the Soroban ledger.
+
+        **USDC is the canonical accounting unit.** All on-chain receipts are denominated in USDC.
+        NGN amounts and FX metadata are optional and stored as off-chain metadata only.
+
+        **Idempotency:** Submitting the same `(externalRefSource, externalRef)` pair twice will
+        return the existing receipt without writing a duplicate on-chain.
+      operationId: confirmPayment
+      tags:
+        - Payments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmPaymentRequest'
+            examples:
+              tenantRepayment:
+                summary: Tenant repayment via Stripe
+                value:
+                  dealId: "550e8400-e29b-41d4-a716-446655440000"
+                  txType: tenant_repayment
+                  amountUsdc: "64.52"
+                  tokenAddress: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+                  externalRefSource: stripe
+                  externalRef: pi_3OZxyz123456
+                  amountNgn: 100000
+                  fxRateNgnPerUsdc: 1550.00
+                  fxProvider: exchangerate-api
+              landlordPayout:
+                summary: Landlord payout
+                value:
+                  dealId: "550e8400-e29b-41d4-a716-446655440000"
+                  txType: landlord_payout
+                  amountUsdc: "774.19"
+                  tokenAddress: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+                  externalRefSource: stellar
+                  externalRef: "a3f2c1d4e5b6..."
+      responses:
+        '200':
+          description: Payment confirmed and USDC receipt written to chain
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentConfirmationResponse'
+              example:
+                success: true
+                outboxId: "550e8400-e29b-41d4-a716-446655440001"
+                txId: "a3f2c1d4e5b6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
+                status: sent
+                message: "Payment confirmed and USDC receipt written to chain"
+        '202':
+          description: Payment confirmed, USDC receipt queued for retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentConfirmationResponse'
+              example:
+                success: true
+                outboxId: "550e8400-e29b-41d4-a716-446655440001"
+                txId: "a3f2c1d4e5b6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
+                status: failed
+                message: "Payment confirmed, USDC receipt queued for retry"
+        '400':
+          $ref: '#/components/responses/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/Error'
+
   /api/deals:
     post:
       summary: Create a new deal with repayment schedule
@@ -510,6 +585,99 @@ paths:
 
 components:
   schemas:
+    PaymentTxType:
+      type: string
+      enum:
+        - tenant_repayment
+        - landlord_payout
+        - whistleblower_reward
+      description: |
+        Transaction type for the on-chain USDC receipt.
+        - `tenant_repayment` — tenant repaying ShelterFlex financing
+        - `landlord_payout` — ShelterFlex paying landlord upfront
+        - `whistleblower_reward` — reward paid to a whistleblower
+
+    ConfirmPaymentRequest:
+      type: object
+      description: |
+        Request body for confirming a payment. **USDC is the canonical unit** for all
+        on-chain receipts. NGN values (`amountNgn`, `fxRateNgnPerUsdc`, `fxProvider`) are
+        optional metadata and are NOT stored on-chain.
+      required:
+        - dealId
+        - txType
+        - amountUsdc
+        - tokenAddress
+        - externalRefSource
+        - externalRef
+      properties:
+        dealId:
+          type: string
+          description: ID of the deal this payment is associated with
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        txType:
+          $ref: '#/components/schemas/PaymentTxType'
+        amountUsdc:
+          type: string
+          description: |
+            Payment amount in USDC (canonical on-chain unit). Decimal string with up to 6 places.
+          pattern: '^\d+(\.\d{1,6})?$'
+          example: "64.52"
+        tokenAddress:
+          type: string
+          description: USDC token contract address on Stellar
+          example: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+        externalRefSource:
+          type: string
+          description: Payment provider identifier (e.g., stripe, manual, stellar, flutterwave)
+          pattern: '^[a-zA-Z0-9_-]+$'
+          example: stripe
+        externalRef:
+          type: string
+          description: Provider-specific payment reference string (e.g., charge ID, transaction hash)
+          example: pi_3OZxyz123456
+        amountNgn:
+          type: number
+          description: Payment amount in NGN (optional metadata, not stored on-chain)
+          example: 100000
+        fxRateNgnPerUsdc:
+          type: number
+          description: FX rate (NGN per 1 USDC) at time of payment (optional metadata)
+          example: 1550.00
+        fxProvider:
+          type: string
+          description: FX rate provider name (optional metadata)
+          example: exchangerate-api
+
+    PaymentConfirmationResponse:
+      type: object
+      required:
+        - success
+        - outboxId
+        - txId
+        - status
+        - message
+      properties:
+        success:
+          type: boolean
+          example: true
+        outboxId:
+          type: string
+          format: uuid
+          description: Internal outbox item ID
+          example: "550e8400-e29b-41d4-a716-446655440001"
+        txId:
+          type: string
+          description: Deterministic SHA-256 transaction ID (BytesN<32> as hex). Same (externalRefSource, externalRef) always yields the same txId.
+          example: "a3f2c1d4e5b6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
+        status:
+          type: string
+          enum: [pending, sent, failed]
+          example: sent
+        message:
+          type: string
+          example: "Payment confirmed and USDC receipt written to chain"
+
     ListingStatus:
       type: string
       enum:
@@ -957,6 +1125,8 @@ tags:
     description: Health check operations
   - name: Soroban
     description: Soroban blockchain configuration
+  - name: Payments
+    description: Payment confirmation and on-chain USDC receipt recording
   - name: Whistleblower
     description: Whistleblower listing operations
   - name: Deals
