@@ -85,8 +85,358 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/whistleblower/listings:
+    post:
+      summary: Create a new listing
+      description: |
+        Create a new property listing. 
+        
+        Rules:
+        - Address is required
+        - Annual rent must be greater than 0
+        - At least 3 photos are required
+        - Maximum 2 listings per whistleblower per month
+      operationId: createListing
+      tags:
+        - Whistleblower
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateListingRequest'
+      responses:
+        '201':
+          description: Listing created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - listing
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  listing:
+                    $ref: '#/components/schemas/Listing'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missingPhotos:
+                  summary: Missing required photos
+                  value:
+                    error:
+                      code: VALIDATION_ERROR
+                      message: Invalid request data
+                      details:
+                        fields:
+                          - field: photos
+                            message: At least 3 photos are required
+                invalidRent:
+                  summary: Invalid annual rent
+                  value:
+                    error:
+                      code: VALIDATION_ERROR
+                      message: Invalid request data
+                      details:
+                        fields:
+                          - field: annualRentNgn
+                            message: Annual rent must be greater than 0
+        '429':
+          description: Monthly limit reached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: CONFLICT
+                  message: Monthly listing limit reached
+                  details:
+                    currentCount: 2
+                    maxAllowed: 2
+                    message: You have reached the maximum of 2 listings per month
+        default:
+          $ref: '#/components/responses/Error'
+    
+    get:
+      summary: List listings
+      description: Get a paginated list of listings with optional filters
+      operationId: listListings
+      tags:
+        - Whistleblower
+      parameters:
+        - name: status
+          in: query
+          description: Filter by listing status
+          required: false
+          schema:
+            $ref: '#/components/schemas/ListingStatus'
+        - name: query
+          in: query
+          description: Search term for address, city, area, or description
+          required: false
+          schema:
+            type: string
+            example: Lagos
+        - name: page
+          in: query
+          description: Page number
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            example: 1
+        - name: pageSize
+          in: query
+          description: Number of items per page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+            example: 20
+      responses:
+        '200':
+          description: Listings retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - listings
+                  - pagination
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  listings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Listing'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '400':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/whistleblower/listings/{id}:
+    get:
+      summary: Get listing by ID
+      description: Retrieve a single listing by its ID
+      operationId: getListingById
+      tags:
+        - Whistleblower
+      parameters:
+        - name: id
+          in: path
+          description: Listing ID
+          required: true
+          schema:
+            type: string
+            format: uuid
+            example: 550e8400-e29b-41d4-a716-446655440000
+      responses:
+        '200':
+          description: Listing retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - listing
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  listing:
+                    $ref: '#/components/schemas/Listing'
+        '404':
+          description: Listing not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: NOT_FOUND
+                  message: Listing with ID '550e8400-e29b-41d4-a716-446655440000' not found
+        default:
+          $ref: '#/components/responses/Error'
+
 components:
   schemas:
+    ListingStatus:
+      type: string
+      enum:
+        - pending_review
+        - approved
+        - rejected
+        - rented
+      example: pending_review
+
+    CreateListingRequest:
+      type: object
+      required:
+        - whistleblowerId
+        - address
+        - bedrooms
+        - bathrooms
+        - annualRentNgn
+        - photos
+      properties:
+        whistleblowerId:
+          type: string
+          description: ID of the whistleblower creating the listing
+          example: wb-001
+        address:
+          type: string
+          description: Full address of the property
+          minLength: 1
+          example: 123 Main Street, Ikeja, Lagos
+        city:
+          type: string
+          description: City where the property is located
+          example: Lagos
+        area:
+          type: string
+          description: Specific area or neighborhood
+          example: Ikeja
+        bedrooms:
+          type: integer
+          description: Number of bedrooms
+          minimum: 0
+          example: 2
+        bathrooms:
+          type: integer
+          description: Number of bathrooms
+          minimum: 0
+          example: 2
+        annualRentNgn:
+          type: integer
+          description: Annual rent in Nigerian Naira
+          minimum: 1
+          example: 1200000
+        description:
+          type: string
+          description: Optional description of the property
+          example: Beautiful 2-bedroom apartment with modern amenities
+        photos:
+          type: array
+          description: Array of photo URLs (minimum 3, maximum 20)
+          minItems: 3
+          maxItems: 20
+          items:
+            type: string
+            format: uri
+            example: https://example.com/photo1.jpg
+
+    Listing:
+      type: object
+      required:
+        - listingId
+        - whistleblowerId
+        - address
+        - bedrooms
+        - bathrooms
+        - annualRentNgn
+        - photos
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        listingId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        whistleblowerId:
+          type: string
+          example: wb-001
+        address:
+          type: string
+          example: 123 Main Street, Ikeja, Lagos
+        city:
+          type: string
+          nullable: true
+          example: Lagos
+        area:
+          type: string
+          nullable: true
+          example: Ikeja
+        bedrooms:
+          type: integer
+          example: 2
+        bathrooms:
+          type: integer
+          example: 2
+        annualRentNgn:
+          type: integer
+          example: 1200000
+        description:
+          type: string
+          nullable: true
+          example: Beautiful 2-bedroom apartment
+        photos:
+          type: array
+          items:
+            type: string
+            format: uri
+          example:
+            - https://example.com/photo1.jpg
+            - https://example.com/photo2.jpg
+            - https://example.com/photo3.jpg
+        status:
+          $ref: '#/components/schemas/ListingStatus'
+        createdAt:
+          type: string
+          format: date-time
+          example: 2024-01-15T10:00:00Z
+        updatedAt:
+          type: string
+          format: date-time
+          example: 2024-01-15T10:00:00Z
+        rejectionReason:
+          type: string
+          nullable: true
+          description: Reason for rejection (only present if status is rejected)
+          example: Insufficient photo quality
+
+    Pagination:
+      type: object
+      required:
+        - total
+        - page
+        - pageSize
+        - totalPages
+      properties:
+        total:
+          type: integer
+          description: Total number of items
+          example: 42
+        page:
+          type: integer
+          description: Current page number
+          example: 1
+        pageSize:
+          type: integer
+          description: Number of items per page
+          example: 20
+        totalPages:
+          type: integer
+          description: Total number of pages
+          example: 3
+
     Error:
       type: object
       required:
@@ -143,3 +493,5 @@ tags:
     description: Health check operations
   - name: Soroban
     description: Soroban blockchain configuration
+  - name: Whistleblower
+    description: Whistleblower listing operations
