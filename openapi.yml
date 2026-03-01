@@ -23,7 +23,7 @@ paths:
       tags:
         - Health
       responses:
-        '200':
+        "200":
           description: Service is healthy
           content:
             application/json:
@@ -45,10 +45,10 @@ paths:
                     type: number
                     format: int64
                     example: 3600
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         default:
-          $ref: '#/components/responses/Error'
+          $ref: "#/components/responses/Error"
 
   /soroban/config:
     get:
@@ -58,7 +58,7 @@ paths:
       tags:
         - Soroban
       responses:
-        '200':
+        "200":
           description: Soroban configuration retrieved successfully
           content:
             application/json:
@@ -80,10 +80,129 @@ paths:
                     type: string
                     nullable: true
                     example: null
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         default:
-          $ref: '#/components/responses/Error'
+          $ref: "#/components/responses/Error"
+
+  /api/whistleblower/{id}/earnings:
+    get:
+      summary: Get whistleblower earnings
+      description: Returns aggregated earnings totals and detailed history of individual rewards for a whistleblower
+      operationId: getWhistleblowerEarnings
+      tags:
+        - Whistleblower
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique identifier of the whistleblower
+          schema:
+            type: string
+            minLength: 1
+          example: "wb-123e4567-e89b-12d3-a456-426614174000"
+      responses:
+        "200":
+          description: Earnings data retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EarningsResponse"
+              examples:
+                mixedStatus:
+                  summary: Whistleblower with mixed payout statuses
+                  value:
+                    totals:
+                      totalNgn: 750000
+                      pendingNgn: 450000
+                      paidNgn: 300000
+                      totalUsdc: 500
+                      pendingUsdc: 300
+                      paidUsdc: 200
+                    history:
+                      - rewardId: "rw-001"
+                        listingId: "lst-456"
+                        dealId: "deal-789"
+                        amountNgn: 300000
+                        amountUsdc: 200
+                        status: "paid"
+                        createdAt: "2024-01-15T10:30:00Z"
+                        paidAt: "2024-01-20T14:45:00Z"
+                      - rewardId: "rw-002"
+                        listingId: "lst-457"
+                        dealId: "deal-790"
+                        amountNgn: 225000
+                        amountUsdc: 150
+                        status: "pending"
+                        createdAt: "2024-01-10T08:15:00Z"
+                      - rewardId: "rw-003"
+                        listingId: "lst-458"
+                        dealId: "deal-791"
+                        amountNgn: 225000
+                        amountUsdc: 150
+                        status: "payable"
+                        createdAt: "2024-01-05T16:20:00Z"
+                allPending:
+                  summary: Whistleblower with all pending rewards
+                  value:
+                    totals:
+                      totalNgn: 600000
+                      pendingNgn: 600000
+                      paidNgn: 0
+                      totalUsdc: 400
+                      pendingUsdc: 400
+                      paidUsdc: 0
+                    history:
+                      - rewardId: "rw-004"
+                        listingId: "lst-459"
+                        dealId: "deal-792"
+                        amountNgn: 300000
+                        amountUsdc: 200
+                        status: "pending"
+                        createdAt: "2024-02-01T12:00:00Z"
+                      - rewardId: "rw-005"
+                        listingId: "lst-460"
+                        dealId: "deal-793"
+                        amountNgn: 300000
+                        amountUsdc: 200
+                        status: "pending"
+                        createdAt: "2024-01-28T09:30:00Z"
+        "400":
+          description: Invalid request - whistleblower ID format is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: "VALIDATION_ERROR"
+                  message: "Whistleblower ID is required"
+                  details:
+                    field: "id"
+        "404":
+          description: Whistleblower not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: "NOT_FOUND"
+                  message: "Whistleblower not found"
+                  details:
+                    whistleblowerId: "wb-nonexistent"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: "INTERNAL_ERROR"
+                  message: "Failed to retrieve earnings data"
 
   /api/whistleblower/listings:
     post:
@@ -1242,6 +1361,108 @@ components:
           type: string
           description: Optional FX rate provider
           example: coinbase
+    EarningsResponse:
+      type: object
+      required:
+        - totals
+        - history
+      properties:
+        totals:
+          $ref: "#/components/schemas/EarningsTotals"
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/EarningsHistoryItem"
+
+    EarningsTotals:
+      type: object
+      required:
+        - totalNgn
+        - pendingNgn
+        - paidNgn
+      properties:
+        totalNgn:
+          type: number
+          format: double
+          description: Total earnings in Nigerian Naira across all statuses
+          example: 750000
+        pendingNgn:
+          type: number
+          format: double
+          description: Pending earnings in Nigerian Naira (pending + payable statuses)
+          example: 450000
+        paidNgn:
+          type: number
+          format: double
+          description: Paid earnings in Nigerian Naira
+          example: 300000
+        totalUsdc:
+          type: number
+          format: double
+          description: Total earnings in USDC (optional)
+          example: 500
+        pendingUsdc:
+          type: number
+          format: double
+          description: Pending earnings in USDC (optional)
+          example: 300
+        paidUsdc:
+          type: number
+          format: double
+          description: Paid earnings in USDC (optional)
+          example: 200
+
+    EarningsHistoryItem:
+      type: object
+      required:
+        - rewardId
+        - listingId
+        - dealId
+        - amountNgn
+        - amountUsdc
+        - status
+        - createdAt
+      properties:
+        rewardId:
+          type: string
+          description: Unique identifier for the reward
+          example: "rw-001"
+        listingId:
+          type: string
+          description: Identifier of the reported listing
+          example: "lst-456"
+        dealId:
+          type: string
+          description: Identifier of the associated deal
+          example: "deal-789"
+        amountNgn:
+          type: number
+          format: double
+          description: Reward amount in Nigerian Naira
+          example: 300000
+        amountUsdc:
+          type: number
+          format: double
+          description: Reward amount in USDC
+          example: 200
+        status:
+          type: string
+          enum:
+            - pending
+            - payable
+            - paid
+          description: Current payout status of the reward
+          example: "paid"
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when the reward was created
+          example: "2024-01-15T10:30:00Z"
+        paidAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when the reward was paid (only present when status is "paid")
+          example: "2024-01-20T14:45:00Z"
 
     Error:
       type: object
@@ -1279,14 +1500,14 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/Error'
-    
+            $ref: "#/components/schemas/Error"
+
     TooManyRequests:
       description: Rate limit exceeded
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/Error'
+            $ref: "#/components/schemas/Error"
           example:
             error:
               code: "TOO_MANY_REQUESTS"
@@ -1307,3 +1528,5 @@ tags:
     description: Deal management and repayment schedule operations
   - name: Admin
     description: Administrative operations including reward payouts
+  - name: Whistleblower
+    description: Whistleblower earnings and rewards operations

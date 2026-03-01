@@ -1,19 +1,43 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
+import { EarningsService } from '../services/earnings.js'
 import { validate } from '../middleware/validate.js'
+import { whistleblowerIdParamSchema } from '../schemas/whistleblower.js'
 import { createListingSchema, listingFiltersSchema } from '../schemas/listing.js'
 import { listingStore } from '../models/listingStore.js'
 import { logger } from '../utils/logger.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 
-export function createWhistleblowerRouter() {
+/**
+ * Factory function to create the whistleblower router.
+ * Accepts an EarningsService instance for dependency injection.
+ */
+export function createWhistleblowerRouter(earningsService: EarningsService): Router {
   const router = Router()
 
   /**
+   * GET /api/whistleblower/:id/earnings
+   * Retrieves earnings data (totals and history) for a specific whistleblower.
+   */
+  router.get(
+    '/:id/earnings',
+    validate(whistleblowerIdParamSchema, 'params'),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { id } = req.params
+        const earnings = await earningsService.getEarnings(id)
+        res.json(earnings)
+      } catch (error) {
+        next(error)
+      }
+    }
+  )
+
+  /**
    * POST /api/whistleblower/listings
-   * 
+   *
    * Create a new listing
-   * 
+   *
    * Rules:
    * - Address required
    * - Annual rent must be > 0
@@ -26,23 +50,20 @@ export function createWhistleblowerRouter() {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const input = req.body
-
         logger.info('Creating new listing', {
           whistleblowerId: input.whistleblowerId,
           address: input.address,
           requestId: req.requestId,
         })
-
         // Check monthly limit
         const hasReachedLimit = await listingStore.hasReachedMonthlyLimit(
           input.whistleblowerId,
         )
-
         if (hasReachedLimit) {
           const currentCount = await listingStore.getMonthlyReportCount(
             input.whistleblowerId,
           )
-          
+         
           throw new AppError(
             ErrorCode.CONFLICT,
             429,
@@ -54,16 +75,13 @@ export function createWhistleblowerRouter() {
             },
           )
         }
-
         // Create listing
         const listing = await listingStore.create(input)
-
         logger.info('Listing created successfully', {
           listingId: listing.listingId,
           whistleblowerId: listing.whistleblowerId,
           requestId: req.requestId,
         })
-
         res.status(201).json({
           success: true,
           listing: {
@@ -90,13 +108,13 @@ export function createWhistleblowerRouter() {
 
   /**
    * GET /api/whistleblower/listings
-   * 
+   *
    * List listings with optional filters
    * Query params:
-   *   - status: pending_review | approved | rejected | rented
-   *   - query: search term
-   *   - page: page number (default 1)
-   *   - pageSize: items per page (default 20, max 100)
+   * - status: pending_review | approved | rejected | rented
+   * - query: search term
+   * - page: page number (default 1)
+   * - pageSize: items per page (default 20, max 100)
    */
   router.get(
     '/listings',
@@ -104,14 +122,11 @@ export function createWhistleblowerRouter() {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const filters = req.query
-
         logger.info('Listing listings', {
           filters,
           requestId: req.requestId,
         })
-
         const result = await listingStore.list(filters)
-
         res.json({
           success: true,
           listings: result.listings.map((listing) => ({
@@ -145,7 +160,7 @@ export function createWhistleblowerRouter() {
 
   /**
    * GET /api/whistleblower/listings/:id
-   * 
+   *
    * Get a single listing by ID
    */
   router.get(
@@ -153,14 +168,11 @@ export function createWhistleblowerRouter() {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const { id } = req.params
-
         logger.info('Getting listing', {
           listingId: id,
           requestId: req.requestId,
         })
-
         const listing = await listingStore.getById(id)
-
         if (!listing) {
           throw new AppError(
             ErrorCode.NOT_FOUND,
@@ -168,7 +180,6 @@ export function createWhistleblowerRouter() {
             `Listing with ID '${id}' not found`,
           )
         }
-
         res.json({
           success: true,
           listing: {
