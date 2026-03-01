@@ -15,6 +15,7 @@ import { createSorobanAdapter } from "./soroban/index.js"
 import { createBalanceRouter } from "./routes/balance.js"
 import { createPaymentsRouter } from "./routes/payments.js"
 import { createAdminRouter } from "./routes/admin.js"
+import { createDealsRouter } from "./routes/deals.js"
 
 export function createApp() {
   const app = express()
@@ -48,6 +49,7 @@ export function createApp() {
   app.use('/api', createBalanceRouter(sorobanAdapter))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter))
+  app.use('/api/deals', createDealsRouter())
 
 
 

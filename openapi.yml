@@ -275,6 +275,239 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/deals:
+    post:
+      summary: Create a new deal with repayment schedule
+      description: Creates a new financing deal with a deterministic repayment schedule
+      operationId: createDeal
+      tags:
+        - Deals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDealRequest'
+      responses:
+        '201':
+          description: Deal created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/DealWithSchedule'
+        '400':
+          $ref: '#/components/responses/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/Error'
+
+    get:
+      summary: Get deals with optional filtering
+      description: Retrieves a paginated list of deals, optionally filtered by tenant, landlord, or status
+      operationId: getDeals
+      tags:
+        - Deals
+      parameters:
+        - name: tenantId
+          in: query
+          description: Filter by tenant ID
+          schema:
+            type: string
+        - name: landlordId
+          in: query
+          description: Filter by landlord ID
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by deal status
+          schema:
+            $ref: '#/components/schemas/DealStatus'
+        - name: page
+          in: query
+          description: Page number for pagination
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          description: Number of items per page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Deals retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/PaginatedDeals'
+        '400':
+          $ref: '#/components/responses/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/deals/{dealId}:
+    get:
+      summary: Get a specific deal by ID with schedule
+      description: Retrieves a single deal including its full repayment schedule
+      operationId: getDealById
+      tags:
+        - Deals
+      parameters:
+        - name: dealId
+          in: path
+          required: true
+          description: ID of the deal to retrieve
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Deal retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/DealWithSchedule'
+        '404':
+          $ref: '#/components/responses/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/deals/{dealId}/status:
+    patch:
+      summary: Update deal status
+      description: Updates the status of a deal (e.g., from draft to active)
+      operationId: updateDealStatus
+      tags:
+        - Deals
+      parameters:
+        - name: dealId
+          in: path
+          required: true
+          description: ID of the deal to update
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDealStatusRequest'
+      responses:
+        '200':
+          description: Deal status updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/DealWithSchedule'
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/deals/{dealId}/schedule/{period}:
+    patch:
+      summary: Update schedule item status
+      description: Updates the status of a specific repayment schedule item
+      operationId: updateScheduleItemStatus
+      tags:
+        - Deals
+      parameters:
+        - name: dealId
+          in: path
+          required: true
+          description: ID of the deal
+          schema:
+            type: string
+            format: uuid
+        - name: period
+          in: path
+          required: true
+          description: Period number in the repayment schedule
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateScheduleItemRequest'
+      responses:
+        '200':
+          description: Schedule item status updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/DealWithSchedule'
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        default:
+          $ref: '#/components/responses/Error'
+
 components:
   schemas:
     ListingStatus:
@@ -412,6 +645,237 @@ components:
           description: Reason for rejection (only present if status is rejected)
           example: Insufficient photo quality
 
+    DealStatus:
+      type: string
+      enum:
+        - draft
+        - active
+        - completed
+        - defaulted
+      example: draft
+
+    ScheduleItemStatus:
+      type: string
+      enum:
+        - upcoming
+        - due
+        - paid
+        - late
+      example: upcoming
+
+    ScheduleItem:
+      type: object
+      required:
+        - period
+        - dueDate
+        - amountNgn
+        - status
+      properties:
+        period:
+          type: integer
+          description: Period number in the repayment schedule (1-indexed)
+          example: 1
+        dueDate:
+          type: string
+          format: date-time
+          description: ISO date when payment is due
+          example: 2024-02-15T00:00:00Z
+        amountNgn:
+          type: number
+          format: double
+          description: Payment amount in Nigerian Naira
+          example: 83333.33
+        status:
+          $ref: '#/components/schemas/ScheduleItemStatus'
+
+    Deal:
+      type: object
+      required:
+        - dealId
+        - tenantId
+        - landlordId
+        - annualRentNgn
+        - depositNgn
+        - financedAmountNgn
+        - termMonths
+        - createdAt
+        - status
+      properties:
+        dealId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        tenantId:
+          type: string
+          description: ID of the tenant repaying the financing
+          example: tenant-001
+        landlordId:
+          type: string
+          description: ID of the landlord who received upfront payment
+          example: landlord-001
+        listingId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Optional ID of the associated property listing
+          example: 550e8400-e29b-41d4-a716-446655440001
+        annualRentNgn:
+          type: integer
+          description: Annual rent amount in Naira
+          example: 1200000
+        depositNgn:
+          type: integer
+          description: Deposit amount paid by tenant (must be >= 20% of annual rent)
+          example: 240000
+        financedAmountNgn:
+          type: integer
+          description: Amount financed by ShelterFlex (annual rent - deposit)
+          example: 960000
+        termMonths:
+          type: integer
+          description: Repayment term in months (3, 6, or 12)
+          example: 12
+        createdAt:
+          type: string
+          format: date-time
+          example: 2024-01-15T10:00:00Z
+        status:
+          $ref: '#/components/schemas/DealStatus'
+
+    DealWithSchedule:
+      type: object
+      required:
+        - dealId
+        - tenantId
+        - landlordId
+        - annualRentNgn
+        - depositNgn
+        - financedAmountNgn
+        - termMonths
+        - createdAt
+        - status
+        - schedule
+      properties:
+        dealId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        tenantId:
+          type: string
+          example: tenant-001
+        landlordId:
+          type: string
+          example: landlord-001
+        listingId:
+          type: string
+          format: uuid
+          nullable: true
+          example: 550e8400-e29b-41d4-a716-446655440001
+        annualRentNgn:
+          type: integer
+          example: 1200000
+        depositNgn:
+          type: integer
+          example: 240000
+        financedAmountNgn:
+          type: integer
+          example: 960000
+        termMonths:
+          type: integer
+          example: 12
+        createdAt:
+          type: string
+          format: date-time
+          example: 2024-01-15T10:00:00Z
+        status:
+          $ref: '#/components/schemas/DealStatus'
+        schedule:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScheduleItem'
+
+    CreateDealRequest:
+      type: object
+      required:
+        - tenantId
+        - landlordId
+        - annualRentNgn
+        - depositNgn
+        - termMonths
+      properties:
+        tenantId:
+          type: string
+          description: ID of the tenant who will repay the financing
+          example: tenant-001
+        landlordId:
+          type: string
+          description: ID of the landlord who will receive upfront payment
+          example: landlord-001
+        listingId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Optional ID of the associated property listing
+          example: 550e8400-e29b-41d4-a716-446655440001
+        annualRentNgn:
+          type: integer
+          description: Annual rent amount in Naira
+          example: 1200000
+        depositNgn:
+          type: integer
+          description: Deposit amount paid by tenant (must be >= 20% of annual rent)
+          example: 240000
+        termMonths:
+          type: integer
+          description: Repayment term in months (must be 3, 6, or 12)
+          example: 12
+
+    UpdateDealStatusRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          $ref: '#/components/schemas/DealStatus'
+
+    UpdateScheduleItemRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          $ref: '#/components/schemas/ScheduleItemStatus'
+
+    PaginatedDeals:
+      type: object
+      required:
+        - deals
+        - total
+        - page
+        - pageSize
+        - totalPages
+      properties:
+        deals:
+          type: array
+          items:
+            $ref: '#/components/schemas/Deal'
+        total:
+          type: integer
+          description: Total number of deals matching the filter
+          example: 42
+        page:
+          type: integer
+          description: Current page number
+          example: 1
+        pageSize:
+          type: integer
+          description: Number of deals per page
+          example: 20
+        totalPages:
+          type: integer
+          description: Total number of pages
+          example: 3
+
     Pagination:
       type: object
       required:
@@ -495,3 +959,5 @@ tags:
     description: Soroban blockchain configuration
   - name: Whistleblower
     description: Whistleblower listing operations
+  - name: Deals
+    description: Deal management and repayment schedule operations
