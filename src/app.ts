@@ -13,7 +13,8 @@ import { requestLogger } from "./middleware/requestLogger.js"
 import { getSorobanConfigFromEnv } from "./soroban/client.js"
 import { createSorobanAdapter } from "./soroban/index.js"
 import { createBalanceRouter } from "./routes/balance.js"
-import { createWhistleblowerRouter } from "./routes/whistleblower.js"
+import { createPaymentsRouter } from "./routes/payments.js"
+import { createAdminRouter } from "./routes/admin.js"
 
 export function createApp() {
   const app = express()
@@ -45,7 +46,8 @@ export function createApp() {
   app.use(createPublicRateLimiter(env))
   app.use("/", publicRouter)
   app.use('/api', createBalanceRouter(sorobanAdapter))
-  app.use('/api/whistleblower', createWhistleblowerRouter())
+  app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
+  app.use('/api/admin', createAdminRouter(sorobanAdapter))
 
 
 
