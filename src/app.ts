@@ -16,6 +16,9 @@ import { createBalanceRouter } from "./routes/balance.js"
 import { createPaymentsRouter } from "./routes/payments.js"
 import { createAdminRouter } from "./routes/admin.js"
 import { createDealsRouter } from "./routes/deals.js"
+import { createWhistleblowerRouter } from "./routes/whistleblower.js"
+import { EarningsServiceImpl } from "./services/earnings.js"
+import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
 
 export function createApp() {
   const app = express()
@@ -23,6 +26,12 @@ export function createApp() {
   // Initialize Soroban adapter using your existing config function
   const sorobanConfig = getSorobanConfigFromEnv(process.env)
   const sorobanAdapter = createSorobanAdapter(sorobanConfig)
+
+  // Initialize earnings service with stub data layer
+  const rewardsDataLayer = new StubRewardsDataLayer()
+  const earningsService = new EarningsServiceImpl(rewardsDataLayer, {
+    usdcToNgnRate: 1600, // Example exchange rate: 1 USDC = 1600 NGN
+  })
 
   // Core middleware
   app.use(requestIdMiddleware)
@@ -50,6 +59,7 @@ export function createApp() {
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter))
   app.use('/api/deals', createDealsRouter())
+  app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
 
 
 
