@@ -191,6 +191,48 @@ inferred TypeScript type.
 
 See [src/docs/ERROR-INFO.md](src/docs/ERROR-INFO.md) for the full error contract, code catalog, and usage examples.
 
+## Environment Variables
+
+Create a `.env` file based on `.env.example`. The following environment variables are required:
+
+### Core Configuration
+```bash
+# Server
+PORT=4000
+NODE_ENV=development
+
+# CORS (comma-separated origins)
+CORS_ORIGINS=http://localhost:3000
+
+# Rate limiting (public endpoints: /health, /soroban/config)
+RATE_LIMIT_WINDOW_MS=60000
+RATE_LIMIT_MAX_REQUESTS=100
+```
+
+### Soroban / Stellar Configuration
+```bash
+# Soroban network (local|testnet|mainnet)
+SOROBAN_NETWORK=testnet
+
+# USDC token contract address (required in non-development environments)
+# Testnet example: USDC_TOKEN_ADDRESS=0x8d3e2a4e2c3b4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9
+# Mainnet example: USDC_TOKEN_ADDRESS=0xa0b86a33e6c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c
+USDC_TOKEN_ADDRESS=
+
+# Soroban RPC URL and network passphrase
+SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+SOROBAN_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+
+# Optional: contract id for the deployed Shelterflex contract
+SOROBAN_CONTRACT_ID=
+```
+
+**Important Notes:**
+- `USDC_TOKEN_ADDRESS` is **required** in `production` and `test` environments
+- In `development`, the address can be omitted (uses mock address for testing)
+- The address must be a valid Ethereum address format: `0x` followed by 40 hex characters
+- Server will refuse to start if `USDC_TOKEN_ADDRESS` is missing in non-development environments
+
 ## Soroban integration
 
 Soroban-related code should live in `src/soroban/`.
