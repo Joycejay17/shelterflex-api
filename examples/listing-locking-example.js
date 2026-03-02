@@ -3,7 +3,12 @@
  * 
  * This example demonstrates the listing rental locking feature that prevents
  * multiple deals from being created for the same listing.
+ * 
+ * Note: This example uses fetch which requires Node.js 18+ or the node-fetch package.
+ * For older Node versions, install node-fetch: npm install node-fetch
  */
+
+/* global fetch */
 
 const BASE_URL = 'http://localhost:4000'
 
