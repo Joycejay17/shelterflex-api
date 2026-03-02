@@ -24,6 +24,7 @@ export interface Listing {
   createdAt: Date
   updatedAt: Date
   rejectionReason?: string
+  dealId?: string
 }
 
 export interface CreateListingInput {

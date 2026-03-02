@@ -380,7 +380,53 @@ paths:
                   data:
                     $ref: '#/components/schemas/DealWithSchedule'
         '400':
-          $ref: '#/components/responses/Error'
+          description: Validation error or listing not approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                validationError:
+                  summary: Invalid request data
+                  value:
+                    error:
+                      code: VALIDATION_ERROR
+                      message: Invalid request data
+                listingNotApproved:
+                  summary: Listing not approved
+                  value:
+                    error:
+                      code: VALIDATION_ERROR
+                      message: Listing must be approved to create a deal. Current status pending_review
+        '404':
+          description: Listing not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: NOT_FOUND
+                  message: Listing with ID '550e8400-e29b-41d4-a716-446655440000' not found
+        '409':
+          description: Listing already rented or linked to another deal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                listingRented:
+                  summary: Listing already rented
+                  value:
+                    error:
+                      code: LISTING_ALREADY_RENTED
+                      message: Listing with ID '550e8400-e29b-41d4-a716-446655440000' is already rented
+                listingLinked:
+                  summary: Listing already linked to a deal
+                  value:
+                    error:
+                      code: LISTING_ALREADY_RENTED
+                      message: Listing with ID '550e8400-e29b-41d4-a716-446655440000' is already linked to deal 550e8400-e29b-41d4-a716-446655440001
         '429':
           $ref: '#/components/responses/TooManyRequests'
         default:
@@ -948,6 +994,12 @@ components:
           nullable: true
           description: Reason for rejection (only present if status is rejected)
           example: Insufficient photo quality
+        dealId:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID of the deal this listing is linked to (only present if status is rented)
+          example: 550e8400-e29b-41d4-a716-446655440001
 
     DealStatus:
       type: string
@@ -1262,6 +1314,7 @@ components:
                 - FORBIDDEN
                 - NOT_FOUND
                 - CONFLICT
+                - LISTING_ALREADY_RENTED
                 - SOROBAN_ERROR
                 - INTERNAL_ERROR
               example: NOT_FOUND

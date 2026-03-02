@@ -118,6 +118,22 @@ class ListingStore {
   }
 
   /**
+   * Lock listing to a deal
+   * Updates listing status to RENTED and sets dealId
+   */
+  async lockToDeal(listingId: string, dealId: string): Promise<Listing | null> {
+    const listing = this.listings.get(listingId)
+    if (!listing) return null
+
+    listing.status = ListingStatus.RENTED
+    listing.dealId = dealId
+    listing.updatedAt = new Date()
+
+    this.listings.set(listingId, listing)
+    return listing
+  }
+
+  /**
    * Check if whistleblower has reached monthly report limit
    */
   async hasReachedMonthlyLimit(whistleblowerId: string): Promise<boolean> {
