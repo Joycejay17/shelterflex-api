@@ -52,6 +52,7 @@ export enum ErrorCode {
   // Resources
   NOT_FOUND = "NOT_FOUND",
   CONFLICT = "CONFLICT",
+  LISTING_ALREADY_RENTED = "LISTING_ALREADY_RENTED",
 
   // Blockchain / Soroban
   SOROBAN_ERROR = "SOROBAN_ERROR",

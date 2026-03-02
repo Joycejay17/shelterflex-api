@@ -29,6 +29,7 @@
     "@types/node": "^22.10.2",
     "@types/supertest": "^7.2.0",
     "eslint": "^9.39.2",
+    "fast-check": "^4.5.3",
     "supertest": "^7.2.2",
     "tsx": "^4.20.0",
     "typescript": "^5.7.2",

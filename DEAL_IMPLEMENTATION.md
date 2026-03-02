@@ -177,3 +177,102 @@ POST /api/deals
 - Deal analytics and reporting
 - Integration with property listings
 - Notification systems for due payments
+
+
+## Listing Rental Locking
+
+### Overview
+
+The listing rental locking feature ensures that once a deal is created for a specific listing, that listing cannot be used for another deal. This prevents double-booking and maintains data integrity.
+
+### Implementation
+
+**Data Model Changes:**
+- Added `dealId` field to Listing model (optional string)
+- Listing tracks which deal it's linked to
+
+**Validation Rules:**
+When creating a deal with a `listingId`:
+1. Listing must exist (404 if not found)
+2. Listing status must be `approved` (400 if not approved)
+3. Listing status must not be `rented` (409 if already rented)
+4. Listing must not have an existing `dealId` (409 if already linked)
+
+**Locking Mechanism:**
+After successful deal creation:
+1. Listing status is updated to `rented`
+2. Listing `dealId` is set to the new deal's ID
+3. Listing `updatedAt` timestamp is updated
+
+**Error Codes:**
+- `VALIDATION_ERROR` (400): Listing not approved
+- `NOT_FOUND` (404): Listing doesn't exist
+- `LISTING_ALREADY_RENTED` (409): Listing already rented or linked to another deal
+
+**Race Condition Handling (MVP):**
+- Uses synchronous validation and locking
+- Suitable for single-instance in-memory store
+- Production should use database transactions or distributed locks
+
+### API Examples
+
+**Successful Deal Creation with Listing:**
+```bash
+POST /api/deals
+{
+  "tenantId": "tenant-001",
+  "landlordId": "landlord-001",
+  "listingId": "550e8400-e29b-41d4-a716-446655440000",
+  "annualRentNgn": 1200000,
+  "depositNgn": 240000,
+  "termMonths": 12
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "dealId": "550e8400-e29b-41d4-a716-446655440001",
+    "listingId": "550e8400-e29b-41d4-a716-446655440000",
+    // ... other deal fields
+  }
+}
+```
+
+After this, the listing will have:
+- `status`: "rented"
+- `dealId`: "550e8400-e29b-41d4-a716-446655440001"
+
+**Attempting Second Deal on Same Listing:**
+```bash
+POST /api/deals
+{
+  "tenantId": "tenant-002",
+  "landlordId": "landlord-001",
+  "listingId": "550e8400-e29b-41d4-a716-446655440000",
+  "annualRentNgn": 1200000,
+  "depositNgn": 240000,
+  "termMonths": 12
+}
+```
+
+**Error Response (409):**
+```json
+{
+  "error": {
+    "code": "LISTING_ALREADY_RENTED",
+    "message": "Listing with ID '550e8400-e29b-41d4-a716-446655440000' is already linked to deal 550e8400-e29b-41d4-a716-446655440001"
+  }
+}
+```
+
+### Production Considerations
+
+For production deployment with database persistence:
+1. Use database transactions to ensure atomic read-check-update operations
+2. Implement optimistic locking with version numbers on listing records
+3. Add unique constraint on `listing.dealId` at database level
+4. Consider distributed locks (Redis) for multi-instance deployments
+5. Add retry logic with exponential backoff for transient failures
