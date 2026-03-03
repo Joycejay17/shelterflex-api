@@ -1,109 +1,176 @@
-import { Router, Request, Response, NextFunction } from 'express'
-import { SorobanAdapter } from '../soroban/adapter.js'
+import { Router, type Request, type Response, type NextFunction } from 'express'
+import { validate } from '../middleware/validate.js'
+import { WalletService } from '../services/walletService.js'
+import { 
+  walletAddressResponseSchema,
+  walletCreationResponseSchema,
+  signMessageRequestSchema,
+  signMessageResponseSchema,
+  signTransactionRequestSchema,
+  signTransactionResponseSchema
+} from '../schemas/wallet.js'
+import { logger } from '../utils/logger.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 
-const USDC_DECIMALS = 7n
-const USDC_DIVISOR = 10n ** USDC_DECIMALS
-const NGN_PER_USDC = 1620n
+export function createWalletRouter(walletService: WalletService): Router {
+  const router = Router()
 
-function formatUsdc(raw: bigint): string {
-     const whole = raw / USDC_DIVISOR
-     const frac = (raw % USDC_DIVISOR).toString().padStart(Number(USDC_DECIMALS), '0')
-     return `${whole}.${frac}`
-}
+  /**
+   * GET /api/wallet/address
+   * Returns the public wallet address for the authenticated user
+   * 
+   * Note: In a real implementation, this would require authentication middleware
+   * to extract the user ID from the request (e.g., from JWT token)
+   */
+  router.get('/address', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.headers['x-user-id'] as string
+      
+      if (!userId) {
+        throw new AppError(
+          ErrorCode.UNAUTHORIZED,
+          401,
+          'User authentication required'
+        )
+      }
 
-/**
- * @openapi
- * /api/wallet/balance:
- *   get:
- *     summary: Get wallet balance from Soroban adapter
- *     tags: [Wallet]
- *     parameters:
- *       - in: query
- *         name: address
- *         required: true
- *         schema:
- *           type: string
- *           example: GABC123...
- *         description: Stellar wallet public key
- *     responses:
- *       200:
- *         description: Wallet balance
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 wallet:
- *                   type: string
- *                 balance:
- *                   type: object
- *                   properties:
- *                     usdc:
- *                       type: object
- *                       properties:
- *                         raw: { type: string }
- *                         formatted: { type: string }
- *                         symbol: { type: string }
- *                     ngn:
- *                       type: object
- *                       properties:
- *                         raw: { type: string }
- *                         formatted: { type: string }
- *                         symbol: { type: string }
- *                         display_note: { type: string }
- *                 meta:
- *                   type: object
- *                   properties:
- *                     source: { type: string }
- *                     computed_at: { type: string }
- *       400:
- *         description: Missing or invalid address
- *       500:
- *         description: Adapter error
- */
-export function createWalletRouter(adapter: SorobanAdapter): Router {
-     const router = Router()
+      logger.info('Getting wallet address', { userId, requestId: req.requestId })
+      
+      const address = await walletService.getPublicAddress(userId)
+      
+      const response = {
+        success: true,
+        address,
+      }
+      
+      logger.info('Wallet address retrieved', { userId, address, requestId: req.requestId })
+      res.json(walletAddressResponseSchema.parse(response))
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Wallet not found')) {
+        throw new AppError(
+          ErrorCode.UNAUTHORIZED,
+          401,
+          'User wallet not found'
+        )
+      }
+      next(error)
+    }
+  })
 
-     router.get('/balance', async (req: Request, res: Response, next: NextFunction) => {
-          const address = req.query.address as string | undefined
+  /**
+   * POST /api/wallet/create
+   * Creates a new wallet for the user (if one doesn't exist)
+   * This would typically be called after first successful OTP login
+   */
+  router.post('/create', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      // TODO: Extract userId from authentication token
+      const userId = req.headers['x-user-id'] as string || req.body.userId
+      
+      if (!userId) {
+        throw new AppError(
+          ErrorCode.UNAUTHORIZED,
+          401,
+          'User authentication required'
+        )
+      }
 
-          if (!address || typeof address !== 'string' || address.trim() === '') {
-               return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Query param `address` is required'))
-          }
+      logger.info('Creating wallet for user', { userId, requestId: req.requestId })
+      
+      const { publicKey } = await walletService.createWalletForUser(userId)
+      
+      const response = {
+        success: true,
+        address: publicKey,
+      }
+      
+      logger.info('Wallet created successfully', { userId, address: publicKey, requestId: req.requestId })
+      res.status(201).json(walletCreationResponseSchema.parse(response))
+    } catch (error) {
+      next(error)
+    }
+  })
 
-          try {
-               const raw = await adapter.getBalance(address)
-               const ngnRaw = (raw * NGN_PER_USDC) / USDC_DIVISOR
+  /**
+   * POST /api/wallet/sign-message
+   * Signs a message with the user's private key
+   */
+  router.post(
+    '/sign-message',
+    validate(signMessageRequestSchema, 'body'),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        // TODO: Extract userId from authentication token
+        const userId = req.headers['x-user-id'] as string
+        
+        if (!userId) {
+          throw new AppError(
+            ErrorCode.UNAUTHORIZED,
+            401,
+            'User authentication required'
+          )
+        }
 
-               return res.json({
-                    wallet: address,
-                    balance: {
-                         usdc: {
-                              raw: raw.toString(),
-                              formatted: formatUsdc(raw),
-                              symbol: 'USDC',
-                         },
-                         ngn: {
-                              raw: ngnRaw.toString(),
-                              formatted: new Intl.NumberFormat('en-NG', {
-                                   style: 'currency',
-                                   currency: 'NGN',
-                              }).format(Number(ngnRaw)),
-                              symbol: 'NGN',
-                              display_note: 'Display only. Rate: 1 USDC = ₦1,620',
-                         },
-                    },
-                    meta: {
-                         source: 'soroban_adapter',
-                         computed_at: new Date().toISOString(),
-                    },
-               })
-          } catch (err) {
-               next(err)
-          }
-     })
+        const { message } = req.body
+        
+        logger.info('Signing message', { userId, messageLength: message.length, requestId: req.requestId })
+        
+        const result = await walletService.signMessage(userId, message)
+        
+        const response = {
+          success: true,
+          signature: result.signature,
+          publicKey: result.publicKey,
+        }
+        
+        logger.info('Message signed successfully', { userId, requestId: req.requestId })
+        res.json(signMessageResponseSchema.parse(response))
+      } catch (error) {
+        next(error)
+      }
+    }
+  )
 
-     return router
+  /**
+   * POST /api/wallet/sign-transaction
+   * Signs a Soroban transaction with the user's private key
+   */
+  router.post(
+    '/sign-transaction',
+    validate(signTransactionRequestSchema, 'body'),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        // TODO: Extract userId from authentication token
+        const userId = req.headers['x-user-id'] as string
+        
+        if (!userId) {
+          throw new AppError(
+            ErrorCode.UNAUTHORIZED,
+            401,
+            'User authentication required'
+          )
+        }
+
+        const { xdr } = req.body
+        
+        logger.info('Signing transaction', { userId, xdrLength: xdr.length, requestId: req.requestId })
+        
+        const result = await walletService.signSorobanTransaction(userId, xdr)
+        
+        const response = {
+          success: true,
+          signature: result.signature,
+          publicKey: result.publicKey,
+        }
+        
+        logger.info('Transaction signed successfully', { userId, requestId: req.requestId })
+        res.json(signTransactionResponseSchema.parse(response))
+      } catch (error) {
+        next(error)
+      }
+    }
+  )
+
+  return router
 }
