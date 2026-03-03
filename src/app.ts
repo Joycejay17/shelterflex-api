@@ -19,6 +19,7 @@ import { createDealsRouter } from "./routes/deals.js"
 import { createWhistleblowerRouter } from "./routes/whistleblower.js"
 import { EarningsServiceImpl } from "./services/earnings.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
+import authRouter from "./routes/auth.js"
 
 export function createApp() {
   const app = express()
@@ -53,6 +54,7 @@ export function createApp() {
 
   // Routes
   app.use("/health", healthRouter)
+  app.use("/auth", authRouter)
   app.use(createPublicRateLimiter(env))
   app.use("/", publicRouter)
   app.use('/api', createBalanceRouter(sorobanAdapter))
