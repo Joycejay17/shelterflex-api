@@ -21,6 +21,9 @@ import { createStakingRouter } from "./routes/staking.js"
 import { EarningsServiceImpl } from "./services/earnings.js"
 import { createWalletRouter } from "./routes/wallet.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
+import { StubReceiptRepository } from "./indexer/receipt-repository.js"
+import { ReceiptIndexer } from "./indexer/worker.js"
+import { createReceiptsRouter } from "./routes/receiptsRoute.js"
 
 export function createApp() {
   const app = express()
@@ -34,6 +37,14 @@ export function createApp() {
   const earningsService = new EarningsServiceImpl(rewardsDataLayer, {
     usdcToNgnRate: 1600, // Example exchange rate: 1 USDC = 1600 NGN
   })
+
+  // Indexer
+  const receiptRepo = new StubReceiptRepository()
+  const indexer = new ReceiptIndexer(sorobanAdapter, receiptRepo, {
+    pollIntervalMs: parseInt(process.env.INDEXER_POLL_MS ?? '5000'),
+    startLedger: process.env.INDEXER_START_LEDGER ? parseInt(process.env.INDEXER_START_LEDGER) : undefined,
+  })
+  indexer.start()
 
   // Core middleware
   app.use(requestIdMiddleware)
@@ -58,6 +69,7 @@ export function createApp() {
   app.use(createPublicRateLimiter(env))
   app.use("/", publicRouter)
   app.use('/api', createBalanceRouter(sorobanAdapter))
+  app.use('/api', createReceiptsRouter(receiptRepo))
   app.use('/api/wallet', createWalletRouter(sorobanAdapter))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter))
