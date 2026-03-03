@@ -14,6 +14,9 @@ export enum TxType {
   TENANT_REPAYMENT = 'tenant_repayment',
   LANDLORD_PAYOUT = 'landlord_payout',
   WHISTLEBLOWER_REWARD = 'whistleblower_reward',
+  STAKE = 'stake',
+  UNSTAKE = 'unstake',
+  STAKE_REWARD_CLAIM = 'stake_reward_claim',
 }
 
 /**

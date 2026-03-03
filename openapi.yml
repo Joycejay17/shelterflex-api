@@ -884,6 +884,192 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/staking/stake:
+    post:
+      summary: Stake USDC tokens
+      description: |
+        Stake USDC tokens and record the transaction on-chain.
+        
+        **Idempotency:** Submitting the same `(externalRefSource, externalRef)` pair twice will
+        return the existing receipt without writing a duplicate on-chain.
+      operationId: stakeTokens
+      tags:
+        - Staking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StakeRequest'
+            example:
+              amountUsdc: "1000.000000"
+              externalRefSource: manual
+              externalRef: stake-2024-01-15-001
+      responses:
+        '200':
+          description: Staking confirmed and receipt written to chain
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StakingResponse'
+              example:
+                success: true
+                outboxId: "550e8400-e29b-41d4-a716-446655440001"
+                txId: "a3f2c1d4e5b6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
+                status: sent
+                message: Staking confirmed and receipt written to chain
+        '202':
+          description: Staking confirmed, receipt queued for retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StakingResponse'
+              example:
+                success: true
+                outboxId: "550e8400-e29b-41d4-a716-446655440001"
+                txId: "a3f2c1d4e5b6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
+                status: pending
+                message: Staking confirmed, receipt queued for retry
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/staking/unstake:
+    post:
+      summary: Unstake USDC tokens
+      description: |
+        Unstake USDC tokens and record the transaction on-chain.
+        
+        **Idempotency:** Submitting the same `(externalRefSource, externalRef)` pair twice will
+        return the existing receipt without writing a duplicate on-chain.
+      operationId: unstakeTokens
+      tags:
+        - Staking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnstakeRequest'
+            example:
+              amountUsdc: "500.000000"
+              externalRefSource: manual
+              externalRef: unstake-2024-01-15-001
+      responses:
+        '200':
+          description: Unstaking confirmed and receipt written to chain
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StakingResponse'
+              example:
+                success: true
+                outboxId: "550e8400-e29b-41d4-a716-446655440002"
+                txId: "b4g3d2e5f6c7g8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3"
+                status: sent
+                message: Unstaking confirmed and receipt written to chain
+        '202':
+          description: Unstaking confirmed, receipt queued for retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StakingResponse'
+              example:
+                success: true
+                outboxId: "550e8400-e29b-41d4-a716-446655440002"
+                txId: "b4g3d2e5f6c7g8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3"
+                status: pending
+                message: Unstaking confirmed, receipt queued for retry
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/staking/claim:
+    post:
+      summary: Claim staking rewards
+      description: |
+        Claim staking rewards and record the transaction on-chain.
+        
+        **Idempotency:** Submitting the same `(externalRefSource, externalRef)` pair twice will
+        return the existing receipt without writing a duplicate on-chain.
+      operationId: claimStakingRewards
+      tags:
+        - Staking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimStakeRewardRequest'
+            example:
+              externalRefSource: manual
+              externalRef: claim-2024-01-15-001
+      responses:
+        '200':
+          description: Staking reward claim confirmed and receipt written to chain
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StakingResponse'
+              example:
+                success: true
+                outboxId: "550e8400-e29b-41d4-a716-446655440003"
+                txId: "c5h4e3f6g7d8h9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4"
+                status: sent
+                message: Staking reward claim confirmed and receipt written to chain
+        '202':
+          description: Staking reward claim confirmed, receipt queued for retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StakingResponse'
+              example:
+                success: true
+                outboxId: "550e8400-e29b-41d4-a716-446655440003"
+                txId: "c5h4e3f6g7d8h9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4"
+                status: pending
+                message: Staking reward claim confirmed, receipt queued for retry
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/staking/position:
+    get:
+      summary: Get staking position
+      description: Get current staking position (staked amount and claimable rewards)
+      operationId: getStakingPosition
+      tags:
+        - Staking
+      responses:
+        '200':
+          description: Staking position retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StakingPositionResponse'
+              example:
+                success: true
+                position:
+                  staked: "1000.000000"
+                  claimable: "50.250000"
+        default:
+          $ref: '#/components/responses/Error'
+
 components:
   schemas:
     PaymentTxType:
@@ -1547,6 +1733,124 @@ components:
               description: Optional structured context for the error
               additionalProperties: true
 
+    StakeRequest:
+      type: object
+      description: Request body for staking USDC tokens
+      required:
+        - amountUsdc
+        - externalRefSource
+        - externalRef
+      properties:
+        amountUsdc:
+          type: string
+          description: Amount to stake in USDC (canonical on-chain unit). Decimal string with up to 6 places.
+          pattern: '^\d+(\.\d{1,6})?$'
+          example: "1000.000000"
+        externalRefSource:
+          type: string
+          description: Staking provider identifier (e.g., manual, stellar)
+          pattern: '^[a-zA-Z0-9_-]+$'
+          example: manual
+        externalRef:
+          type: string
+          description: Provider-specific staking reference string
+          example: stake-2024-01-15-001
+
+    UnstakeRequest:
+      type: object
+      description: Request body for unstaking USDC tokens
+      required:
+        - amountUsdc
+        - externalRefSource
+        - externalRef
+      properties:
+        amountUsdc:
+          type: string
+          description: Amount to unstake in USDC (canonical on-chain unit). Decimal string with up to 6 places.
+          pattern: '^\d+(\.\d{1,6})?$'
+          example: "500.000000"
+        externalRefSource:
+          type: string
+          description: Unstaking provider identifier (e.g., manual, stellar)
+          pattern: '^[a-zA-Z0-9_-]+$'
+          example: manual
+        externalRef:
+          type: string
+          description: Provider-specific unstaking reference string
+          example: unstake-2024-01-15-001
+
+    ClaimStakeRewardRequest:
+      type: object
+      description: Request body for claiming staking rewards
+      required:
+        - externalRefSource
+        - externalRef
+      properties:
+        externalRefSource:
+          type: string
+          description: Claim provider identifier (e.g., manual, stellar)
+          pattern: '^[a-zA-Z0-9_-]+$'
+          example: manual
+        externalRef:
+          type: string
+          description: Provider-specific claim reference string
+          example: claim-2024-01-15-001
+
+    StakingResponse:
+      type: object
+      required:
+        - success
+        - outboxId
+        - txId
+        - status
+        - message
+      properties:
+        success:
+          type: boolean
+          example: true
+        outboxId:
+          type: string
+          format: uuid
+          description: ID of the outbox item
+          example: "550e8400-e29b-41d4-a716-446655440001"
+        txId:
+          type: string
+          description: 32-byte transaction ID as hex
+          example: "a3f2c1d4e5b6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
+        status:
+          type: string
+          enum: [pending, sent, failed]
+          example: sent
+        message:
+          type: string
+          example: Staking confirmed and receipt written to chain
+
+    StakingPositionResponse:
+      type: object
+      required:
+        - success
+        - position
+      properties:
+        success:
+          type: boolean
+          example: true
+        position:
+          type: object
+          required:
+            - staked
+            - claimable
+          properties:
+            staked:
+              type: string
+              description: Total amount currently staked in USDC
+              pattern: '^\d+(\.\d{1,6})?$'
+              example: "1000.000000"
+            claimable:
+              type: string
+              description: Amount of rewards available for claiming in USDC
+              pattern: '^\d+(\.\d{1,6})?$'
+              example: "50.250000"
+
   responses:
     Error:
       description: Unexpected error
@@ -1583,3 +1887,5 @@ tags:
     description: Administrative operations including reward payouts
   - name: Whistleblower
     description: Whistleblower earnings and rewards operations
+  - name: Staking
+    description: Staking operations (stake, unstake, claim rewards)
