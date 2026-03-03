@@ -15,6 +15,9 @@ export const envSchema = z.object({
   SOROBAN_NETWORK: sorobanNetworkEnum.default('testnet'),
   USDC_TOKEN_ADDRESS: z.string().optional(),
   ENCRYPTION_KEY: z.string().min(32, 'Encryption key must be at least 32 characters'),
+  CUSTODIAL_WALLET_MASTER_KEY_V1: z.string().optional(),
+  CUSTODIAL_WALLET_MASTER_KEY_V2: z.string().optional(),
+  CUSTODIAL_WALLET_MASTER_KEY_ACTIVE_VERSION: z.coerce.number().default(1),
 }).refine((data) => {
   if (data.NODE_ENV !== 'development' && data.NODE_ENV !== 'test' && !data.USDC_TOKEN_ADDRESS) {
     return false
@@ -27,6 +30,25 @@ export const envSchema = z.object({
   message: 'USDC_TOKEN_ADDRESS is required outside development/test and must be a valid Ethereum address (0x followed by 40 hex characters)',
   path: ['USDC_TOKEN_ADDRESS'],
 })
+  .refine((data) => {
+    if (data.NODE_ENV === 'development' || data.NODE_ENV === 'test') {
+      return true
+    }
+    if (!data.CUSTODIAL_WALLET_MASTER_KEY_V1) {
+      return false
+    }
+    const active = data.CUSTODIAL_WALLET_MASTER_KEY_ACTIVE_VERSION
+    if (active === 2 && !data.CUSTODIAL_WALLET_MASTER_KEY_V2) {
+      return false
+    }
+    if (active !== 1 && active !== 2) {
+      return false
+    }
+    return true
+  }, {
+    message: 'Custodial wallet master keys must be configured for active encryption version',
+    path: ['CUSTODIAL_WALLET_MASTER_KEY_ACTIVE_VERSION'],
+  })
 
 export type Env = z.infer<typeof envSchema>
 

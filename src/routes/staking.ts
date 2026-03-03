@@ -40,13 +40,11 @@ export function createStakingRouter(adapter: SorobanAdapter) {
           requestId: req.requestId,
         })
 
-        // Build canonical external ref: lowercase source + raw ref
-        const canonicalExternalRefV1 = `${externalRefSource.toLowerCase()}:${externalRef}`
-
-        // Create outbox item (idempotent by canonicalExternalRefV1)
+        // Create outbox item (idempotent by source+ref)
         const outboxItem = await outboxStore.create({
           txType: TxType.STAKE,
-          canonicalExternalRefV1,
+          source: externalRefSource,
+          ref: externalRef,
           payload: {
             txType: TxType.STAKE,
             amountUsdc,
@@ -109,13 +107,11 @@ export function createStakingRouter(adapter: SorobanAdapter) {
           requestId: req.requestId,
         })
 
-        // Build canonical external ref: lowercase source + raw ref
-        const canonicalExternalRefV1 = `${externalRefSource.toLowerCase()}:${externalRef}`
-
-        // Create outbox item (idempotent by canonicalExternalRefV1)
+        // Create outbox item (idempotent by source+ref)
         const outboxItem = await outboxStore.create({
           txType: TxType.UNSTAKE,
-          canonicalExternalRefV1,
+          source: externalRefSource,
+          ref: externalRef,
           payload: {
             txType: TxType.UNSTAKE,
             amountUsdc,
@@ -177,13 +173,11 @@ export function createStakingRouter(adapter: SorobanAdapter) {
           requestId: req.requestId,
         })
 
-        // Build canonical external ref: lowercase source + raw ref
-        const canonicalExternalRefV1 = `${externalRefSource.toLowerCase()}:${externalRef}`
-
-        // Create outbox item (idempotent by canonicalExternalRefV1)
+        // Create outbox item (idempotent by source+ref)
         const outboxItem = await outboxStore.create({
           txType: TxType.STAKE_REWARD_CLAIM,
-          canonicalExternalRefV1,
+          source: externalRefSource,
+          ref: externalRef,
           payload: {
             txType: TxType.STAKE_REWARD_CLAIM,
             externalRefSource,

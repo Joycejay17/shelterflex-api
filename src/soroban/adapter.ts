@@ -1,5 +1,6 @@
 import { SorobanConfig } from './client.js'
 import { TxType } from '../outbox/types.js'
+import { RawReceiptEvent } from '../indexer/event-parser.js'
 
 export interface RecordReceiptParams {
   txId: string           // BytesN<32> as hex string - deterministic idempotency key
@@ -23,4 +24,5 @@ export interface SorobanAdapter {
   debit(account: string, amount: bigint): Promise<void>
   recordReceipt(params: RecordReceiptParams): Promise<void>
   getConfig(): SorobanConfig
+  getReceiptEvents(fromLedger: number | null): Promise<RawReceiptEvent[]>
 }

@@ -41,6 +41,7 @@ export interface OutboxItem {
 
 export interface CreateOutboxItemInput {
   txType: TxType
-  canonicalExternalRefV1: CanonicalExternalRefV1
+  source: string  // Payment source (e.g., "paystack", "stellar")
+  ref: string     // External payment reference ID
   payload: Record<string, unknown>
 }
