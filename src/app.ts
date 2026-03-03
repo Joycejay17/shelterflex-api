@@ -20,6 +20,10 @@ import { createWhistleblowerRouter } from "./routes/whistleblower.js"
 import { createStakingRouter } from "./routes/staking.js"
 import { EarningsServiceImpl } from "./services/earnings.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
+import { createWalletRouter } from "./routes/wallet.js"
+import { WalletServiceImpl } from "./services/walletService.js"
+import { EnvironmentEncryptionService } from "./services/walletService.js"
+import { InMemoryWalletStore } from "./models/walletStore.js"
 
 export function createApp() {
   const app = express()
@@ -29,6 +33,11 @@ export function createApp() {
   const sorobanAdapter = createSorobanAdapter(sorobanConfig)
 
   // Initialize earnings service with stub data layer
+  // Initialize wallet service and store
+  const walletStore = new InMemoryWalletStore()
+  const encryptionService = new EnvironmentEncryptionService(env.ENCRYPTION_KEY)
+  const walletService = new WalletServiceImpl(walletStore, encryptionService)
+
   const rewardsDataLayer = new StubRewardsDataLayer()
   const earningsService = new EarningsServiceImpl(rewardsDataLayer, {
     usdcToNgnRate: 1600, // Example exchange rate: 1 USDC = 1600 NGN
@@ -62,6 +71,7 @@ export function createApp() {
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
   app.use('/api/staking', createStakingRouter(sorobanAdapter))
+  app.use('/api/wallet', createWalletRouter(walletService))
 
 
 
