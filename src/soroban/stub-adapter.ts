@@ -1,5 +1,6 @@
 import { SorobanAdapter, RecordReceiptParams } from './adapter.js'
 import { SorobanConfig } from './client.js'
+import { RawReceiptEvent } from '../indexer/event-parser.js'
 
 // In-memory store for stub balances
 const stubBalances = new Map<string, bigint>()
@@ -62,5 +63,18 @@ export class StubSorobanAdapter implements SorobanAdapter {
                hash = hash & hash
           }
           return Math.abs(hash)
+     }
+
+     private _ledger = 1000
+     async getReceiptEvents(fromLedger: number | null): Promise<RawReceiptEvent[]> {
+          const ledger = (fromLedger ?? this._ledger) + 1
+          this._ledger = ledger
+          return [{
+               ledger, txHash: `stub_${ledger}`, contractId: this.config.contractId ?? 'stub',
+               data: {
+                    tx_id: `txid_${ledger}`, tx_type: 'PAYMENT', deal_id: `deal_${ledger % 5}`,
+                    amount_usdc: '10000000', external_ref_hash: `hash_${ledger}`
+               }
+          }]
      }
 }
