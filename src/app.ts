@@ -21,6 +21,7 @@ import { createStakingRouter } from "./routes/staking.js"
 import { EarningsServiceImpl } from "./services/earnings.js"
 import { createWalletRouter } from "./routes/wallet.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
+import authRouter from "./routes/auth.js"
 import { StubReceiptRepository } from "./indexer/receipt-repository.js"
 import { ReceiptIndexer } from "./indexer/worker.js"
 import { createReceiptsRouter } from "./routes/receiptsRoute.js"
@@ -66,6 +67,7 @@ export function createApp() {
 
   // Routes
   app.use("/health", healthRouter)
+  app.use("/auth", authRouter)
   app.use(createPublicRateLimiter(env))
   app.use("/", publicRouter)
   app.use('/api', createBalanceRouter(sorobanAdapter))
