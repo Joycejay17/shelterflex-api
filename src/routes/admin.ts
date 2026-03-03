@@ -327,13 +327,11 @@ export function createAdminRouter(adapter: SorobanAdapter, walletStore?: WalletS
           )
         }
 
-        // Create canonical external reference
-        const canonicalExternalRef = `${externalRefSource.toLowerCase()}:${externalRef}`
-
-        // Create outbox item for on-chain receipt (idempotent)
+        // Create outbox item for on-chain receipt (idempotent by source+ref)
         const outboxItem = await outboxStore.create({
           txType: TxType.WHISTLEBLOWER_REWARD,
-          canonicalExternalRefV1: canonicalExternalRef,
+          source: externalRefSource,
+          ref: externalRef,
           payload: {
             txType: TxType.WHISTLEBLOWER_REWARD,
             dealId: reward.dealId,
