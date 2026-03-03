@@ -19,6 +19,7 @@ import { createDealsRouter } from "./routes/deals.js"
 import { createWhistleblowerRouter } from "./routes/whistleblower.js"
 import { createStakingRouter } from "./routes/staking.js"
 import { EarningsServiceImpl } from "./services/earnings.js"
+import { createWalletRouter } from "./routes/wallet.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
 import { StubReceiptRepository } from "./indexer/receipt-repository.js"
 import { ReceiptIndexer } from "./indexer/worker.js"
@@ -69,6 +70,7 @@ export function createApp() {
   app.use("/", publicRouter)
   app.use('/api', createBalanceRouter(sorobanAdapter))
   app.use('/api', createReceiptsRouter(receiptRepo))
+  app.use('/api/wallet', createWalletRouter(sorobanAdapter))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter))
   app.use('/api/deals', createDealsRouter())
