@@ -24,6 +24,7 @@ import { WalletServiceImpl } from "./services/walletService.js"
 import { EnvironmentEncryptionService } from "./services/walletService.js"
 import { InMemoryWalletStore } from "./models/walletStore.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
+import authRouter from "./routes/auth.js"
 import { StubReceiptRepository } from "./indexer/receipt-repository.js"
 import { ReceiptIndexer } from "./indexer/worker.js"
 import { createReceiptsRouter } from "./routes/receiptsRoute.js"
@@ -74,6 +75,7 @@ export function createApp() {
 
   // Routes
   app.use("/health", healthRouter)
+  app.use("/auth", authRouter)
   app.use(createPublicRateLimiter(env))
   app.use("/", publicRouter)
   app.use('/api', createBalanceRouter(sorobanAdapter))
