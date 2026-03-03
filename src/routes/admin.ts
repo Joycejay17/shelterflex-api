@@ -2,12 +2,19 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { outboxStore, OutboxSender, OutboxStatus, TxType } from '../outbox/index.js'
 import { SorobanAdapter } from '../soroban/adapter.js'
 import { logger } from '../utils/logger.js'
-import { AppError } from '../errors/AppError.js'
+import { AppError, notFound } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { validate } from '../middleware/validate.js'
 import { markRewardPaidSchema } from '../schemas/reward.js'
+import {
+  adminListingFiltersSchema,
+  approveListingSchema,
+  rejectListingSchema,
+} from '../schemas/listing.js'
 import { rewardStore } from '../models/rewardStore.js'
 import { RewardStatus } from '../models/reward.js'
+import { listingStore } from '../models/listingStore.js'
+import { ListingStatus } from '../models/listing.js'
 
 export function createAdminRouter(adapter: SorobanAdapter) {
   const router = Router()
@@ -295,6 +302,170 @@ export function createAdminRouter(adapter: SorobanAdapter) {
           message: sent
             ? 'Reward marked as paid and receipt written to chain'
             : 'Reward marked as paid, receipt queued for retry',
+        })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  /**
+   * GET /api/admin/whistleblower/listings
+   *
+   * List whistleblower listings for admin review.
+   * Defaults to status=pending_review when no status is provided.
+   * Query params:
+   *   - status: pending_review | approved | rejected | rented (optional, default: pending_review)
+   *   - page: number (optional, default 1)
+   *   - pageSize: number (optional, default 20, max 100)
+   */
+  router.get(
+    '/whistleblower/listings',
+    validate(adminListingFiltersSchema, 'query'),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const filters = req.query
+
+        logger.info('Admin listing moderation queue requested', {
+          filters,
+          requestId: req.requestId,
+        })
+
+        const result = await listingStore.list(filters)
+
+        res.json({
+          listings: result.listings.map((listing) => ({
+            listingId: listing.listingId,
+            whistleblowerId: listing.whistleblowerId,
+            address: listing.address,
+            city: listing.city,
+            area: listing.area,
+            bedrooms: listing.bedrooms,
+            bathrooms: listing.bathrooms,
+            annualRentNgn: listing.annualRentNgn,
+            description: listing.description,
+            photos: listing.photos,
+            status: listing.status,
+            reviewedBy: listing.reviewedBy,
+            reviewedAt: listing.reviewedAt?.toISOString(),
+            rejectionReason: listing.rejectionReason,
+            createdAt: listing.createdAt.toISOString(),
+            updatedAt: listing.updatedAt.toISOString(),
+          })),
+          pagination: {
+            total: result.total,
+            page: result.page,
+            pageSize: result.pageSize,
+            totalPages: result.totalPages,
+          },
+        })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  /**
+   * POST /api/admin/whistleblower/listings/:id/approve
+   *
+   * Approve a pending_review listing.
+   * Only valid transition: pending_review -> approved.
+   */
+  router.post(
+    '/whistleblower/listings/:id/approve',
+    validate(approveListingSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { id } = req.params
+        const { reviewedBy } = req.body
+
+        const listing = await listingStore.getById(id)
+        if (!listing) {
+          throw notFound(`Listing with ID '${id}'`)
+        }
+
+        if (listing.status !== ListingStatus.PENDING_REVIEW) {
+          throw new AppError(
+            ErrorCode.CONFLICT,
+            409,
+            `Listing cannot be approved. Current status: ${listing.status}`,
+            { currentStatus: listing.status, allowedFrom: ListingStatus.PENDING_REVIEW },
+          )
+        }
+
+        const updated = await listingStore.moderate(id, ListingStatus.APPROVED, reviewedBy)
+
+        logger.info('Listing approved', {
+          listingId: id,
+          reviewedBy,
+          requestId: req.requestId,
+        })
+
+        res.json({
+          listing: {
+            listingId: updated!.listingId,
+            status: updated!.status,
+            reviewedBy: updated!.reviewedBy,
+            reviewedAt: updated!.reviewedAt?.toISOString(),
+            updatedAt: updated!.updatedAt.toISOString(),
+          },
+        })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  /**
+   * POST /api/admin/whistleblower/listings/:id/reject
+   *
+   * Reject a pending_review listing with a mandatory reason.
+   * Only valid transition: pending_review -> rejected.
+   */
+  router.post(
+    '/whistleblower/listings/:id/reject',
+    validate(rejectListingSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { id } = req.params
+        const { reviewedBy, reason } = req.body
+
+        const listing = await listingStore.getById(id)
+        if (!listing) {
+          throw notFound(`Listing with ID '${id}'`)
+        }
+
+        if (listing.status !== ListingStatus.PENDING_REVIEW) {
+          throw new AppError(
+            ErrorCode.CONFLICT,
+            409,
+            `Listing cannot be rejected. Current status: ${listing.status}`,
+            { currentStatus: listing.status, allowedFrom: ListingStatus.PENDING_REVIEW },
+          )
+        }
+
+        const updated = await listingStore.moderate(
+          id,
+          ListingStatus.REJECTED,
+          reviewedBy,
+          reason,
+        )
+
+        logger.info('Listing rejected', {
+          listingId: id,
+          reviewedBy,
+          requestId: req.requestId,
+        })
+
+        res.json({
+          listing: {
+            listingId: updated!.listingId,
+            status: updated!.status,
+            reviewedBy: updated!.reviewedBy,
+            reviewedAt: updated!.reviewedAt?.toISOString(),
+            rejectionReason: updated!.rejectionReason,
+            updatedAt: updated!.updatedAt.toISOString(),
+          },
         })
       } catch (error) {
         next(error)
