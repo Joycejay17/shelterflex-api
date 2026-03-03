@@ -24,9 +24,19 @@ import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
 import { StubReceiptRepository } from "./indexer/receipt-repository.js"
 import { ReceiptIndexer } from "./indexer/worker.js"
 import { createReceiptsRouter } from "./routes/receiptsRoute.js"
+import { pool } from "./db.js"
+
 
 export function createApp() {
   const app = express()
+
+  // Test database
+  async function testDb() {
+    const result = await pool.query("SELECT NOW()");
+    console.log("Database connected at:", result.rows[0].now);
+  }
+
+  testDb();
 
   // Initialize Soroban adapter using your existing config function
   const sorobanConfig = getSorobanConfigFromEnv(process.env)
@@ -49,7 +59,7 @@ export function createApp() {
   // Core middleware
   app.use(requestIdMiddleware)
 
-  //  Logger 
+  //  Logger
   app.use(requestLogger);
 
   if (env.NODE_ENV !== "production") {
@@ -83,6 +93,7 @@ export function createApp() {
   app.use('*', (_req, _res, next) => {
     next(new AppError(ErrorCode.NOT_FOUND, 404, `Route ${_req.originalUrl} not found`))
   })
+
 
 
   // Error handler (must be last)

@@ -44,3 +44,31 @@ export interface CreateOutboxItemInput {
   canonicalExternalRefV1: CanonicalExternalRefV1
   payload: Record<string, unknown>
 }
+
+
+
+export interface Deal {
+  id: string;
+  canonicalRef: string;
+  status: string;
+  payload: object;
+}
+
+
+
+export interface OutboxItemInsert {
+  aggregateType: string;
+  aggregateId: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+}
+
+
+export interface OutboxItem extends OutboxItemInsert {
+  id: string;
+  // status: "PENDING" | "PROCESSED";
+  retryCount: number;
+  nextRetryAt: Date | null;
+  createdAt: Date;
+  processedAt: Date | null;
+}
