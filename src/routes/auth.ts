@@ -1,22 +1,17 @@
 import { Router, Request, Response } from "express"
 import { z } from "zod"
-import crypto from "crypto"
+import { generateOtp, generateToken, generateId } from "../utils/tokens.js"
 
 const router = Router()
 
-// In-memory OTP store — replace with DB/Redis in production
 const otpStore = new Map<string, { otp: string; expires: number }>()
-
-// In-memory user store — replace with real DB
 const userStore = new Map<string, {
   id: string
   email: string
   name: string
   role: "tenant" | "landlord" | "agent"
 }>()
-
-// In-memory token store — replace with JWT in production
-const tokenStore = new Map<string, string>() // token -> email
+const tokenStore = new Map<string, string>()
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -27,7 +22,6 @@ const verifySchema = z.object({
   otp: z.string().length(6),
 })
 
-// POST /auth/login — request OTP
 router.post("/login", (req: Request, res: Response) => {
   const parsed = loginSchema.safeParse(req.body)
   if (!parsed.success) {
@@ -36,19 +30,15 @@ router.post("/login", (req: Request, res: Response) => {
   }
 
   const { email } = parsed.data
-  const otp = Math.floor(100000 + Math.random() * 900000).toString()
-  const expires = Date.now() + 10 * 60 * 1000 // 10 minutes
+  const otp = generateOtp()
+  const expires = Date.now() + 10 * 60 * 1000
 
   otpStore.set(email, { otp, expires })
-
-  // In production, send OTP via email here
-  // For now, log it so you can test
   console.log(`[auth] OTP for ${email}: ${otp}`)
 
   res.json({ message: "OTP sent to your email" })
 })
 
-// POST /auth/verify-otp — verify OTP and return token
 router.post("/verify-otp", (req: Request, res: Response) => {
   const parsed = verifySchema.safeParse(req.body)
   if (!parsed.success) {
@@ -75,29 +65,25 @@ router.post("/verify-otp", (req: Request, res: Response) => {
     return
   }
 
-  // OTP valid — clean up
   otpStore.delete(email)
 
-  // Get or create user
   let user = userStore.get(email)
   if (!user) {
     user = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       email,
       name: email.split("@")[0],
-      role: "tenant", // default role — update based on your logic
+      role: "tenant",
     }
     userStore.set(email, user)
   }
 
-  // Generate token
-  const token = crypto.randomBytes(32).toString("hex")
+  const token = generateToken()
   tokenStore.set(token, email)
 
   res.json({ token, user })
 })
 
-// POST /auth/logout
 router.post("/logout", (req: Request, res: Response) => {
   const authHeader = req.headers.authorization
   if (authHeader?.startsWith("Bearer ")) {
