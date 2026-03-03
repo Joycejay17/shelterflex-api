@@ -14,6 +14,7 @@ export const envSchema = z.object({
   SOROBAN_CONTRACT_ID: z.string().optional(),
   SOROBAN_NETWORK: sorobanNetworkEnum.default('testnet'),
   USDC_TOKEN_ADDRESS: z.string().optional(),
+  ENCRYPTION_KEY: z.string().min(32, 'Encryption key must be at least 32 characters'),
 }).refine((data) => {
   if (data.NODE_ENV !== 'development' && data.NODE_ENV !== 'test' && !data.USDC_TOKEN_ADDRESS) {
     return false
