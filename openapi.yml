@@ -946,6 +946,216 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/admin/whistleblower/listings:
+    get:
+      summary: List whistleblower listings (admin)
+      description: |
+        Returns a paginated list of whistleblower listings for admin review.
+        Defaults to `status=pending_review` when no status filter is provided.
+      operationId: adminListWhistleblowerListings
+      tags:
+        - Admin
+      parameters:
+        - name: status
+          in: query
+          description: Filter by listing status (defaults to pending_review)
+          required: false
+          schema:
+            type: string
+            enum: [pending_review, approved, rejected, rented]
+            default: pending_review
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Paginated list of listings
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - listings
+                  - pagination
+                properties:
+                  listings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdminListing'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/admin/whistleblower/listings/{id}/approve:
+    post:
+      summary: Approve a whistleblower listing
+      description: |
+        Transitions a listing from `pending_review` to `approved`.
+        Any other current status results in a 409 conflict.
+      operationId: approveWhistleblowerListing
+      tags:
+        - Admin
+      parameters:
+        - name: id
+          in: path
+          description: Listing ID
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - reviewedBy
+              properties:
+                reviewedBy:
+                  type: string
+                  minLength: 1
+                  description: ID of the admin performing the review
+                  example: admin-001
+      responses:
+        '200':
+          description: Listing approved
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - listing
+                properties:
+                  listing:
+                    $ref: '#/components/schemas/ModerationResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          description: Listing not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: NOT_FOUND
+                  message: "Listing with ID 'abc-123' not found"
+        '409':
+          description: Invalid state transition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: CONFLICT
+                  message: Listing cannot be approved. Current status: approved
+                  details:
+                    currentStatus: approved
+                    allowedFrom: pending_review
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/admin/whistleblower/listings/{id}/reject:
+    post:
+      summary: Reject a whistleblower listing
+      description: |
+        Transitions a listing from `pending_review` to `rejected`.
+        A `reason` explaining the rejection is required.
+        Any other current status results in a 409 conflict.
+      operationId: rejectWhistleblowerListing
+      tags:
+        - Admin
+      parameters:
+        - name: id
+          in: path
+          description: Listing ID
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - reviewedBy
+                - reason
+              properties:
+                reviewedBy:
+                  type: string
+                  minLength: 1
+                  description: ID of the admin performing the review
+                  example: admin-001
+                reason:
+                  type: string
+                  minLength: 1
+                  description: Reason for rejection shown to the whistleblower
+                  example: Photos do not match the listed address
+      responses:
+        '200':
+          description: Listing rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - listing
+                properties:
+                  listing:
+                    allOf:
+                      - $ref: '#/components/schemas/ModerationResult'
+                      - type: object
+                        properties:
+                          rejectionReason:
+                            type: string
+                            example: Photos do not match the listed address
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          description: Listing not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: NOT_FOUND
+                  message: "Listing with ID 'abc-123' not found"
+        '409':
+          description: Invalid state transition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: CONFLICT
+                  message: Listing cannot be rejected. Current status: rejected
+                  details:
+                    currentStatus: rejected
+                    allowedFrom: pending_review
+        default:
+          $ref: '#/components/responses/Error'
+
   /api/staking/stake:
     post:
       summary: Stake USDC tokens
@@ -1134,6 +1344,92 @@ paths:
 
 components:
   schemas:
+    AdminListing:
+      type: object
+      required:
+        - listingId
+        - whistleblowerId
+        - address
+        - bedrooms
+        - bathrooms
+        - annualRentNgn
+        - photos
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        listingId:
+          type: string
+          format: uuid
+        whistleblowerId:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        area:
+          type: string
+        bedrooms:
+          type: integer
+          minimum: 0
+        bathrooms:
+          type: integer
+          minimum: 0
+        annualRentNgn:
+          type: integer
+          minimum: 1
+        description:
+          type: string
+        photos:
+          type: array
+          items:
+            type: string
+            format: uri
+        status:
+          type: string
+          enum: [pending_review, approved, rejected, rented]
+        reviewedBy:
+          type: string
+          description: ID of the admin who reviewed this listing
+        reviewedAt:
+          type: string
+          format: date-time
+          description: Timestamp of the review decision
+        rejectionReason:
+          type: string
+          description: Reason provided when the listing was rejected
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ModerationResult:
+      type: object
+      required:
+        - listingId
+        - status
+        - reviewedBy
+        - reviewedAt
+        - updatedAt
+      properties:
+        listingId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [approved, rejected]
+        reviewedBy:
+          type: string
+          example: admin-001
+        reviewedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
     PaymentTxType:
       type: string
       enum:
