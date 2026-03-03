@@ -28,6 +28,9 @@ export class OutboxSender {
         case TxType.TENANT_REPAYMENT:
         case TxType.LANDLORD_PAYOUT:
         case TxType.WHISTLEBLOWER_REWARD:
+        case TxType.STAKE:
+        case TxType.UNSTAKE:
+        case TxType.STAKE_REWARD_CLAIM:
           await this.sendReceipt(item)
           break
         default:
@@ -67,6 +70,39 @@ export class OutboxSender {
   private async sendReceipt(item: OutboxItem): Promise<void> {
     const { payload } = item
 
+    // Handle staking transactions differently - they don't require dealId or tokenAddress
+    if (item.txType === TxType.STAKE || item.txType === TxType.UNSTAKE || item.txType === TxType.STAKE_REWARD_CLAIM) {
+      // For staking transactions, we need at least amountUsdc and txType
+      if (!payload.amountUsdc && item.txType !== TxType.STAKE_REWARD_CLAIM) {
+        throw new Error('Invalid staking payload: missing required field amountUsdc')
+      }
+      if (!payload.txType) {
+        throw new Error('Invalid staking payload: missing required field txType')
+      }
+
+      const { createHash } = await import('node:crypto')
+      const externalRefHash = createHash('sha256')
+        .update(item.canonicalExternalRefV1)
+        .digest('hex')
+
+      // For staking, we use a default dealId and tokenAddress since they're not relevant
+      await this.adapter.recordReceipt({
+        txId: item.txId,
+        txType: item.txType as import('./types.js').TxType,
+        amountUsdc: payload.amountUsdc ? String(payload.amountUsdc) : '0',
+        tokenAddress: process.env.USDC_TOKEN_ADDRESS || '0x0000000000000000000000000000000000000000',
+        dealId: 'staking-transaction',
+        externalRefHash,
+      })
+
+      logger.debug('Staking transaction recorded on-chain', {
+        txId: item.txId,
+        txType: item.txType,
+      })
+      return
+    }
+
+    // Handle regular payment transactions
     if (!payload.dealId || !payload.amountUsdc || !payload.tokenAddress || !payload.txType) {
       throw new Error('Invalid receipt payload: missing required fields (dealId, amountUsdc, tokenAddress, txType)')
     }
