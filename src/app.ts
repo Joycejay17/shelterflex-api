@@ -5,7 +5,7 @@ import { requestIdMiddleware } from "./middleware/requestId.js"
 import { errorHandler } from "./middleware/errorHandler.js"
 import { createLogger } from "./middleware/logger.js"
 import healthRouter from "./routes/health.js"
-import { createPublicRateLimiter } from "./middleware/rateLimit.js"
+import { createPublicRateLimiter, createAuthRateLimiter, createWalletRateLimiter } from "./middleware/rateLimit.js"
 import publicRouter from "./routes/publicRoutes.js"
 import { AppError } from "./errors/AppError.js"
 import { ErrorCode } from "./errors/errorCodes.js"
@@ -75,12 +75,12 @@ export function createApp() {
 
   // Routes
   app.use("/health", healthRouter)
-  app.use("/auth", authRouter)
+  app.use("/auth", createAuthRateLimiter(env), authRouter)
   app.use(createPublicRateLimiter(env))
   app.use("/", publicRouter)
   app.use('/api', createBalanceRouter(sorobanAdapter))
   app.use('/api', createReceiptsRouter(receiptRepo))
-  app.use('/api/wallet', createWalletRouter(walletService))
+  app.use('/api/wallet', createWalletRateLimiter(env), createWalletRouter(walletService))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter))
   app.use('/api/deals', createDealsRouter())
