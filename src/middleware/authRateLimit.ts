@@ -34,7 +34,7 @@ export function otpRequestRateLimit(options?: {
   maxPerIp?: number
 }) {
   const windowMs = options?.windowMs ?? 15 * 60 * 1000
-  const maxPerEmail = options?.maxPerEmail ?? 3
+  const maxPerEmail = options?.maxPerEmail ?? 6
   const maxPerIp = options?.maxPerIp ?? 10
 
   return (req: Request, _res: Response, next: NextFunction) => {
