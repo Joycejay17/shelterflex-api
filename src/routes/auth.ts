@@ -1,97 +1,106 @@
-import { Router, Request, Response } from "express"
-import { z } from "zod"
-import { generateOtp, generateToken, generateId } from "../utils/tokens.js"
+import { Router, type Request, type Response } from 'express'
+import { AppError } from '../errors/AppError.js'
+import { ErrorCode } from '../errors/errorCodes.js'
+import { validate } from '../middleware/validate.js'
+import { otpRequestRateLimit } from '../middleware/authRateLimit.js'
+import { requestOtpSchema, verifyOtpSchema } from '../schemas/auth.js'
+import { generateOtp, generateToken } from '../utils/tokens.js'
+import { generateOtpSalt, hashOtp, verifyOtpHash } from '../utils/otp.js'
+import { otpChallengeStore, sessionStore, userStore } from '../models/authStore.js'
+import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 
 const router = Router()
 
-const otpStore = new Map<string, { otp: string; expires: number }>()
-const userStore = new Map<string, {
-  id: string
-  email: string
-  name: string
-  role: "tenant" | "landlord" | "agent"
-}>()
-const tokenStore = new Map<string, string>()
+const OTP_TTL_MS = 10 * 60 * 1000
+const OTP_MAX_ATTEMPTS = 5
 
-const loginSchema = z.object({
-  email: z.string().email(),
-})
+/**
+ * POST /api/auth/request-otp
+ * Body: { email }
+ */
+router.post(
+  '/request-otp',
+  validate(requestOtpSchema, 'body'),
+  otpRequestRateLimit(),
+  (req: Request, res: Response) => {
+    const email = (req.body.email as string).toLowerCase()
 
-const verifySchema = z.object({
-  email: z.string().email(),
-  otp: z.string().length(6),
-})
+    const otp = generateOtp()
+    const salt = generateOtpSalt()
+    const otpHash = hashOtp(otp, salt)
+    const expiresAt = new Date(Date.now() + OTP_TTL_MS)
 
-router.post("/login", (req: Request, res: Response) => {
-  const parsed = loginSchema.safeParse(req.body)
-  if (!parsed.success) {
-    res.status(400).json({ error: "Invalid email" })
-    return
-  }
+    otpChallengeStore.set({ email, otpHash, salt, expiresAt, attempts: 0 })
 
-  const { email } = parsed.data
-  const otp = generateOtp()
-  const expires = Date.now() + 10 * 60 * 1000
+    // MVP: No email provider integrated. For development, log OTP.
+    // Never persist plaintext OTP.
+    // eslint-disable-next-line no-console
+    console.log(`[auth] OTP for ${email}: ${otp}`)
 
-  otpStore.set(email, { otp, expires })
-  console.log(`[auth] OTP for ${email}: ${otp}`)
+    res.json({ message: 'OTP sent to your email' })
+  },
+)
 
-  res.json({ message: "OTP sent to your email" })
-})
+/**
+ * POST /api/auth/verify-otp
+ * Body: { email, otp } -> { token }
+ */
+router.post(
+  '/verify-otp',
+  validate(verifyOtpSchema, 'body'),
+  (req: Request, res: Response) => {
+    const email = (req.body.email as string).toLowerCase()
+    const otp = req.body.otp as string
 
-router.post("/verify-otp", (req: Request, res: Response) => {
-  const parsed = verifySchema.safeParse(req.body)
-  if (!parsed.success) {
-    res.status(400).json({ error: "Invalid request" })
-    return
-  }
-
-  const { email, otp } = parsed.data
-  const stored = otpStore.get(email)
-
-  if (!stored) {
-    res.status(401).json({ error: "No OTP requested for this email" })
-    return
-  }
-
-  if (Date.now() > stored.expires) {
-    otpStore.delete(email)
-    res.status(401).json({ error: "OTP has expired" })
-    return
-  }
-
-  if (stored.otp !== otp) {
-    res.status(401).json({ error: "Invalid OTP" })
-    return
-  }
-
-  otpStore.delete(email)
-
-  let user = userStore.get(email)
-  if (!user) {
-    user = {
-      id: generateId(),
-      email,
-      name: email.split("@")[0],
-      role: "tenant",
+    const challenge = otpChallengeStore.getByEmail(email)
+    if (!challenge) {
+      throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'No OTP requested for this email')
     }
-    userStore.set(email, user)
-  }
 
-  const token = generateToken()
-  tokenStore.set(token, email)
+    if (new Date() > challenge.expiresAt) {
+      otpChallengeStore.deleteByEmail(email)
+      throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'OTP has expired')
+    }
 
-  res.json({ token, user })
-})
+    if (challenge.attempts >= OTP_MAX_ATTEMPTS) {
+      otpChallengeStore.deleteByEmail(email)
+      throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid OTP')
+    }
 
-router.post("/logout", (req: Request, res: Response) => {
+    const ok = verifyOtpHash(otp, challenge.salt, challenge.otpHash)
+    if (!ok) {
+      challenge.attempts += 1
+      otpChallengeStore.set(challenge)
+      throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid OTP')
+    }
+
+    otpChallengeStore.deleteByEmail(email)
+
+    const user = userStore.getOrCreateByEmail(email)
+    const token = generateToken()
+    sessionStore.create(email, token)
+
+    res.json({ token, user })
+  },
+)
+
+/**
+ * POST /api/auth/logout
+ */
+router.post('/logout', (req: Request, res: Response) => {
   const authHeader = req.headers.authorization
-  if (authHeader?.startsWith("Bearer ")) {
-    const token = authHeader.slice(7)
-    tokenStore.delete(token)
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
+  if (token) {
+    sessionStore.deleteByToken(token)
   }
-  res.json({ message: "Logged out" })
+  res.json({ message: 'Logged out' })
 })
 
-export { tokenStore, userStore }
+/**
+ * GET /api/auth/me
+ */
+router.get('/me', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
+  res.json({ user: req.user })
+})
+
 export default router

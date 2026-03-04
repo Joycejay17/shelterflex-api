@@ -1,0 +1,108 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { createTestAgent, expectErrorShape } from '../test-helpers.js'
+import { otpChallengeStore, sessionStore, userStore } from '../models/authStore.js'
+import { _testOnly_clearAuthRateLimits } from '../middleware/authRateLimit.js'
+
+vi.mock('../utils/tokens.js', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../utils/tokens.js')>()
+  return {
+    ...mod,
+    generateOtp: () => '123456',
+    generateToken: () => 'session-token-abc',
+  }
+})
+
+describe('Auth Routes (OTP)', () => {
+  const request = createTestAgent()
+
+  beforeEach(() => {
+    otpChallengeStore.clear()
+    sessionStore.clear()
+    userStore.clear()
+    _testOnly_clearAuthRateLimits()
+    vi.useRealTimers()
+  })
+
+  it('POST /api/auth/request-otp should create hashed challenge (no plaintext stored)', async () => {
+    const email = 'a@example.com'
+
+    const res = await request.post('/api/auth/request-otp').send({ email })
+    expect(res.status).toBe(200)
+
+    const challenge = otpChallengeStore.getByEmail(email)
+    expect(challenge).toBeDefined()
+    expect(challenge!.email).toBe(email)
+    expect(typeof challenge!.otpHash).toBe('string')
+    expect(challenge!.otpHash).not.toBe('123456')
+    expect(typeof challenge!.salt).toBe('string')
+    expect(challenge!.attempts).toBe(0)
+  })
+
+  it('POST /api/auth/verify-otp should return session token on success', async () => {
+    const email = 'b@example.com'
+
+    await request.post('/api/auth/request-otp').send({ email }).expect(200)
+
+    const res = await request
+      .post('/api/auth/verify-otp')
+      .send({ email, otp: '123456' })
+      .expect(200)
+
+    expect(res.body).toHaveProperty('token', 'session-token-abc')
+    expect(res.body).toHaveProperty('user')
+    expect(res.body.user).toHaveProperty('email', email)
+
+    const session = sessionStore.getByToken('session-token-abc')
+    expect(session).toBeDefined()
+    expect(session!.email).toBe(email)
+  })
+
+  it('verify should increment attempts and eventually fail after too many attempts', async () => {
+    const email = 'c@example.com'
+
+    await request.post('/api/auth/request-otp').send({ email }).expect(200)
+
+    for (let i = 0; i < 5; i++) {
+      const res = await request.post('/api/auth/verify-otp').send({ email, otp: '000000' })
+      expect(res.status).toBe(401)
+    }
+
+    const res = await request.post('/api/auth/verify-otp').send({ email, otp: '123456' })
+    expect(res.status).toBe(401)
+  })
+
+  it('request-otp should rate limit by email', async () => {
+    const email = 'rate@example.com'
+
+    await request.post('/api/auth/request-otp').send({ email }).expect(200)
+    await request.post('/api/auth/request-otp').send({ email }).expect(200)
+    await request.post('/api/auth/request-otp').send({ email }).expect(200)
+
+    const res = await request.post('/api/auth/request-otp').send({ email })
+    expect(res.status).toBe(429)
+  })
+
+  it('GET /api/auth/me should require auth and return user when authenticated', async () => {
+    const email = 'me@example.com'
+
+    await request.post('/api/auth/request-otp').send({ email }).expect(200)
+
+    const verify = await request
+      .post('/api/auth/verify-otp')
+      .send({ email, otp: '123456' })
+      .expect(200)
+
+    const token = verify.body.token as string
+
+    const me = await request
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    expect(me.body).toHaveProperty('user')
+    expect(me.body.user).toHaveProperty('email', email)
+
+    const missing = await request.get('/api/auth/me')
+    expectErrorShape(missing, 'UNAUTHORIZED', 401)
+  })
+})
