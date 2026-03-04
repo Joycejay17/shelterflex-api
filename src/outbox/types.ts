@@ -35,6 +35,17 @@ export interface OutboxItem {
   status: OutboxStatus
   attempts: number
   lastError?: string
+
+  // Fields from OutboxItemInsert
+  aggregateType: string
+  aggregateId: string
+  eventType: string
+
+  // Retry / processing fields
+  retryCount: number
+  nextRetryAt: Date | null
+  processedAt: Date | null
+
   createdAt: Date
   updatedAt: Date
 }
@@ -70,11 +81,3 @@ export interface OutboxItemInsert {
 }
 
 
-export interface OutboxItem extends OutboxItemInsert {
-  id: string;
-  // status: "PENDING" | "PROCESSED";
-  retryCount: number;
-  nextRetryAt: Date | null;
-  createdAt: Date;
-  processedAt: Date | null;
-}
