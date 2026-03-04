@@ -1,77 +1,193 @@
+import { readFile, readdir } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { Pool } from "pg";
 
-import { pool } from "../db.js";
-import { OutboxItem, OutboxItemInsert } from "../outbox/types.js";
+const databaseUrl = process.env.DATABASE_URL;
 
-export class OutboxRepository {
-  // Insert a new outbox event
-  async add(item: OutboxItemInsert) {
-    await pool.query(
-      `INSERT INTO outbox_items (aggregate_type, aggregate_id, event_type, payload)
-       VALUES ($1,$2,$3,$4)`,
-      [item.aggregateType, item.aggregateId, item.eventType, item.payload]
+if (!databaseUrl) {
+  throw new Error("DATABASE_URL is required to run this script.");
+}
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const migrationsDir = path.resolve(__dirname, "../../migrations");
+
+async function runMigrations(pool: Pool): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id BIGSERIAL PRIMARY KEY,
+      filename TEXT NOT NULL UNIQUE,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  const files = (await readdir(migrationsDir))
+    .filter((file) => file.endsWith(".sql"))
+    .sort((a, b) => a.localeCompare(b));
+
+  for (const file of files) {
+    const alreadyApplied = await pool.query(
+      "SELECT 1 FROM schema_migrations WHERE filename = $1",
+      [file],
     );
-  }
 
-  // Fetch pending events
-  async fetchPending(): Promise<OutboxItem[]> {
-    const { rows } = await pool.query(`
-      SELECT
-        id,
-        aggregate_type AS "aggregateType",
-        aggregate_id AS "aggregateId",
-        event_type AS "eventType",
-        payload,
-        status,
-        retry_count AS "retryCount",
-        next_retry_at AS "nextRetryAt",
-        created_at AS "createdAt",
-        processed_at AS "processedAt"
-      FROM outbox_items
-      WHERE status='PENDING' AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-      ORDER BY created_at
-      LIMIT 50
-      FOR UPDATE SKIP LOCKED
-    `);
-    return rows;
-  }
+    if (alreadyApplied.rowCount) {
+      continue;
+    }
 
-  async markProcessed(id: string) {
-    await pool.query(
-      `UPDATE outbox_items SET status='PROCESSED', processed_at=NOW() WHERE id=$1`,
-      [id]
-    );
-  }
+    const sql = await readFile(path.join(migrationsDir, file), "utf8");
 
-  async markRetry(id: string) {
-    await pool.query(
-      `UPDATE outbox_items
-       SET retry_count = retry_count+1,
-           next_retry_at = NOW() + INTERVAL '5 minutes'
-       WHERE id=$1`,
-      [id]
-    );
+    await pool.query("BEGIN");
+    try {
+      await pool.query(sql);
+      await pool.query(
+        "INSERT INTO schema_migrations (filename) VALUES ($1)",
+        [file],
+      );
+      await pool.query("COMMIT");
+      console.log(`Applied migration: ${file}`);
+    } catch (error) {
+      await pool.query("ROLLBACK");
+      throw error;
+    }
   }
 }
 
+async function assertRequiredIndexes(pool: Pool): Promise<void> {
+  const { rows } = await pool.query<{
+    indexname: string;
+  }>(
+    `
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND tablename IN ('deals', 'listings', 'rewards', 'outbox_items')
+    `,
+  );
 
-// --- Test Execution ---
-const repo = new OutboxRepository();
+  const found = new Set(rows.map((row) => row.indexname));
+  const required = [
+    "deals_canonical_external_ref_v1_uidx",
+    "listings_deal_id_idx",
+    "listings_status_idx",
+    "rewards_listing_id_idx",
+    "rewards_status_idx",
+    "outbox_status_idx",
+    "outbox_next_retry_idx",
+    "outbox_aggregate_idx",
+  ];
 
-async function runTest() {
-  console.log(" Starting Outbox Test...");
+  const missing = required.filter((name) => !found.has(name));
+  if (missing.length > 0) {
+    throw new Error(`Missing required indexes: ${missing.join(", ")}`);
+  }
+}
+
+async function runPersistenceChecks(pool: Pool): Promise<void> {
+  const canonicalRef = `test-ref-${Date.now()}`;
+
+  const dealResult = await pool.query<{ id: string }>(
+    `
+      INSERT INTO deals (canonical_external_ref_v1, status, payload)
+      VALUES ($1, 'NEW', '{}'::jsonb)
+      RETURNING id
+    `,
+    [canonicalRef],
+  );
+
+  const dealId = dealResult.rows[0]?.id;
+  if (!dealId) {
+    throw new Error("Failed to create a deal row.");
+  }
+
+  const listingResult = await pool.query<{ id: string }>(
+    `
+      INSERT INTO listings (deal_id, status, payload)
+      VALUES ($1, 'ACTIVE', '{}'::jsonb)
+      RETURNING id
+    `,
+    [dealId],
+  );
+
+  const listingId = listingResult.rows[0]?.id;
+  if (!listingId) {
+    throw new Error("Failed to create a listing row.");
+  }
+
+  await pool.query(
+    `
+      INSERT INTO rewards (listing_id, status, amount_cents)
+      VALUES ($1, 'PENDING', 5000)
+    `,
+    [listingId],
+  );
+
+  const outboxResult = await pool.query<{ id: string }>(
+    `
+      INSERT INTO outbox_items (aggregate_type, aggregate_id, event_type, payload)
+      VALUES ('deal', $1, 'deal.created', '{}'::jsonb)
+      RETURNING id
+    `,
+    [dealId],
+  );
+
+  const outboxId = outboxResult.rows[0]?.id;
+  if (!outboxId) {
+    throw new Error("Failed to create an outbox row.");
+  }
+
+  await pool.query(
+    `
+      UPDATE outbox_items
+      SET retry_count = retry_count + 1,
+          next_retry_at = NOW() + INTERVAL '5 minutes'
+      WHERE id = $1
+    `,
+    [outboxId],
+  );
+
+  const verificationPool = new Pool({ connectionString: databaseUrl });
+  try {
+    const persistedCheck = await verificationPool.query<{ retry_count: number }>(
+      "SELECT retry_count FROM outbox_items WHERE id = $1",
+      [outboxId],
+    );
+
+    const retryCount = persistedCheck.rows[0]?.retry_count;
+    if (retryCount !== 1) {
+      throw new Error(`Expected retry_count=1, got ${String(retryCount)}`);
+    }
+
+    console.log("Persistence check passed:");
+    console.log(`- deal persisted: ${dealId}`);
+    console.log(`- listing persisted: ${listingId}`);
+    console.log(`- outbox retry persisted: ${outboxId}`);
+  } finally {
+    await verificationPool.end();
+  }
+}
+
+async function main() {
+  const pool = new Pool({ connectionString: databaseUrl });
 
   try {
-    const items = await repo.fetchPending();
-    console.log(` Connection successful! Found ${items.length} pending items.`);
+    console.log("Running migrations...");
+    await runMigrations(pool);
 
-    if (items.length > 0) {
-      console.table(items);
-    }
-  } catch (error) {
-    console.error(" Database Error:", error);
+    console.log("Validating required indexes...");
+    await assertRequiredIndexes(pool);
+
+    console.log("Running persistence and outbox retry checks...");
+    await runPersistenceChecks(pool);
+
+    console.log("DB setup and migration test completed successfully.");
   } finally {
-    process.exit();
+    await pool.end();
   }
 }
 
-runTest();
+main().catch((error: unknown) => {
+  console.error("DB setup test failed:", error);
+  process.exitCode = 1;
+});
