@@ -49,6 +49,9 @@ export enum ErrorCode {
   UNAUTHORIZED = "UNAUTHORIZED",
   FORBIDDEN = "FORBIDDEN",
 
+  // Rate limiting
+  TOO_MANY_REQUESTS = "TOO_MANY_REQUESTS",
+
   // Resources
   NOT_FOUND = "NOT_FOUND",
   CONFLICT = "CONFLICT",

@@ -50,6 +50,135 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /api/auth/request-otp:
+    post:
+      summary: Request OTP for email login
+      description: Sends a one-time password (OTP) to the provided email address.
+      operationId: requestOtp
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "200":
+          description: OTP request accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - message
+                properties:
+                  message:
+                    type: string
+                    example: OTP sent to your email
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/auth/verify-otp:
+    post:
+      summary: Verify OTP and create session
+      description: Verifies the OTP for the email and returns a session token (Bearer).
+      operationId: verifyOtp
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - otp
+              properties:
+                email:
+                  type: string
+                  format: email
+                otp:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
+      responses:
+        "200":
+          description: OTP verified successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - token
+                  - user
+                properties:
+                  token:
+                    type: string
+                    description: Session token to be used as Authorization: Bearer <token>
+                  user:
+                    $ref: "#/components/schemas/User"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/auth/logout:
+    post:
+      summary: Logout
+      description: Invalidates the current session token.
+      operationId: logout
+      tags:
+        - Auth
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Logged out successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - message
+                properties:
+                  message:
+                    type: string
+                    example: Logged out
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/auth/me:
+    get:
+      summary: Get current authenticated user
+      description: Returns the current user associated with the Bearer session token.
+      operationId: getMe
+      tags:
+        - Auth
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - user
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+        default:
+          $ref: "#/components/responses/Error"
+
   /soroban/config:
     get:
       summary: Get Soroban configuration
@@ -1344,6 +1473,29 @@ paths:
 
 components:
   schemas:
+    User:
+      type: object
+      required:
+        - id
+        - email
+        - createdAt
+        - name
+        - role
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        createdAt:
+          type: string
+          format: date-time
+        name:
+          type: string
+        role:
+          type: string
+          enum: [tenant, landlord, agent]
+
     AdminListing:
       type: object
       required:
@@ -2116,6 +2268,7 @@ components:
                 - VALIDATION_ERROR
                 - UNAUTHORIZED
                 - FORBIDDEN
+                - TOO_MANY_REQUESTS
                 - NOT_FOUND
                 - CONFLICT
                 - LISTING_ALREADY_RENTED
@@ -2267,13 +2420,19 @@ components:
               code: "TOO_MANY_REQUESTS"
               message: "Rate limit exceeded"
 
-  securitySchemes: {}
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: token
 
 tags:
   - name: Health
     description: Health check operations
   - name: Soroban
     description: Soroban blockchain configuration
+  - name: Auth
+    description: Email/OTP authentication and sessions
   - name: Payments
     description: Payment confirmation and on-chain USDC receipt recording
   - name: Whistleblower

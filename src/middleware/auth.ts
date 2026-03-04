@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { logger } from '../utils/logger.js'
-import { tokenStore, userStore } from '../routes/auth.js'
+import { sessionStore, userStore } from '../models/authStore.js'
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -27,8 +27,8 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
     throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication token required')
   }
 
-  const email = tokenStore.get(token)
-  if (!email) {
+  const session = sessionStore.getByToken(token)
+  if (!session) {
     logger.warn('Unauthorized access attempt - invalid token', {
       ip: req.ip,
       userAgent: req.get('User-Agent'),
@@ -39,14 +39,14 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
     throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid or expired token')
   }
 
-  const user = userStore.get(email)
+  const user = userStore.getByEmail(session.email)
   if (!user) {
     logger.warn('Unauthorized access attempt - user not found', {
       ip: req.ip,
       userAgent: req.get('User-Agent'),
       requestId: req.requestId,
       path: req.path,
-      email
+      email: session.email
     })
     throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'User not found')
   }

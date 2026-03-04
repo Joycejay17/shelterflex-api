@@ -85,7 +85,7 @@ export function createApp() {
 
   // Routes
   app.use("/health", healthRouter)
-  app.use("/auth", createAuthRateLimiter(env), authRouter)
+  app.use("/api/auth", createAuthRateLimiter(env), authRouter)
   app.use(createPublicRateLimiter(env))
   app.use("/", publicRouter)
   app.use('/api', createBalanceRouter(sorobanAdapter))
