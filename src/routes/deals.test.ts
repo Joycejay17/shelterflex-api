@@ -339,7 +339,8 @@ describe('Deals API', () => {
       // Create a SENT receipt
       const sentItem = await outboxStore.create({
         txType: TxType.TENANT_REPAYMENT,
-        canonicalExternalRefV1: 'stripe:pi_sent_001',
+        source: 'stripe',
+        ref: 'pi_sent_001',
         payload: { dealId, amountUsdc: '64.52', tokenAddress: 'USDC_ADDR', txType: TxType.TENANT_REPAYMENT },
       })
       await outboxStore.updateStatus(sentItem.id, OutboxStatus.SENT)
@@ -347,14 +348,16 @@ describe('Deals API', () => {
       // Create a PENDING receipt (should NOT be counted)
       await outboxStore.create({
         txType: TxType.TENANT_REPAYMENT,
-        canonicalExternalRefV1: 'stripe:pi_pending_002',
+        source: 'stripe',
+        ref: 'pi_pending_002',
         payload: { dealId, amountUsdc: '64.52', tokenAddress: 'USDC_ADDR', txType: TxType.TENANT_REPAYMENT },
       })
 
       // Create a FAILED receipt (should NOT be counted)
       const failedItem = await outboxStore.create({
         txType: TxType.TENANT_REPAYMENT,
-        canonicalExternalRefV1: 'stripe:pi_failed_003',
+        source: 'stripe',
+        ref: 'pi_failed_003',
         payload: { dealId, amountUsdc: '64.52', tokenAddress: 'USDC_ADDR', txType: TxType.TENANT_REPAYMENT },
       })
       await outboxStore.updateStatus(failedItem.id, OutboxStatus.FAILED)
@@ -375,14 +378,16 @@ describe('Deals API', () => {
     it('should sum multiple SENT receipts and pick the latest as last payment', async () => {
       const item1 = await outboxStore.create({
         txType: TxType.TENANT_REPAYMENT,
-        canonicalExternalRefV1: 'stripe:pi_aaa',
+        source: 'stripe',
+        ref: 'pi_aaa',
         payload: { dealId, amountUsdc: '50.00', tokenAddress: 'USDC_ADDR', txType: TxType.TENANT_REPAYMENT },
       })
       await outboxStore.updateStatus(item1.id, OutboxStatus.SENT)
 
       const item2 = await outboxStore.create({
         txType: TxType.TENANT_REPAYMENT,
-        canonicalExternalRefV1: 'stellar:txhash_bbb',
+        source: 'stellar',
+        ref: 'txhash_bbb',
         payload: { dealId, amountUsdc: '79.04', tokenAddress: 'USDC_ADDR', txType: TxType.TENANT_REPAYMENT },
       })
       await outboxStore.updateStatus(item2.id, OutboxStatus.SENT)
@@ -402,7 +407,8 @@ describe('Deals API', () => {
     it('should not count LANDLORD_PAYOUT receipts', async () => {
       const item = await outboxStore.create({
         txType: TxType.LANDLORD_PAYOUT,
-        canonicalExternalRefV1: 'manual:payout_001',
+        source: 'manual',
+        ref: 'payout_001',
         payload: { dealId, amountUsdc: '960.00', tokenAddress: 'USDC_ADDR', txType: TxType.LANDLORD_PAYOUT },
       })
       await outboxStore.updateStatus(item.id, OutboxStatus.SENT)
@@ -420,7 +426,8 @@ describe('Deals API', () => {
       for (let i = 0; i < 12; i++) {
         const item = await outboxStore.create({
           txType: TxType.TENANT_REPAYMENT,
-          canonicalExternalRefV1: `stripe:pi_period_${i}`,
+          source: 'stripe',
+          ref: `pi_period_${i}`,
           payload: { dealId, amountUsdc: '80000.00', tokenAddress: 'USDC_ADDR', txType: TxType.TENANT_REPAYMENT },
         })
         await outboxStore.updateStatus(item.id, OutboxStatus.SENT)

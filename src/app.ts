@@ -5,7 +5,7 @@ import { requestIdMiddleware } from "./middleware/requestId.js"
 import { errorHandler } from "./middleware/errorHandler.js"
 import { createLogger } from "./middleware/logger.js"
 import healthRouter from "./routes/health.js"
-import { createPublicRateLimiter } from "./middleware/rateLimit.js"
+import { createPublicRateLimiter, createAuthRateLimiter, createWalletRateLimiter } from "./middleware/rateLimit.js"
 import publicRouter from "./routes/publicRoutes.js"
 import { AppError } from "./errors/AppError.js"
 import { ErrorCode } from "./errors/errorCodes.js"
@@ -20,7 +20,11 @@ import { createWhistleblowerRouter } from "./routes/whistleblower.js"
 import { createStakingRouter } from "./routes/staking.js"
 import { EarningsServiceImpl } from "./services/earnings.js"
 import { createWalletRouter } from "./routes/wallet.js"
+import { WalletServiceImpl } from "./services/walletService.js"
+import { EnvironmentEncryptionService } from "./services/walletService.js"
+import { InMemoryWalletStore } from "./models/walletStore.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
+import authRouter from "./routes/auth.js"
 import { StubReceiptRepository } from "./indexer/receipt-repository.js"
 import { ReceiptIndexer } from "./indexer/worker.js"
 import { createReceiptsRouter } from "./routes/receiptsRoute.js"
@@ -43,6 +47,11 @@ export function createApp() {
   const sorobanAdapter = createSorobanAdapter(sorobanConfig)
 
   // Initialize earnings service with stub data layer
+  // Initialize wallet service and store
+  const walletStore = new InMemoryWalletStore()
+  const encryptionService = new EnvironmentEncryptionService(env.ENCRYPTION_KEY)
+  const walletService = new WalletServiceImpl(walletStore, encryptionService)
+
   const rewardsDataLayer = new StubRewardsDataLayer()
   const earningsService = new EarningsServiceImpl(rewardsDataLayer, {
     usdcToNgnRate: 1600, // Example exchange rate: 1 USDC = 1600 NGN
@@ -76,11 +85,12 @@ export function createApp() {
 
   // Routes
   app.use("/health", healthRouter)
+  app.use("/auth", createAuthRateLimiter(env), authRouter)
   app.use(createPublicRateLimiter(env))
   app.use("/", publicRouter)
   app.use('/api', createBalanceRouter(sorobanAdapter))
   app.use('/api', createReceiptsRouter(receiptRepo))
-  app.use('/api/wallet', createWalletRouter(sorobanAdapter))
+  app.use('/api/wallet', createWalletRateLimiter(env), createWalletRouter(walletService))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter))
   app.use('/api/deals', createDealsRouter())

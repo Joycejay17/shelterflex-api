@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { outboxStore, OutboxSender, OutboxStatus, TxType } from '../outbox/index.js'
 import { SorobanAdapter } from '../soroban/adapter.js'
 import { logger } from '../utils/logger.js'
+import { auditAdminWalletAction } from '../utils/auditLogger.js'
 import { AppError, notFound } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { validate } from '../middleware/validate.js'
@@ -72,6 +73,16 @@ export function createAdminRouter(adapter: SorobanAdapter, walletStore?: WalletS
           toVersion,
           batchSize,
           requestId: req.requestId,
+        })
+
+        // Audit log: admin wallet action (rewrap)
+        auditAdminWalletAction(req, {
+          action: 'WALLET_REWRAP',
+          details: {
+            fromVersion,
+            toVersion,
+            batchSize,
+          },
         })
 
         const candidates = await walletStore.listByEncryptionVersion(fromVersion, batchSize)
@@ -327,13 +338,11 @@ export function createAdminRouter(adapter: SorobanAdapter, walletStore?: WalletS
           )
         }
 
-        // Create canonical external reference
-        const canonicalExternalRef = `${externalRefSource.toLowerCase()}:${externalRef}`
-
-        // Create outbox item for on-chain receipt (idempotent)
+        // Create outbox item for on-chain receipt (idempotent by source+ref)
         const outboxItem = await outboxStore.create({
           txType: TxType.WHISTLEBLOWER_REWARD,
-          canonicalExternalRefV1: canonicalExternalRef,
+          source: externalRefSource,
+          ref: externalRef,
           payload: {
             txType: TxType.WHISTLEBLOWER_REWARD,
             dealId: reward.dealId,
