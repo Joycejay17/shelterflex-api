@@ -77,7 +77,7 @@ describe('Auth Routes (OTP)', () => {
   })
 
   it('GET /api/auth/me should require auth and return user when authenticated', async () => {
-    const email = 'me@example.com'
+    const email = 'me-auth@example.com'
 
     await request.post('/api/auth/request-otp').send({ email }).expect(200)
 
@@ -95,6 +95,8 @@ describe('Auth Routes (OTP)', () => {
 
     expect(me.body).toHaveProperty('user')
     expect(me.body.user).toHaveProperty('email', email)
+    expect(me.body.user).toHaveProperty('id')
+    expect(me.body.user).toHaveProperty('role')
 
     const missing = await request.get('/api/auth/me')
     expectErrorShape(missing, 'UNAUTHORIZED', 401)
