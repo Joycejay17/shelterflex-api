@@ -19,7 +19,10 @@ import { createDealsRouter } from "./routes/deals.js"
 import { createWhistleblowerRouter } from "./routes/whistleblower.js"
 import { createStakingRouter } from "./routes/staking.js"
 import { createWebhooksRouter } from "./routes/webhooks.js"
+import { createDepositsRouter } from "./routes/deposits.js"
 import { EarningsServiceImpl } from "./services/earnings.js"
+import { StubConversionProvider } from "./services/conversionProvider.js"
+import { ConversionService } from "./services/conversionService.js"
 import { createWalletRouter } from "./routes/wallet.js"
 import { WalletServiceImpl } from "./services/walletService.js"
 import { EnvironmentEncryptionService } from "./services/walletService.js"
@@ -29,7 +32,7 @@ import authRouter from "./routes/auth.js"
 import { StubReceiptRepository } from "./indexer/receipt-repository.js"
 import { ReceiptIndexer } from "./indexer/worker.js"
 import { createReceiptsRouter } from "./routes/receiptsRoute.js"
-import { pool } from "./db.js"
+import { getPool } from "./db.js"
 
 
 export function createApp() {
@@ -37,11 +40,15 @@ export function createApp() {
 
   // Test database
   async function testDb() {
+    const pool = await getPool()
+    if (!pool) return
     const result = await pool.query("SELECT NOW()");
     console.log("Database connected at:", result.rows[0].now);
   }
 
-  testDb();
+  if (env.NODE_ENV !== 'test') {
+    testDb();
+  }
 
   // Initialize Soroban adapter using your existing config function
   const sorobanConfig = getSorobanConfigFromEnv(process.env)
@@ -57,6 +64,9 @@ export function createApp() {
   const earningsService = new EarningsServiceImpl(rewardsDataLayer, {
     usdcToNgnRate: 1600, // Example exchange rate: 1 USDC = 1600 NGN
   })
+
+  const conversionProvider = new StubConversionProvider(1600)
+  const conversionService = new ConversionService(conversionProvider, 'onramp')
 
   // Indexer
   const receiptRepo = new StubReceiptRepository()
@@ -98,6 +108,7 @@ export function createApp() {
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
   app.use('/api/staking', createStakingRouter(sorobanAdapter))
   app.use('/api/webhooks', createWebhooksRouter())
+  app.use('/api/deposits', createDepositsRouter(conversionService))
 
 
 

@@ -1,7 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Pool } from "pg";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -9,11 +8,13 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL is required to run this script.");
 }
 
+const databaseUrlStr = databaseUrl;
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const migrationsDir = path.resolve(__dirname, "../../migrations");
 
-async function runMigrations(pool: Pool): Promise<void> {
+async function runMigrations(pool: any): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       id BIGSERIAL PRIMARY KEY,
@@ -54,10 +55,8 @@ async function runMigrations(pool: Pool): Promise<void> {
   }
 }
 
-async function assertRequiredIndexes(pool: Pool): Promise<void> {
-  const { rows } = await pool.query<{
-    indexname: string;
-  }>(
+async function assertRequiredIndexes(pool: any): Promise<void> {
+  const { rows } = await pool.query(
     `
       SELECT indexname
       FROM pg_indexes
@@ -66,7 +65,7 @@ async function assertRequiredIndexes(pool: Pool): Promise<void> {
     `,
   );
 
-  const found = new Set(rows.map((row) => row.indexname));
+  const found = new Set(rows.map((row: { indexname: string }) => row.indexname));
   const required = [
     "deals_canonical_external_ref_v1_uidx",
     "listings_deal_id_idx",
@@ -84,10 +83,10 @@ async function assertRequiredIndexes(pool: Pool): Promise<void> {
   }
 }
 
-async function runPersistenceChecks(pool: Pool): Promise<void> {
+async function runPersistenceChecks(pool: any): Promise<void> {
   const canonicalRef = `test-ref-${Date.now()}`;
 
-  const dealResult = await pool.query<{ id: string }>(
+  const dealResult = await pool.query(
     `
       INSERT INTO deals (canonical_external_ref_v1, status, payload)
       VALUES ($1, 'NEW', '{}'::jsonb)
@@ -101,7 +100,7 @@ async function runPersistenceChecks(pool: Pool): Promise<void> {
     throw new Error("Failed to create a deal row.");
   }
 
-  const listingResult = await pool.query<{ id: string }>(
+  const listingResult = await pool.query(
     `
       INSERT INTO listings (deal_id, status, payload)
       VALUES ($1, 'ACTIVE', '{}'::jsonb)
@@ -123,7 +122,7 @@ async function runPersistenceChecks(pool: Pool): Promise<void> {
     [listingId],
   );
 
-  const outboxResult = await pool.query<{ id: string }>(
+  const outboxResult = await pool.query(
     `
       INSERT INTO outbox_items (aggregate_type, aggregate_id, event_type, payload)
       VALUES ('deal', $1, 'deal.created', '{}'::jsonb)
@@ -147,9 +146,9 @@ async function runPersistenceChecks(pool: Pool): Promise<void> {
     [outboxId],
   );
 
-  const verificationPool = new Pool({ connectionString: databaseUrl });
+  const verificationPool = new (await import('pg')).Pool({ connectionString: databaseUrlStr });
   try {
-    const persistedCheck = await verificationPool.query<{ retry_count: number }>(
+    const persistedCheck = await verificationPool.query(
       "SELECT retry_count FROM outbox_items WHERE id = $1",
       [outboxId],
     );
@@ -169,7 +168,9 @@ async function runPersistenceChecks(pool: Pool): Promise<void> {
 }
 
 async function main() {
-  const pool = new Pool({ connectionString: databaseUrl });
+  const mod = await import('pg');
+  const Pool = (mod as any).Pool as new (opts: { connectionString: string }) => any;
+  const pool = new Pool({ connectionString: databaseUrlStr });
 
   try {
     console.log("Running migrations...");

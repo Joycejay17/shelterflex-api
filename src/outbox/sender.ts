@@ -93,6 +93,9 @@ export class OutboxSender {
         tokenAddress: process.env.USDC_TOKEN_ADDRESS || '0x0000000000000000000000000000000000000000',
         dealId: 'staking-transaction',
         externalRefHash,
+        amountNgn: payload.amountNgn != null ? Number(payload.amountNgn) : undefined,
+        fxRate: payload.fxRateNgnPerUsdc != null ? Number(payload.fxRateNgnPerUsdc) : undefined,
+        fxProvider: payload.fxProvider ? String(payload.fxProvider) : undefined,
       })
 
       logger.debug('Staking transaction recorded on-chain', {

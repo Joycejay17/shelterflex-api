@@ -7,6 +7,8 @@ import { ErrorCode } from '../errors/errorCodes.js'
 import { validate } from '../middleware/validate.js'
 import { depositStore } from '../models/depositStore.js'
 import { depositInitiateSchema, type DepositInitiateRequest } from '../schemas/deposit.js'
+import { stakeFromDepositSchema, type StakeFromDepositRequest } from '../schemas/stakeFromDeposit.js'
+import { conversionStore } from '../models/conversionStore.js'
 import {
   stakeSchema,
   unstakeSchema,
@@ -72,6 +74,82 @@ export function createStakingRouter(adapter: SorobanAdapter) {
           externalRef,
           ...(redirectUrl ? { redirectUrl } : {}),
           ...(bankDetails ? { bankDetails } : {}),
+        })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  /**
+   * POST /api/staking/stake_from_deposit
+   *
+   * Stakes using the canonical USDC amount produced by a prior deposit conversion.
+   * Idempotent by depositId (conversion is unique per deposit).
+   */
+  router.post(
+    '/stake_from_deposit',
+    validate(stakeFromDepositSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { conversionId } = req.body as StakeFromDepositRequest
+
+        const conversion = await conversionStore.getByConversionId(conversionId)
+        if (!conversion) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, 'Conversion not found')
+        }
+        if (conversion.status !== 'completed') {
+          throw new AppError(ErrorCode.CONFLICT, 409, 'Conversion not completed')
+        }
+
+        const deposit = await depositStore.getById(conversion.depositId)
+        if (!deposit) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, 'Deposit not found')
+        }
+
+        // Mark deposit consumed (idempotent)
+        await depositStore.markConsumed(deposit.depositId)
+
+        // Create outbox item idempotent by depositId
+        const outboxItem = await outboxStore.create({
+          txType: TxType.STAKE,
+          source: 'deposit',
+          ref: deposit.depositId,
+          payload: {
+            txType: TxType.STAKE,
+            amountUsdc: conversion.amountUsdc,
+
+            // Include FX metadata so the on-chain receipt can carry NGN fields deterministically.
+            amountNgn: conversion.amountNgn,
+            fxRateNgnPerUsdc: conversion.fxRateNgnPerUsdc,
+            fxProvider: conversion.provider,
+
+            depositId: deposit.depositId,
+            conversionId: conversion.conversionId,
+            conversionProviderRef: conversion.providerRef,
+            userId: conversion.userId,
+          },
+        })
+
+        const sent = await sender.send(outboxItem)
+
+        const updatedItem = await outboxStore.getById(outboxItem.id)
+        if (!updatedItem) {
+          throw new AppError(
+            ErrorCode.INTERNAL_ERROR,
+            500,
+            'Failed to retrieve outbox item after send attempt',
+          )
+        }
+
+        res.status(sent ? 200 : 202).json({
+          success: true,
+          outboxId: updatedItem.id,
+          txId: updatedItem.txId,
+          status: updatedItem.status,
+          message: sent
+            ? 'Staking confirmed and receipt written to chain'
+            : 'Staking confirmed, receipt queued for retry',
         })
       } catch (error) {
         next(error)
