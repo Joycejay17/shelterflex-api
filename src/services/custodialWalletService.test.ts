@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import request from 'supertest'
 import express from 'express'
 import { createPaymentsRouter } from '../routes/payments.js'
@@ -10,6 +10,7 @@ import {
   type Decryptor,
 } from './custodialWalletService.js'
 import { TxType } from '../outbox/types.js'
+import { type EncryptedKeyEnvelope } from '../utils/encryption.js'
 
 class MockStore implements KeyStore {
   constructor(private records: Map<string, { plain: Buffer; address: string }>) {}
@@ -18,7 +19,17 @@ class MockStore implements KeyStore {
     if (!r) throw new Error('missing user')
     const iv = Buffer.alloc(16, 1)
     const cipherText = Buffer.concat([iv, r.plain])
-    return { cipherText, keyId: `kid-${userId}` }
+    return {
+      envelope: {
+        version: 'v1',
+        algo: 'aes-256-gcm',
+        iv: iv.toString('base64'),
+        ciphertext: cipherText.toString('base64'),
+        tag: Buffer.alloc(16).toString('base64'),
+      },
+      keyVersion: `kid-${userId}`,
+      publicAddress: r.address,
+    }
   }
   async getPublicAddress(userId: string): Promise<string> {
     const r = this.records.get(userId)
@@ -29,9 +40,10 @@ class MockStore implements KeyStore {
 
 class MockDecryptor implements Decryptor {
   calls = 0
-  async decrypt(input: Buffer): Promise<Buffer> {
+  async decrypt(envelope: EncryptedKeyEnvelope): Promise<Buffer> {
     this.calls++
-    return input.subarray(16)
+    if (!envelope?.ciphertext) return Buffer.alloc(0)
+    return Buffer.from(envelope.ciphertext, 'base64').subarray(16)
   }
 }
 

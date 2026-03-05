@@ -9,6 +9,7 @@
 
 import { OutboxStatus, TxType, type OutboxItem } from '../outbox/types.js'
 import type { DealWithSchedule } from '../models/deal.js'
+import { parseCanonicalString } from '../outbox/canonicalization.js'
 
 export interface DealProgress {
   /** Total USDC paid across all on-chain TENANT_REPAYMENT receipts */
@@ -67,11 +68,18 @@ export function computeDealProgress(
   if (lastReceipt) {
     lastPaymentTxId = lastReceipt.txId
 
-    // canonicalExternalRefV1 format: "{source}:{ref}"
-    const separatorIndex = lastReceipt.canonicalExternalRefV1.indexOf(':')
-    if (separatorIndex !== -1) {
-      lastPaymentExternalRefSource = lastReceipt.canonicalExternalRefV1.slice(0, separatorIndex)
-      lastPaymentExternalRef = lastReceipt.canonicalExternalRefV1.slice(separatorIndex + 1)
+    // Parse canonicalExternalRefV1 format: "v1|source=<source>|ref=<ref>"
+    try {
+      const parsed = parseCanonicalString(lastReceipt.canonicalExternalRefV1)
+      lastPaymentExternalRefSource = parsed.source
+      lastPaymentExternalRef = parsed.ref
+    } catch {
+      // Fallback for old format or parsing errors
+      const separatorIndex = lastReceipt.canonicalExternalRefV1.indexOf(':')
+      if (separatorIndex !== -1) {
+        lastPaymentExternalRefSource = lastReceipt.canonicalExternalRefV1.slice(0, separatorIndex)
+        lastPaymentExternalRef = lastReceipt.canonicalExternalRefV1.slice(separatorIndex + 1)
+      }
     }
   }
 
