@@ -5,6 +5,8 @@ import { logger } from '../utils/logger.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { validate } from '../middleware/validate.js'
+import { depositStore } from '../models/depositStore.js'
+import { depositInitiateSchema, type DepositInitiateRequest } from '../schemas/deposit.js'
 import {
   stakeSchema,
   unstakeSchema,
@@ -19,6 +21,63 @@ import {
 export function createStakingRouter(adapter: SorobanAdapter) {
   const router = Router()
   const sender = new OutboxSender(adapter)
+
+  router.post(
+    '/deposit/initiate',
+    validate(depositInitiateSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { quoteId, paymentRail, customerMeta } = req.body as DepositInitiateRequest
+        const userId = req.headers['x-user-id']
+        if (typeof userId !== 'string' || userId.length === 0) {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Missing x-user-id header')
+        }
+        const amountNgnHeader = req.headers['x-amount-ngn']
+        const amountNgn = typeof amountNgnHeader === 'string' ? Number(amountNgnHeader) : NaN
+        if (!Number.isFinite(amountNgn) || amountNgn <= 0) {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Invalid NGN amount')
+        }
+        const deposit = await depositStore.create({
+          quoteId,
+          userId,
+          paymentRail,
+          amountNgn,
+          customerMeta,
+        })
+        let externalRefSource: string | undefined
+        let externalRef: string | undefined
+        let redirectUrl: string | undefined
+        let bankDetails: Record<string, string> | undefined
+        if (paymentRail === 'psp') {
+          externalRefSource = 'psp'
+          externalRef = `pi_${deposit.depositId}`
+          redirectUrl = `https://pay.example.com/${externalRef}`
+        } else if (paymentRail === 'bank') {
+          externalRefSource = 'bank'
+          externalRef = `bnk_${deposit.depositId}`
+          bankDetails = { accountNumber: '1234567890', bankName: 'Example Bank' }
+        } else {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Unsupported payment rail')
+        }
+        await depositStore.attachExternalRef(deposit.depositId, externalRefSource, externalRef)
+        logger.info('Deposit initiated', {
+          depositId: deposit.depositId,
+          paymentRail,
+          requestId: req.requestId,
+        })
+        res.status(201).json({
+          success: true,
+          depositId: deposit.depositId,
+          externalRefSource,
+          externalRef,
+          ...(redirectUrl ? { redirectUrl } : {}),
+          ...(bankDetails ? { bankDetails } : {}),
+        })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
 
   /**
    * POST /api/staking/stake

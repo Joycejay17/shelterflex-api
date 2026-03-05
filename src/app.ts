@@ -18,6 +18,7 @@ import { createAdminRouter } from "./routes/admin.js"
 import { createDealsRouter } from "./routes/deals.js"
 import { createWhistleblowerRouter } from "./routes/whistleblower.js"
 import { createStakingRouter } from "./routes/staking.js"
+import { createWebhooksRouter } from "./routes/webhooks.js"
 import { EarningsServiceImpl } from "./services/earnings.js"
 import { createWalletRouter } from "./routes/wallet.js"
 import { WalletServiceImpl } from "./services/walletService.js"
@@ -96,6 +97,7 @@ export function createApp() {
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
   app.use('/api/staking', createStakingRouter(sorobanAdapter))
+  app.use('/api/webhooks', createWebhooksRouter())
 
 
 

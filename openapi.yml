@@ -1471,6 +1471,129 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/staking/deposit/initiate:
+    post:
+      summary: Initiate NGN deposit for staking
+      description: Creates a payment intent for NGN deposit. Returns PSP redirect URL or bank details.
+      operationId: initiateStakingDeposit
+      tags:
+        - Staking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - quoteId
+                - paymentRail
+              properties:
+                quoteId:
+                  type: string
+                paymentRail:
+                  type: string
+                  enum: [psp, bank]
+                customerMeta:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    phone:
+                      type: string
+      responses:
+        '201':
+          description: Deposit initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - depositId
+                  - externalRefSource
+                  - externalRef
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  depositId:
+                    type: string
+                    format: uuid
+                  externalRefSource:
+                    type: string
+                    example: psp
+                  externalRef:
+                    type: string
+                    example: pi_abc123
+                  redirectUrl:
+                    type: string
+                    format: uri
+                    nullable: true
+                  bankDetails:
+                    type: object
+                    nullable: true
+                    properties:
+                      accountNumber:
+                        type: string
+                      bankName:
+                        type: string
+        '400':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/webhooks/payments/{rail}:
+    post:
+      summary: Payments webhook
+      description: Ingest payment provider webhook. Idempotent by (rail, externalRef). Signature validation can be enabled.
+      operationId: paymentsWebhook
+      tags:
+        - Webhooks
+      parameters:
+        - name: rail
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [psp, bank]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - externalRefSource
+                - externalRef
+              properties:
+                externalRefSource:
+                  type: string
+                externalRef:
+                  type: string
+                status:
+                  type: string
+                  enum: [confirmed, failed]
+                  default: confirmed
+      responses:
+        '200':
+          description: Webhook processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '400':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
 components:
   schemas:
     User:

@@ -20,6 +20,8 @@ export const envSchema = z.object({
   CUSTODIAL_WALLET_MASTER_KEY_ACTIVE_VERSION: z.coerce.number().default(1),
   CUSTODIAL_MODE_ENABLED: z.coerce.boolean().default(true),
   CUSTODIAL_SIGNING_PAUSED: z.coerce.boolean().default(false),
+  WEBHOOK_SIGNATURE_ENABLED: z.coerce.boolean().default(false),
+  WEBHOOK_SECRET: z.string().optional(),
 }).refine((data) => {
   if (data.NODE_ENV !== 'development' && data.NODE_ENV !== 'test' && !data.USDC_TOKEN_ADDRESS) {
     return false
@@ -50,6 +52,13 @@ export const envSchema = z.object({
   }, {
     message: 'Custodial wallet master keys must be configured for active encryption version',
     path: ['CUSTODIAL_WALLET_MASTER_KEY_ACTIVE_VERSION'],
+  })
+  .refine((data) => {
+    if (!data.WEBHOOK_SIGNATURE_ENABLED) return true
+    return !!data.WEBHOOK_SECRET
+  }, {
+    message: 'WEBHOOK_SECRET is required when WEBHOOK_SIGNATURE_ENABLED is true',
+    path: ['WEBHOOK_SECRET'],
   })
 
 export type Env = z.infer<typeof envSchema>
