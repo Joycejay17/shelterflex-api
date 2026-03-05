@@ -126,6 +126,28 @@ describe('EnvironmentEncryptionService', () => {
     expect(cipherText).not.toEqual(originalData)
   })
 
+  it('should fail to decrypt when ciphertext is tampered with', async () => {
+    const originalData = Buffer.from('secret-key-data', 'utf8')
+    const keyId = encryptionService.getCurrentKeyId()
+
+    const { cipherText } = await encryptionService.encrypt(originalData, keyId)
+    const parsed = JSON.parse(cipherText.toString('utf8')) as {
+      version: number
+      iv: string
+      authTag: string
+      ciphertext: string
+    }
+
+    const ct = Buffer.from(parsed.ciphertext, 'base64')
+    ct[0] = ct[0] ^ 0x01
+    parsed.ciphertext = ct.toString('base64')
+    const tampered = Buffer.from(JSON.stringify(parsed), 'utf8')
+
+    await expect(encryptionService.decrypt(tampered, keyId)).rejects.toThrow(
+      'Decryption failed: authentication tag verification failed'
+    )
+  })
+
   it('should throw error with short encryption key', () => {
     expect(() => new EnvironmentEncryptionService('short')).toThrow('Encryption key must be at least 32 characters')
   })
