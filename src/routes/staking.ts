@@ -6,6 +6,7 @@ import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { validate } from '../middleware/validate.js'
 import { stakeFromDepositSchema, type StakeFromDepositRequest } from '../schemas/stakeFromDeposit.js'
+import { stakeFinalizeSchema, type StakeFinalizeRequest } from '../schemas/stakeFinalize.js'
 import { conversionStore } from '../models/conversionStore.js'
 import { depositStore } from '../models/depositStore.js'
 import {
@@ -22,6 +23,75 @@ import {
 export function createStakingRouter(adapter: SorobanAdapter) {
   const router = Router()
   const sender = new OutboxSender(adapter)
+
+  /**
+   * POST /api/staking/finalize
+   *
+   * Finalizes staking using the canonical USDC amount produced by a conversion.
+   * - If conversion not completed -> 409
+   * - Idempotent by conversionId
+   */
+  router.post(
+    '/finalize',
+    validate(stakeFinalizeSchema),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { conversionId } = req.body as StakeFinalizeRequest
+
+        const conversion = await conversionStore.getByConversionId(conversionId)
+        if (!conversion) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, 'Conversion not found')
+        }
+        if (conversion.status !== 'completed') {
+          throw new AppError(ErrorCode.CONFLICT, 409, 'Conversion not completed')
+        }
+
+        // Create outbox item idempotent by conversionId
+        const outboxItem = await outboxStore.create({
+          txType: TxType.STAKE,
+          source: 'conversion',
+          ref: conversion.conversionId,
+          payload: {
+            txType: TxType.STAKE,
+            amountUsdc: conversion.amountUsdc,
+
+            // Include FX metadata so receipt is deterministic.
+            amountNgn: conversion.amountNgn,
+            fxRateNgnPerUsdc: conversion.fxRateNgnPerUsdc,
+            fxProvider: conversion.provider,
+
+            conversionId: conversion.conversionId,
+            depositId: conversion.depositId,
+            conversionProviderRef: conversion.providerRef,
+            userId: conversion.userId,
+          },
+        })
+
+        const sent = await sender.send(outboxItem)
+
+        const updatedItem = await outboxStore.getById(outboxItem.id)
+        if (!updatedItem) {
+          throw new AppError(
+            ErrorCode.INTERNAL_ERROR,
+            500,
+            'Failed to retrieve outbox item after send attempt',
+          )
+        }
+
+        res.status(sent ? 200 : 202).json({
+          success: true,
+          outboxId: updatedItem.id,
+          txId: updatedItem.txId,
+          status: updatedItem.status,
+          message: sent
+            ? 'Staking finalized and receipt written to chain'
+            : 'Staking finalized, receipt queued for retry',
+        })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
 
   /**
    * POST /api/staking/stake_from_deposit
