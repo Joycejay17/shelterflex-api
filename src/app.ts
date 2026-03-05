@@ -23,7 +23,9 @@ import { EarningsServiceImpl } from "./services/earnings.js"
 import { StubConversionProvider } from "./services/conversionProvider.js"
 import { ConversionService } from "./services/conversionService.js"
 import { createWalletRouter } from "./routes/wallet.js"
+import { createNgnWalletRouter } from "./routes/ngnWallet.js"
 import { WalletServiceImpl } from "./services/walletService.js"
+import { NgnWalletService } from "./services/ngnWalletService.js"
 import { EnvironmentEncryptionService } from "./services/walletService.js"
 import { InMemoryWalletStore } from "./models/walletStore.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
@@ -58,6 +60,7 @@ export function createApp() {
   const walletStore = new InMemoryWalletStore()
   const encryptionService = new EnvironmentEncryptionService(env.ENCRYPTION_KEY)
   const walletService = new WalletServiceImpl(walletStore, encryptionService)
+  const ngnWalletService = new NgnWalletService()
 
   const rewardsDataLayer = new StubRewardsDataLayer()
   const earningsService = new EarningsServiceImpl(rewardsDataLayer, {
@@ -101,6 +104,7 @@ export function createApp() {
   app.use('/api', createBalanceRouter(sorobanAdapter))
   app.use('/api', createReceiptsRouter(receiptRepo))
   app.use('/api/wallet', createWalletRateLimiter(env), createWalletRouter(walletService))
+  app.use('/api/wallet/ngn', createNgnWalletRouter(ngnWalletService))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter))
   app.use('/api/deals', createDealsRouter())
