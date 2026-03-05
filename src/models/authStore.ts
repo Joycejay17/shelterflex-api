@@ -8,6 +8,7 @@ export interface User {
   createdAt: Date
   name: string
   role: UserRole
+  walletAddress?: string
 }
 
 export interface OtpChallenge {
@@ -24,8 +25,16 @@ export interface Session {
   createdAt: Date
 }
 
+export interface WalletChallenge {
+  address: string
+  message: string
+  nonce: string
+  expiresAt: Date
+  attempts: number
+}
+
 class UserStore {
-  private usersByEmail: Map<string, User> = new Map()
+  private readonly usersByEmail: Map<string, User> = new Map()
 
   getByEmail(email: string): User | undefined {
     return this.usersByEmail.get(email)
@@ -48,13 +57,29 @@ class UserStore {
     return user
   }
 
+  getByWalletAddress(address: string): User | undefined {
+    for (const user of this.usersByEmail.values()) {
+      if (user.walletAddress === address.toLowerCase()) {
+        return user
+      }
+    }
+    return undefined
+  }
+
+  linkWalletToUser(email: string, walletAddress: string): User {
+    const user = this.getOrCreateByEmail(email)
+    user.walletAddress = walletAddress.toLowerCase()
+    this.usersByEmail.set(email, user)
+    return user
+  }
+
   clear(): void {
     this.usersByEmail.clear()
   }
 }
 
 class OtpChallengeStore {
-  private challengesByEmail: Map<string, OtpChallenge> = new Map()
+  private readonly challengesByEmail: Map<string, OtpChallenge> = new Map()
 
   set(challenge: OtpChallenge): void {
     this.challengesByEmail.set(challenge.email, challenge)
@@ -73,8 +98,28 @@ class OtpChallengeStore {
   }
 }
 
+class WalletChallengeStore {
+  private readonly challengesByAddress: Map<string, WalletChallenge> = new Map()
+
+  set(challenge: WalletChallenge): void {
+    this.challengesByAddress.set(challenge.address.toLowerCase(), challenge)
+  }
+
+  getByAddress(address: string): WalletChallenge | undefined {
+    return this.challengesByAddress.get(address.toLowerCase())
+  }
+
+  deleteByAddress(address: string): void {
+    this.challengesByAddress.delete(address.toLowerCase())
+  }
+
+  clear(): void {
+    this.challengesByAddress.clear()
+  }
+}
+
 class SessionStore {
-  private sessionsByToken: Map<string, Session> = new Map()
+  private readonly sessionsByToken: Map<string, Session> = new Map()
 
   create(email: string, token: string): Session {
     const session: Session = {
@@ -102,4 +147,5 @@ class SessionStore {
 
 export const userStore = new UserStore()
 export const otpChallengeStore = new OtpChallengeStore()
+export const walletChallengeStore = new WalletChallengeStore()
 export const sessionStore = new SessionStore()
