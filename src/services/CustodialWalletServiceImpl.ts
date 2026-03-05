@@ -1,4 +1,4 @@
-import { Keypair, Transaction } from "@stellar/stellar-sdk"
+import { Keypair, Transaction, xdr } from "@stellar/stellar-sdk"
 import { CustodialWalletService } from "./CustodialWalletService.js"
 
 /**
@@ -86,7 +86,8 @@ export class CustodialWalletServiceImpl implements CustodialWalletService {
 
       // Parse the transaction XDR
       // Transaction.fromXDR handles both regular and Soroban transactions
-      const transaction = Transaction.fromXDR(transactionXdr, this.networkPassphrase)
+      // Using type assertion because TypeScript types may not be fully up to date
+      const transaction = (Transaction as any).fromXDR(transactionXdr, this.networkPassphrase) as Transaction
 
       // Sign the transaction
       transaction.sign(keypair)
