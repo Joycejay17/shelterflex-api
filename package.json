@@ -14,7 +14,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^12.3.0",
+    "@stellar/stellar-sdk": "^14.6.1",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.19.2",
@@ -33,6 +33,7 @@
     "@types/supertest": "^7.2.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "@vitest/ui": "^4.0.18",
     "eslint": "^9.39.2",
     "fast-check": "^4.5.3",
     "supertest": "^7.2.2",
