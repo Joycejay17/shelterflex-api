@@ -1,10 +1,21 @@
 import { randomUUID } from 'node:crypto'
-import { Deposit, DepositStatus, CreateDepositInput } from './deposit.js'
+import {
+  Deposit,
+  DepositStatus,
+  CreateDepositInput,
+  type DepositRecord,
+  type ConfirmDepositRecordInput,
+} from './deposit.js'
 
 class DepositStore {
-  private byId = new Map<string, Deposit>()
+  // Initiation (pending deposits tracked by external refs)
+  private initiationsById = new Map<string, Deposit>()
   private byCanonicalRef = new Map<string, string>()
 
+  // Confirmed deposits (idempotent by depositId)
+  private deposits = new Map<string, DepositRecord>()
+
+  // Initiation flow
   async create(input: CreateDepositInput): Promise<Deposit> {
     const now = new Date()
     const deposit: Deposit = {
@@ -18,7 +29,7 @@ class DepositStore {
       createdAt: now,
       updatedAt: now,
     }
-    this.byId.set(deposit.depositId, deposit)
+    this.initiationsById.set(deposit.depositId, deposit)
     return deposit
   }
 
@@ -27,25 +38,21 @@ class DepositStore {
     externalRefSource: string,
     externalRef: string,
   ): Promise<Deposit | null> {
-    const deposit = this.byId.get(depositId)
+    const deposit = this.initiationsById.get(depositId)
     if (!deposit) return null
     deposit.externalRefSource = externalRefSource
     deposit.externalRef = externalRef
     deposit.updatedAt = new Date()
     const canonical = `${externalRefSource}:${externalRef}`
     this.byCanonicalRef.set(canonical, depositId)
-    this.byId.set(depositId, deposit)
+    this.initiationsById.set(depositId, deposit)
     return deposit
-  }
-
-  async getById(depositId: string): Promise<Deposit | null> {
-    return this.byId.get(depositId) ?? null
   }
 
   async getByCanonical(rail: string, externalRef: string): Promise<Deposit | null> {
     const id = this.byCanonicalRef.get(`${rail}:${externalRef}`)
     if (!id) return null
-    return this.byId.get(id) ?? null
+    return this.initiationsById.get(id) ?? null
   }
 
   async confirmByCanonical(rail: string, externalRef: string): Promise<Deposit | null> {
@@ -55,32 +62,21 @@ class DepositStore {
     deposit.status = DepositStatus.CONFIRMED
     deposit.confirmedAt = new Date()
     deposit.updatedAt = new Date()
-    this.byId.set(deposit.depositId, deposit)
+    this.initiationsById.set(deposit.depositId, deposit)
     return deposit
   }
 
   async fail(depositId: string): Promise<Deposit | null> {
-    const deposit = this.byId.get(depositId)
+    const deposit = this.initiationsById.get(depositId)
     if (!deposit) return null
     deposit.status = DepositStatus.FAILED
     deposit.updatedAt = new Date()
-    this.byId.set(depositId, deposit)
+    this.initiationsById.set(depositId, deposit)
     return deposit
   }
 
-  async clear(): Promise<void> {
-    this.byId.clear()
-    this.byCanonicalRef.clear()
-import { ConfirmDepositInput, type DepositRecord } from './deposit.js'
-
-/**
- * In-memory store for confirmed deposits.
- * Keyed by depositId (idempotent confirmation).
- */
-class DepositStore {
-  private deposits = new Map<string, DepositRecord>()
-
-  async confirm(input: ConfirmDepositInput): Promise<DepositRecord> {
+  // Confirmed deposit flow
+  async confirm(input: ConfirmDepositRecordInput): Promise<DepositRecord> {
     const existing = this.deposits.get(input.depositId)
     if (existing) {
       return existing
@@ -110,11 +106,9 @@ class DepositStore {
   async markConsumed(depositId: string): Promise<DepositRecord | null> {
     const dep = this.deposits.get(depositId)
     if (!dep) return null
-
     if (dep.status === 'consumed') {
       return dep
     }
-
     const now = new Date()
     const updated: DepositRecord = {
       ...dep,
@@ -122,12 +116,13 @@ class DepositStore {
       consumedAt: now,
       updatedAt: now,
     }
-
     this.deposits.set(depositId, updated)
     return updated
   }
 
   async clear(): Promise<void> {
+    this.initiationsById.clear()
+    this.byCanonicalRef.clear()
     this.deposits.clear()
   }
 }

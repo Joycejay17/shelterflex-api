@@ -32,11 +32,7 @@ export interface CreateDepositInput {
   customerMeta?: CustomerMeta
 }
 
-export interface ConfirmDepositInput {
-  rail: string
-  externalRefSource: string
-  externalRef: string
-export type DepositStatus = 'confirmed' | 'consumed'
+export type DepositRecordStatus = 'confirmed' | 'consumed'
 
 export type DepositProvider = 'onramp' | 'offramp' | 'manual_admin'
 
@@ -46,13 +42,13 @@ export interface DepositRecord {
   amountNgn: number
   provider: DepositProvider
   providerRef: string
-  status: DepositStatus
+  status: DepositRecordStatus
   createdAt: Date
   updatedAt: Date
   consumedAt: Date | null
 }
 
-export interface ConfirmDepositInput {
+export interface ConfirmDepositRecordInput {
   depositId: string
   userId: string
   amountNgn: number
