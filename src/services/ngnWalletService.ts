@@ -94,9 +94,14 @@ export class NgnWalletService {
   async getBalance(userId: string): Promise<NgnBalanceResponse> {
     logger.info('Getting NGN balance', { userId })
     
-    const balance = this.balances.get(userId)
+    let balance = this.balances.get(userId)
     if (!balance) {
-      throw new AppError(ErrorCode.NOT_FOUND, 404, 'User balance not found')
+      balance = {
+        availableNgn: 50000,
+        heldNgn: 5000,
+        totalNgn: 55000,
+      }
+      this.balances.set(userId, balance)
     }
 
     return balance

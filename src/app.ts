@@ -70,7 +70,7 @@ export function createApp() {
     usdcToNgnRate: 1600, // Example exchange rate: 1 USDC = 1600 NGN
   })
 
-  const conversionProvider = new StubConversionProvider(1600)
+  const conversionProvider = new StubConversionProvider(env.FX_RATE_NGN_PER_USDC)
   const conversionService = new ConversionService(conversionProvider, 'onramp')
 
   // Indexer

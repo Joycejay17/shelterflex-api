@@ -14,6 +14,8 @@ import { stakeFromDepositSchema, type StakeFromDepositRequest } from '../schemas
 import { stakeFinalizeSchema, type StakeFinalizeRequest } from '../schemas/stakeFinalize.js'
 import { conversionStore } from '../models/conversionStore.js'
 import { WalletService } from '../services/walletService.js'
+import { stakingQuoteSchema, type StakingQuoteRequest } from '../schemas/stakingQuote.js'
+import { quoteStore } from '../models/quoteStore.js'
 import {
   stakeSchema,
   unstakeSchema,
@@ -42,6 +44,47 @@ export function createStakingRouter(
   const sender = new OutboxSender(adapter)
 
   router.post(
+    '/quote',
+    authenticateToken,
+    validate(stakingQuoteSchema),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const { amountNgn, paymentRail } = req.body as StakingQuoteRequest
+        const userId = req.user?.id
+        if (!userId) {
+          throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication required')
+        }
+        if (amountNgn <= 0) {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'amountNgn must be positive')
+        }
+        if (amountNgn > env.QUOTE_MAX_AMOUNT_NGN) {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Quote amount exceeds maximum')
+        }
+        const quote = await quoteStore.create({
+          userId,
+          amountNgn,
+          paymentRail,
+          fxRateNgnPerUsdc: env.FX_RATE_NGN_PER_USDC,
+          feePercent: env.QUOTE_FEE_PERCENT,
+          slippagePercent: env.QUOTE_SLIPPAGE_PERCENT,
+          expiryMs: env.QUOTE_EXPIRY_MS,
+        })
+        res.status(201).json({
+          quoteId: quote.quoteId,
+          amountNgn: quote.amountNgn,
+          estimatedAmountUsdc: quote.estimatedAmountUsdc,
+          fxRateNgnPerUsdc: quote.fxRateNgnPerUsdc,
+          feesNgn: quote.feesNgn,
+          expiresAt: quote.expiresAt.toISOString(),
+          disclaimer: 'Final USDC may differ slightly due to FX movements',
+        })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  router.post(
     '/deposit/initiate',
     validate(depositInitiateSchema),
     async (req: Request, res: Response, next: NextFunction) => {
@@ -56,6 +99,39 @@ export function createStakingRouter(
         if (!Number.isFinite(amountNgn) || amountNgn <= 0) {
           throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Invalid NGN amount')
         }
+        const originalRail = paymentRail
+        const internalRail =
+          originalRail === 'bank_transfer'
+            ? 'bank'
+            : originalRail === 'paystack' ||
+              originalRail === 'flutterwave' ||
+              originalRail === 'manual_admin'
+            ? 'psp'
+            : originalRail
+        if (originalRail !== 'psp' && originalRail !== 'bank') {
+          const quote = await quoteStore.getById(quoteId)
+          if (!quote) {
+            throw new AppError(ErrorCode.NOT_FOUND, 404, 'Quote not found')
+          }
+          if (quote.userId !== userId) {
+            throw new AppError(ErrorCode.FORBIDDEN, 403, 'Quote does not belong to user')
+          }
+          const now = Date.now()
+          if (quote.status !== 'active') {
+            throw new AppError(ErrorCode.CONFLICT, 409, 'Quote cannot be used')
+          }
+          if (quote.expiresAt.getTime() <= now) {
+            await quoteStore.markExpired(quote.quoteId)
+            throw new AppError(ErrorCode.CONFLICT, 409, 'Quote expired')
+          }
+          if (quote.amountNgn !== amountNgn) {
+            throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Amount mismatch with quote')
+          }
+          if (quote.paymentRail !== originalRail) {
+            throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Payment rail mismatch with quote')
+          }
+          await quoteStore.markUsed(quote.quoteId)
+        }
         const deposit = await depositStore.create({
           quoteId,
           userId,
@@ -67,11 +143,11 @@ export function createStakingRouter(
         let externalRef: string | undefined
         let redirectUrl: string | undefined
         let bankDetails: Record<string, string> | undefined
-        if (paymentRail === 'psp') {
+        if (internalRail === 'psp') {
           externalRefSource = 'psp'
           externalRef = `pi_${deposit.depositId}`
           redirectUrl = `https://pay.example.com/${externalRef}`
-        } else if (paymentRail === 'bank') {
+        } else if (internalRail === 'bank') {
           externalRefSource = 'bank'
           externalRef = `bnk_${deposit.depositId}`
           bankDetails = { accountNumber: '1234567890', bankName: 'Example Bank' }
