@@ -939,6 +939,71 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/staking/quote:
+    post:
+      summary: Create NGN→USDC staking quote
+      description: Returns a priced conversion from NGN to USDC including fees and expiry.
+      operationId: createStakingQuote
+      tags:
+        - Staking
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - amountNgn
+                - paymentRail
+              properties:
+                amountNgn:
+                  type: number
+                  minimum: 1
+                paymentRail:
+                  type: string
+                  enum: [paystack, flutterwave, bank_transfer, manual_admin]
+      responses:
+        '201':
+          description: Quote created
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - quoteId
+                  - amountNgn
+                  - estimatedAmountUsdc
+                  - fxRateNgnPerUsdc
+                  - feesNgn
+                  - expiresAt
+                properties:
+                  quoteId:
+                    type: string
+                    format: uuid
+                  amountNgn:
+                    type: number
+                  estimatedAmountUsdc:
+                    type: string
+                    description: USDC amount with up to 6 decimals
+                  fxRateNgnPerUsdc:
+                    type: number
+                  feesNgn:
+                    type: number
+                  expiresAt:
+                    type: string
+                    format: date-time
+                  disclaimer:
+                    type: string
+                    example: Final USDC may differ slightly due to FX movements
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
   /api/admin/rewards/{rewardId}/mark-paid:
     post:
       summary: Mark reward as paid

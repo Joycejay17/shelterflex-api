@@ -12,6 +12,7 @@ export const withdrawalRequestSchema = z.object({
 })
 
 export const withdrawalResponseSchema = z.object({
+  success: z.boolean().optional(),
   id: z.string(),
   amountNgn: z.number(),
   status: z.enum(['pending', 'approved', 'rejected', 'confirmed', 'failed']),
@@ -23,11 +24,13 @@ export const withdrawalResponseSchema = z.object({
 })
 
 export const withdrawalHistoryResponseSchema = z.object({
+  success: z.boolean().optional(),
   entries: z.array(withdrawalResponseSchema),
   nextCursor: z.string().nullable(),
 })
 
 export const ngnBalanceResponseSchema = z.object({
+  success: z.boolean().optional(),
   availableNgn: z.number(),
   heldNgn: z.number(),
   totalNgn: z.number(),
@@ -43,6 +46,7 @@ export const ngnLedgerEntrySchema = z.object({
 })
 
 export const ngnLedgerResponseSchema = z.object({
+  success: z.boolean().optional(),
   entries: z.array(ngnLedgerEntrySchema),
   nextCursor: z.string().nullable(),
 })

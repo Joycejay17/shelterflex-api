@@ -36,7 +36,11 @@ export function createNgnWalletRouter(ngnWalletService: NgnWalletService): Route
       logger.info('NGN balance retrieved', { userId, balance, requestId: req.requestId })
       res.json(ngnBalanceResponseSchema.parse(response))
     } catch (error) {
-      next(error)
+      if (error instanceof AppError) {
+        res.status(error.status).json({ error: { code: error.code, message: error.message } })
+      } else {
+        next(error)
+      }
     }
   })
 
@@ -62,7 +66,11 @@ export function createNgnWalletRouter(ngnWalletService: NgnWalletService): Route
       logger.info('NGN ledger retrieved', { userId, entriesCount: ledger.entries.length, requestId: req.requestId })
       res.json(ngnLedgerResponseSchema.parse(response))
     } catch (error) {
-      next(error)
+      if (error instanceof AppError) {
+        res.status(error.status).json({ error: { code: error.code, message: error.message } })
+      } else {
+        next(error)
+      }
     }
   })
 
@@ -91,7 +99,11 @@ export function createNgnWalletRouter(ngnWalletService: NgnWalletService): Route
         logger.info('Withdrawal initiated successfully', { userId, withdrawalId: withdrawal.id, requestId: req.requestId })
         res.status(201).json(withdrawalResponseSchema.parse(response))
       } catch (error) {
-        next(error)
+        if (error instanceof AppError) {
+          res.status(error.status).json({ error: { code: error.code, message: error.message } })
+        } else {
+          next(error)
+        }
       }
     }
   )
@@ -118,7 +130,11 @@ export function createNgnWalletRouter(ngnWalletService: NgnWalletService): Route
       logger.info('Withdrawal history retrieved', { userId, entriesCount: history.entries.length, requestId: req.requestId })
       res.json(withdrawalHistoryResponseSchema.parse(response))
     } catch (error) {
-      next(error)
+      if (error instanceof AppError) {
+        res.status(error.status).json({ error: { code: error.code, message: error.message } })
+      } else {
+        next(error)
+      }
     }
   })
 
