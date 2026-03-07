@@ -412,7 +412,7 @@ paths:
                     message: You have reached the maximum of 2 listings per month
         default:
           $ref: '#/components/responses/Error'
-    
+
     get:
       summary: List listings
       description: Get a paginated list of listings with optional filters
@@ -520,6 +520,79 @@ paths:
                 error:
                   code: NOT_FOUND
                   message: Listing with ID '550e8400-e29b-41d4-a716-446655440000' not found
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/wallet/ngn/topup/initiate:
+    post:
+      summary: Initiate NGN wallet top-up
+      description: Creates a payment intent for NGN wallet top-up. Returns PSP redirect URL or bank transfer details.
+      operationId: initiateNgnWalletTopup
+      tags:
+        - NGN Wallet
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+          description: Optional idempotency key for safe retries
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - amountNgn
+                - rail
+              properties:
+                amountNgn:
+                  type: number
+                  minimum: 100
+                  maximum: 5000000
+                rail:
+                  type: string
+                  enum: [paystack, flutterwave, bank_transfer, manual_admin]
+      responses:
+        '201':
+          description: Top-up initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - depositId
+                  - externalRefSource
+                  - externalRef
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  depositId:
+                    type: string
+                    format: uuid
+                  externalRefSource:
+                    type: string
+                    example: paystack
+                  externalRef:
+                    type: string
+                    example: pi_abc123
+                  redirectUrl:
+                    type: string
+                    nullable: true
+                  bankDetails:
+                    type: object
+                    nullable: true
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
         default:
           $ref: '#/components/responses/Error'
 
@@ -1557,7 +1630,7 @@ paths:
                   type: string
                 paymentRail:
                   type: string
-                  enum: [psp, bank]
+                  enum: [paystack, flutterwave, manual_admin, bank]
                 customerMeta:
                   type: object
                   properties:
@@ -1620,7 +1693,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [psp, bank]
+            enum: [paystack, flutterwave, manual_admin, bank]
       requestBody:
         required: true
         content:

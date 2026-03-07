@@ -15,7 +15,7 @@ export class StubPspProvider implements PaymentProvider {
   readonly name = 'psp'
 
   async initiatePayment(input: InitiatePaymentInput): Promise<InitiatePaymentResult> {
-    const externalRefSource = 'psp'
+    const externalRefSource = input.rail
     const externalRef = `pi_${input.internalRef}`
     const redirectUrl = `https://pay.example.com/${externalRef}`
 
