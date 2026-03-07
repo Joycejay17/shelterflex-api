@@ -14,13 +14,23 @@ export class OutboxSender {
    * Returns true if successful, false otherwise
    */
   async send(item: OutboxItem): Promise<boolean> {
+    const MAX_RETRY_COUNT = 10;
     try {
       logger.info('Attempting to send outbox item', {
-        id: item.id,
+        outboxId: item.id,
         txType: item.txType,
         txId: item.txId,
-        attempt: item.attempts + 1,
+        retryCount: item.retryCount,
       })
+
+      if (item.retryCount >= MAX_RETRY_COUNT) {
+        logger.warn('Max retry count reached, not retrying', {
+          outboxId: item.id,
+          txId: item.txId,
+          retryCount: item.retryCount,
+        })
+        return false;
+      }
 
       // Route to appropriate handler based on tx type
       switch (item.txType) {
@@ -38,26 +48,39 @@ export class OutboxSender {
       }
 
       // Mark as sent
+      item.processedAt = new Date();
+      item.retryCount = item.retryCount || 0;
+      item.nextRetryAt = null;
       await outboxStore.updateStatus(item.id, OutboxStatus.SENT)
 
       logger.info('Successfully sent outbox item', {
-        id: item.id,
+        outboxId: item.id,
         txId: item.txId,
+        retryCount: item.retryCount,
       })
 
       return true
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      
+      item.retryCount = (item.retryCount || 0) + 1;
+      // Exponential backoff: 2^retryCount * 1000ms, capped at 1 hour
+      const backoffMs = Math.min(Math.pow(2, item.retryCount) * 1000, 60 * 60 * 1000);
+      item.nextRetryAt = new Date(Date.now() + backoffMs);
+      item.processedAt = new Date();
+      item.lastError = errorMessage;
+
       logger.error('Failed to send outbox item', {
-        id: item.id,
+        outboxId: item.id,
         txId: item.txId,
-        attempt: item.attempts + 1,
-        error: errorMessage,
+        retryCount: item.retryCount,
+        lastError: item.lastError,
       })
 
       // Mark as failed
       await outboxStore.updateStatus(item.id, OutboxStatus.FAILED, errorMessage)
+
+      // Persist retry fields (in-memory only)
+      outboxStore.items.set(item.id, item)
 
       return false
     }
