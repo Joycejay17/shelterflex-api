@@ -114,6 +114,18 @@ describe('NGN Wallet Routes', () => {
     })
   })
 
+  describe('GET /api/wallet/ngn/withdrawals', () => {
+    it('should return withdrawals', async () => {
+      const response = await request(app)
+        .get('/api/wallet/ngn/withdrawals')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200)
+
+      expect(response.body.success).toBe(true)
+      expect(Array.isArray(response.body.entries)).toBe(true)
+    })
+  })
+
   describe('POST /api/wallet/ngn/topup/initiate', () => {
     it('should initiate topup successfully', async () => {
       const response = await request(app)
