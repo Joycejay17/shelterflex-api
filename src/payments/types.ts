@@ -32,6 +32,25 @@ export interface MapStatusInput {
   providerStatus?: string
 }
 
+export interface ExecutePayoutInput {
+  amountNgn: number
+  userId: string
+  internalRef: string
+  bankAccount: {
+    accountNumber: string
+    accountName: string
+    bankName: string
+  }
+  rail: string
+}
+
+export interface ExecutePayoutResult {
+  externalRefSource: string
+  externalRef: string
+  status: 'confirmed' | 'failed'
+  providerStatus?: string
+}
+
 export interface PaymentProvider {
   readonly name: string
 
@@ -45,4 +64,6 @@ export interface PaymentProvider {
   parseAndValidateWebhook(req: Request): Promise<ParseWebhookResult>
 
   mapStatus(input: MapStatusInput): InternalPaymentStatus
+
+  executePayout?(input: ExecutePayoutInput): Promise<ExecutePayoutResult>
 }

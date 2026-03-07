@@ -144,6 +144,32 @@ export function createNgnWalletRouter(ngnWalletService: NgnWalletService): Route
     }
   })
 
+  router.get('/withdrawals', authenticateToken, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.id
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined
+      const cursor = req.query.cursor as string | undefined
+
+      logger.info('Getting withdrawals', { userId, limit, cursor, requestId: req.requestId })
+
+      const history = await ngnWalletService.listWithdrawals(userId, { limit, cursor })
+
+      const response = {
+        success: true,
+        ...history,
+      }
+
+      logger.info('Withdrawals retrieved', { userId, entriesCount: history.entries.length, requestId: req.requestId })
+      res.json(withdrawalHistoryResponseSchema.parse(response))
+    } catch (error) {
+      if (error instanceof AppError) {
+        res.status(error.status).json({ error: { code: error.code, message: error.message } })
+      } else {
+        next(error)
+      }
+    }
+  })
+
   router.post(
     '/topup/initiate',
     authenticateToken,

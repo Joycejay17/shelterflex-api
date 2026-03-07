@@ -478,6 +478,134 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/wallet/ngn/withdraw/initiate:
+    post:
+      summary: Initiate NGN withdrawal
+      description: Initiates a withdrawal request and moves funds from available to held.
+      operationId: initiateNgnWithdrawal
+      tags:
+        - NGN Wallet
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawalRequest'
+      responses:
+        '201':
+          description: Withdrawal initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawalResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/wallet/ngn/withdrawals:
+    get:
+      summary: List NGN withdrawals
+      description: Returns the authenticated user's NGN withdrawal history.
+      operationId: listNgnWithdrawals
+      tags:
+        - NGN Wallet
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Withdrawal list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawalHistoryResponse'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/admin/withdrawals/{id}/approve:
+    post:
+      summary: Approve NGN withdrawal
+      description: Approves a pending withdrawal and executes provider payout. Idempotent if already approved/confirmed.
+      operationId: approveNgnWithdrawal
+      tags:
+        - Admin
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Withdrawal approved/confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawalResponse'
+        '409':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/admin/withdrawals/{id}/reject:
+    post:
+      summary: Reject NGN withdrawal
+      description: Rejects a pending withdrawal and releases held funds back to available. Idempotent if already rejected/failed.
+      operationId: rejectNgnWithdrawal
+      tags:
+        - Admin
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - reason
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Withdrawal rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawalResponse'
+        '409':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
   /api/whistleblower/listings/{id}:
     get:
       summary: Get listing by ID
@@ -1756,6 +1884,89 @@ components:
         role:
           type: string
           enum: [tenant, landlord, agent]
+
+    BankAccountDetails:
+      type: object
+      required:
+        - accountNumber
+        - accountName
+        - bankName
+      properties:
+        accountNumber:
+          type: string
+          minLength: 10
+          maxLength: 10
+        accountName:
+          type: string
+        bankName:
+          type: string
+
+    WithdrawalRequest:
+      type: object
+      required:
+        - amountNgn
+      properties:
+        amountNgn:
+          type: number
+          minimum: 100
+          maximum: 1000000
+        bankAccountRef:
+          type: string
+          description: Reference to a saved bank account
+        bankAccount:
+          $ref: '#/components/schemas/BankAccountDetails'
+
+    WithdrawalResponse:
+      type: object
+      required:
+        - success
+        - id
+        - amountNgn
+        - status
+        - bankAccount
+        - reference
+        - createdAt
+        - processedAt
+        - failureReason
+      properties:
+        success:
+          type: boolean
+        id:
+          type: string
+        amountNgn:
+          type: number
+        status:
+          type: string
+          enum: [pending, approved, rejected, confirmed, failed, reversed]
+        bankAccount:
+          $ref: '#/components/schemas/BankAccountDetails'
+        reference:
+          type: string
+        createdAt:
+          type: string
+        processedAt:
+          type: string
+          nullable: true
+        failureReason:
+          type: string
+          nullable: true
+
+    WithdrawalHistoryResponse:
+      type: object
+      required:
+        - success
+        - entries
+        - nextCursor
+      properties:
+        success:
+          type: boolean
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/WithdrawalResponse'
+        nextCursor:
+          type: string
+          nullable: true
 
     AdminListing:
       type: object

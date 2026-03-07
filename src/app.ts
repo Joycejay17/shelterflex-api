@@ -26,6 +26,7 @@ import { ConversionService } from "./services/conversionService.js"
 import { createWalletRouter } from "./routes/wallet.js"
 import { createNgnWalletRouter } from "./routes/ngnWallet.js"
 import { createAdminRiskRouter } from "./routes/adminRisk.js"
+import { createAdminWithdrawalsRouter } from "./routes/adminWithdrawals.js"
 import { WalletServiceImpl } from "./services/walletService.js"
 import { NgnWalletService } from "./services/ngnWalletService.js"
 import { EnvironmentEncryptionService } from "./services/walletService.js"
@@ -110,6 +111,7 @@ export function createApp() {
   app.use('/api/wallet', createWalletRateLimiter(env), createWalletRouter(walletService))
   app.use('/api/wallet/ngn', createNgnWalletRouter(ngnWalletService))
   app.use('/api/admin/risk', createAdminRiskRouter(ngnWalletService))
+  app.use('/api/admin', createAdminWithdrawalsRouter(ngnWalletService))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter))
   app.use('/api/deals', createDealsRouter())

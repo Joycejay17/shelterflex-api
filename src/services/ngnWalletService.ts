@@ -11,13 +11,16 @@ import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { userRiskStateStore } from '../models/userRiskStateStore.js'
 import { depositStore } from '../models/depositStore.js'
+import { getPaymentProvider } from '../payments/index.js'
 
 export class NgnWalletService {
   // In-memory storage for demo purposes
   // In production, this would be replaced with a proper database
   private withdrawals: WithdrawalResponse[] = []
+  private withdrawalUserIds: Map<string, string> = new Map()
   private ledger: NgnLedgerEntry[] = []
   private balances: Map<string, NgnBalanceResponse> = new Map()
+  private bankAccountsByRef: Map<string, { accountNumber: string; accountName: string; bankName: string }> = new Map()
   // Track credited deposits to prevent double-crediting (idempotency)
   private creditedDeposits = new Set<string>()
   // Track staking reservations by canonical ref (source:ref) for idempotency
@@ -95,6 +98,29 @@ export class NgnWalletService {
         failureReason: null
       }
     ]
+
+    // Demo bank account references
+    this.bankAccountsByRef.set('ba-demo-1', {
+      accountNumber: '1234567890',
+      accountName: 'John Doe',
+      bankName: 'Guaranty Trust Bank',
+    })
+  }
+
+  private resolveBankAccount(request: WithdrawalRequest): { accountNumber: string; accountName: string; bankName: string } {
+    if (request.bankAccount) {
+      return request.bankAccount
+    }
+
+    if (request.bankAccountRef) {
+      const bankAccount = this.bankAccountsByRef.get(request.bankAccountRef)
+      if (!bankAccount) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Unknown bankAccountRef')
+      }
+      return bankAccount
+    }
+
+    throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Either bankAccountRef or bankAccount is required')
   }
 
   async getBalance(userId: string): Promise<NgnBalanceResponse> {
@@ -318,7 +344,7 @@ export class NgnWalletService {
       id: `wd-${Date.now()}`,
       amountNgn: request.amountNgn,
       status: 'pending',
-      bankAccount: request.bankAccount,
+      bankAccount: this.resolveBankAccount(request),
       reference: `WD-${Date.now()}`,
       createdAt: new Date().toISOString(),
       processedAt: null,
@@ -335,6 +361,7 @@ export class NgnWalletService {
 
     // Add to withdrawals
     this.withdrawals.unshift(withdrawal)
+    this.withdrawalUserIds.set(withdrawal.id, userId)
 
     // Add to ledger
     const ledgerEntry: NgnLedgerEntry = {
@@ -354,6 +381,142 @@ export class NgnWalletService {
     })
 
     return withdrawal
+  }
+
+  async listWithdrawals(userId: string, options: { limit?: number; cursor?: string } = {}): Promise<WithdrawalHistoryResponse> {
+    return this.getWithdrawalHistory(userId, options)
+  }
+
+  private requireWithdrawalForAdminAction(withdrawalId: string): WithdrawalResponse {
+    const withdrawal = this.withdrawals.find((w) => w.id === withdrawalId)
+    if (!withdrawal) {
+      throw new AppError(ErrorCode.NOT_FOUND, 404, 'Withdrawal not found')
+    }
+    return withdrawal
+  }
+
+  private updateLedgerStatus(withdrawalId: string, status: WithdrawalResponse['status']): void {
+    const ledgerEntry = this.ledger.find((e) => e.id === withdrawalId && e.type === 'withdrawal')
+    if (ledgerEntry) {
+      ledgerEntry.status = status
+    }
+  }
+
+  async approveWithdrawal(withdrawalId: string): Promise<WithdrawalResponse> {
+    const withdrawal = this.requireWithdrawalForAdminAction(withdrawalId)
+
+    if (withdrawal.status === 'confirmed' || withdrawal.status === 'approved') {
+      return withdrawal
+    }
+    if (withdrawal.status === 'rejected' || withdrawal.status === 'failed') {
+      throw new AppError(ErrorCode.CONFLICT, 409, `Withdrawal cannot be approved. Current status: ${withdrawal.status}`)
+    }
+
+    withdrawal.status = 'approved'
+    withdrawal.processedAt = new Date().toISOString()
+    this.updateLedgerStatus(withdrawalId, 'approved')
+
+    const provider = getPaymentProvider('manual_admin')
+    if (!provider.executePayout) {
+      throw new AppError(ErrorCode.INTERNAL_ERROR, 500, 'Payout execution is not supported')
+    }
+
+    const payout = await provider.executePayout({
+      amountNgn: withdrawal.amountNgn,
+      userId: this.withdrawalUserIds.get(withdrawal.id) ?? 'unknown',
+      internalRef: withdrawal.id,
+      bankAccount: withdrawal.bankAccount,
+      rail: provider.name,
+    })
+
+    if (payout.status === 'confirmed') {
+      return this.confirmWithdrawal(withdrawalId)
+    }
+
+    return this.failWithdrawal(withdrawalId, payout.providerStatus ?? 'Provider payout failed')
+  }
+
+  async rejectWithdrawal(withdrawalId: string, reason: string): Promise<WithdrawalResponse> {
+    const withdrawal = this.requireWithdrawalForAdminAction(withdrawalId)
+
+    if (withdrawal.status === 'rejected' || withdrawal.status === 'failed') {
+      return withdrawal
+    }
+    if (withdrawal.status === 'confirmed') {
+      throw new AppError(ErrorCode.CONFLICT, 409, 'Withdrawal cannot be rejected after confirmation')
+    }
+
+    withdrawal.status = 'rejected'
+    withdrawal.processedAt = new Date().toISOString()
+    withdrawal.failureReason = reason
+    this.updateLedgerStatus(withdrawalId, 'rejected')
+
+    await this.releaseHeldFunds(withdrawalId, true)
+
+    return withdrawal
+  }
+
+  async confirmWithdrawal(withdrawalId: string): Promise<WithdrawalResponse> {
+    const withdrawal = this.requireWithdrawalForAdminAction(withdrawalId)
+
+    if (withdrawal.status === 'confirmed') {
+      return withdrawal
+    }
+    if (withdrawal.status === 'rejected' || withdrawal.status === 'failed') {
+      throw new AppError(ErrorCode.CONFLICT, 409, `Withdrawal cannot be confirmed. Current status: ${withdrawal.status}`)
+    }
+
+    withdrawal.status = 'confirmed'
+    withdrawal.processedAt = new Date().toISOString()
+    this.updateLedgerStatus(withdrawalId, 'confirmed')
+
+    await this.releaseHeldFunds(withdrawalId, false)
+
+    return withdrawal
+  }
+
+  async failWithdrawal(withdrawalId: string, reason: string): Promise<WithdrawalResponse> {
+    const withdrawal = this.requireWithdrawalForAdminAction(withdrawalId)
+
+    if (withdrawal.status === 'failed') {
+      return withdrawal
+    }
+    if (withdrawal.status === 'confirmed') {
+      throw new AppError(ErrorCode.CONFLICT, 409, 'Withdrawal cannot be failed after confirmation')
+    }
+
+    withdrawal.status = 'failed'
+    withdrawal.processedAt = new Date().toISOString()
+    withdrawal.failureReason = reason
+    this.updateLedgerStatus(withdrawalId, 'failed')
+
+    await this.releaseHeldFunds(withdrawalId, true)
+
+    return withdrawal
+  }
+
+  private async releaseHeldFunds(withdrawalId: string, restoreToAvailable: boolean): Promise<void> {
+    const withdrawal = this.requireWithdrawalForAdminAction(withdrawalId)
+    const userId = this.withdrawalUserIds.get(withdrawalId)
+    if (!userId) {
+      throw new AppError(ErrorCode.INTERNAL_ERROR, 500, 'Unable to resolve user for withdrawal')
+    }
+
+    const amount = withdrawal.amountNgn
+
+    const bal = await this.getBalance(userId)
+    if (bal.heldNgn < amount) {
+      throw new AppError(ErrorCode.CONFLICT, 409, 'Insufficient held balance for withdrawal')
+    }
+
+    const updated: NgnBalanceResponse = {
+      availableNgn: restoreToAvailable ? bal.availableNgn + amount : bal.availableNgn,
+      heldNgn: Math.max(0, bal.heldNgn - amount),
+      totalNgn: restoreToAvailable ? bal.totalNgn : bal.totalNgn - amount,
+    }
+
+    this.balances.set(userId, updated)
+    return
   }
 
   async getWithdrawalHistory(userId: string, options: { limit?: number; cursor?: string } = {}): Promise<WithdrawalHistoryResponse> {

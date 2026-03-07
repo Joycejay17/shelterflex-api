@@ -8,7 +8,16 @@ export const bankAccountDetailsSchema = z.object({
 
 export const withdrawalRequestSchema = z.object({
   amountNgn: z.number().min(100, 'Minimum withdrawal is 100 NGN').max(1000000, 'Maximum withdrawal is 1,000,000 NGN'),
-  bankAccount: bankAccountDetailsSchema,
+  bankAccountRef: z.string().min(1, 'Bank account reference is required').optional(),
+  bankAccount: bankAccountDetailsSchema.optional(),
+}).superRefine((val, ctx) => {
+  if (!val.bankAccountRef && !val.bankAccount) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Either bankAccountRef or bankAccount is required',
+      path: ['bankAccountRef'],
+    })
+  }
 })
 
 export const withdrawalResponseSchema = z.object({
