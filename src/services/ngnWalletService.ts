@@ -285,6 +285,18 @@ export class NgnWalletService {
     }
   }
 
+  async recordTopUpPending(depositId: string, amountNgn: number, reference: string): Promise<void> {
+    const entry: NgnLedgerEntry = {
+      id: depositId,
+      type: 'topup_pending',
+      amountNgn,
+      status: 'pending',
+      timestamp: new Date().toISOString(),
+      reference,
+    }
+    this.ledger.unshift(entry)
+  }
+
   async initiateWithdrawal(userId: string, request: WithdrawalRequest): Promise<WithdrawalResponse> {
     logger.info('Initiating withdrawal', { userId, amount: request.amountNgn })
 
