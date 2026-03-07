@@ -60,6 +60,9 @@ export enum ErrorCode {
   // Blockchain / Soroban
   SOROBAN_ERROR = "SOROBAN_ERROR",
 
+  // Payment providers / PSP
+  PAYMENT_PROVIDER_ERROR = "PAYMENT_PROVIDER_ERROR",
+
   // Infrastructure
   INTERNAL_ERROR = "INTERNAL_ERROR",
 

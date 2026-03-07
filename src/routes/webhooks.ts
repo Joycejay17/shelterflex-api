@@ -10,6 +10,8 @@ import { outboxStore, OutboxSender, TxType } from '../outbox/index.js'
 import { createSorobanAdapter } from '../soroban/index.js'
 import { getSorobanConfigFromEnv } from '../soroban/client.js'
 import { NgnWalletService } from '../services/ngnWalletService.js'
+import { getPaymentProvider } from '../payments/index.js'
+import { requireValidWebhookSignature } from '../payments/webhookSignature.js'
 
 export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
   const router = Router()
@@ -35,16 +37,10 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const rail = String(req.params.rail)
-        
-        // Validate webhook signature in production mode
-        if (process.env.WEBHOOK_SIGNATURE_ENABLED === 'true') {
-          const sig = req.headers['x-webhook-signature']
-          if (typeof sig !== 'string' || sig !== process.env.WEBHOOK_SECRET) {
-            throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid webhook signature')
-          }
-        }
 
-        const { externalRefSource, externalRef, status, providerStatus } = req.body
+        const provider = getPaymentProvider(rail)
+        const parsed = await provider.parseAndValidateWebhook(req)
+        const { externalRefSource, externalRef, rawStatus, providerStatus } = parsed
         
         // Validate rail matches externalRefSource
         if (externalRefSource !== rail) {
@@ -60,9 +56,7 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
         const { depositId, userId, amountNgn } = existing
         const reference = existing.externalRef || depositId
 
-        // Map provider status to internal status if provided
-        // This allows flexibility for different provider status codes
-        const internalStatus = mapProviderStatus(status, providerStatus)
+        const internalStatus = provider.mapStatus({ rawStatus, providerStatus })
 
         // Handle failed status
         if (internalStatus === 'failed') {
@@ -158,45 +152,6 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
   )
 
   /**
-   * Maps provider-specific status codes to internal status values.
-   * This allows different payment providers to use their own status codes
-   * while maintaining a consistent internal representation.
-   */
-  function mapProviderStatus(status: string, providerStatus?: string): 'confirmed' | 'failed' | 'reversed' {
-    // If status is already in our enum, use it directly
-    if (status === 'confirmed' || status === 'failed' || status === 'reversed') {
-      return status
-    }
-
-    // Map common provider status codes
-    const normalizedProviderStatus = providerStatus?.toLowerCase() || ''
-    
-    // Common reversal/chargeback indicators
-    if (
-      normalizedProviderStatus.includes('reversed') ||
-      normalizedProviderStatus.includes('chargeback') ||
-      normalizedProviderStatus.includes('refund') ||
-      normalizedProviderStatus.includes('dispute') ||
-      status.toLowerCase().includes('reversed')
-    ) {
-      return 'reversed'
-    }
-
-    // Common failure indicators
-    if (
-      normalizedProviderStatus.includes('failed') ||
-      normalizedProviderStatus.includes('declined') ||
-      normalizedProviderStatus.includes('error') ||
-      status.toLowerCase().includes('failed')
-    ) {
-      return 'failed'
-    }
-
-    // Default to confirmed for unknown statuses
-    return 'confirmed'
-  }
-
-  /**
    * POST /api/webhooks/reversals/:provider
    * Handle deposit reversal/chargeback webhooks
    * Idempotent based on (provider, providerRef, eventType)
@@ -207,14 +162,10 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const provider = String(req.params.provider)
-        
-        // Verify webhook signature if enabled
-        if (process.env.WEBHOOK_SIGNATURE_ENABLED === 'true') {
-          const sig = req.headers['x-webhook-signature']
-          if (typeof sig !== 'string' || sig !== process.env.WEBHOOK_SECRET) {
-            throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid webhook signature')
-          }
-        }
+
+        // Enforce webhook signature validation (always on in production)
+        // Reversal webhooks have a different payload shape, so we validate signature only.
+        requireValidWebhookSignature(req)
 
         const { provider: bodyProvider, providerRef, reversalRef, eventType } = req.body
         
