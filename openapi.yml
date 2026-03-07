@@ -1838,8 +1838,11 @@ paths:
                   type: string
                 status:
                   type: string
-                  enum: [confirmed, failed]
+                  enum: [confirmed, failed, reversed]
                   default: confirmed
+                providerStatus:
+                  type: string
+                  description: Provider-specific status code for mapping
       responses:
         '200':
           description: Webhook processed

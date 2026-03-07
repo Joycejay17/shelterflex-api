@@ -101,44 +101,29 @@ export function createStakingRouter(
         if (typeof userId !== 'string' || userId.length === 0) {
           throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Missing x-user-id header')
         }
-        const amountNgnHeader = req.headers['x-amount-ngn']
-        const amountNgn = typeof amountNgnHeader === 'string' ? Number(amountNgnHeader) : NaN
-        if (!Number.isFinite(amountNgn) || amountNgn <= 0) {
-          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Invalid NGN amount')
+
+        const quote = await quoteStore.getById(quoteId)
+        if (!quote) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, 'Quote not found')
         }
-        const originalRail = paymentRail
-        const internalRail =
-          originalRail === 'bank_transfer'
-            ? 'bank'
-            : originalRail === 'paystack' ||
-              originalRail === 'flutterwave' ||
-              originalRail === 'manual_admin'
-            ? 'psp'
-            : originalRail
-        if (originalRail !== 'psp' && originalRail !== 'bank') {
-          const quote = await quoteStore.getById(quoteId)
-          if (!quote) {
-            throw new AppError(ErrorCode.NOT_FOUND, 404, 'Quote not found')
-          }
-          if (quote.userId !== userId) {
-            throw new AppError(ErrorCode.FORBIDDEN, 403, 'Quote does not belong to user')
-          }
-          const now = Date.now()
-          if (quote.status !== 'active') {
-            throw new AppError(ErrorCode.CONFLICT, 409, 'Quote cannot be used')
-          }
-          if (quote.expiresAt.getTime() <= now) {
-            await quoteStore.markExpired(quote.quoteId)
-            throw new AppError(ErrorCode.CONFLICT, 409, 'Quote expired')
-          }
-          if (quote.amountNgn !== amountNgn) {
-            throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Amount mismatch with quote')
-          }
-          if (quote.paymentRail !== originalRail) {
-            throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Payment rail mismatch with quote')
-          }
-          await quoteStore.markUsed(quote.quoteId)
+        if (quote.userId !== userId) {
+          throw new AppError(ErrorCode.FORBIDDEN, 403, 'Quote does not belong to user')
         }
+        if (quote.status !== 'active') {
+          throw new AppError(ErrorCode.CONFLICT, 409, 'Quote is already used or expired')
+        }
+        if (quote.expiresAt.getTime() <= Date.now()) {
+          await quoteStore.markExpired(quote.quoteId)
+          throw new AppError(ErrorCode.CONFLICT, 409, 'Quote has expired')
+        }
+        if (quote.paymentRail !== paymentRail) {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Payment rail mismatch with quote')
+        }
+
+        const amountNgn = quote.amountNgn
+
+        await quoteStore.markUsed(quote.quoteId)
+
         const deposit = await depositStore.create({
           quoteId,
           userId,
@@ -146,17 +131,22 @@ export function createStakingRouter(
           amountNgn,
           customerMeta,
         })
+
+        const pspRail = paymentRail === 'bank_transfer' ? 'bank' : paymentRail
+        const internalRail = (pspRail === 'bank') ? 'bank' : 'psp'
+
         let externalRefSource: string | undefined
         let externalRef: string | undefined
         let redirectUrl: string | undefined
         let bankDetails: Record<string, string> | undefined
+
         if (internalRail === 'psp') {
-          const provider = getPaymentProvider(originalRail)
+          const provider = getPaymentProvider(paymentRail)
           const init = await provider.initiatePayment({
             amountNgn,
             userId,
             internalRef: deposit.depositId,
-            rail: originalRail,
+            rail: paymentRail,
             customerMeta,
           })
           externalRefSource = init.externalRefSource
@@ -460,18 +450,18 @@ export function createStakingRouter(
             externalRef,
             requestId: req.requestId,
           })
-          
+
           // Check if conversion already completed
           const syntheticDepositId = `stake:${externalRefSource}:${externalRef}`
           const existingConversion = await conversionStore.getByDepositId(syntheticDepositId)
-          
+
           if (existingConversion?.status === 'completed') {
             // Conversion already done, check if outbox item exists
             const existingOutbox = await outboxStore.getByExternalRef(
               externalRefSource,
               externalRef
             )
-            
+
             return res.status(200).json({
               success: true,
               message: 'Staking already processed',
@@ -480,7 +470,7 @@ export function createStakingRouter(
               outboxId: existingOutbox?.id,
             })
           }
-          
+
           // Still processing, return current status
           return res.status(202).json({
             success: true,

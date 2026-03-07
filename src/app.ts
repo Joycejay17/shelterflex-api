@@ -104,6 +104,7 @@ export function createApp() {
 
   const conversionProvider = new StubConversionProvider(env.FX_RATE_NGN_PER_USDC)
   const conversionService = new ConversionService(conversionProvider, 'onramp')
+  app.set('conversionService', conversionService)
 
   // Indexer
   const receiptRepo = new StubReceiptRepository()

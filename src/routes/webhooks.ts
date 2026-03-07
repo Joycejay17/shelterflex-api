@@ -42,7 +42,7 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
         const provider = getPaymentProvider(rail)
         const parsed = await provider.parseAndValidateWebhook(req)
         const { externalRefSource, externalRef, rawStatus, providerStatus } = parsed
-        
+
         // Validate rail matches externalRefSource
         if (externalRefSource !== rail) {
           throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Rail mismatch')
@@ -87,7 +87,7 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
           const reversed = existingStakingDeposit
             ? await depositStore.reverseByCanonical(rail, externalRef)
             : await ngnDepositStore.setStatusByCanonical(rail, externalRef, 'reversed')
-          
+
           if (reversed) {
             // Debit wallet balance (idempotent - won't double-debit)
             const result = await ngnWalletService.reverseTopUp(
@@ -121,29 +121,54 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
               const creditResult = await ngnWalletService.creditTopUp(userId, depositId, amountNgn, reference)
 
               if (creditResult.credited) {
-                const amountUsdc = String(Math.round((amountNgn / 1600) * 1e6) / 1e6)
-                const outboxItem = await outboxStore.create({
-                  txType: TxType.STAKE,
-                  source: 'deposit',
-                  ref: depositId,
-                  payload: {
-                    txType: TxType.STAKE,
-                    amountUsdc,
-                  },
+                logger.info('Deposit confirmed and wallet credited, triggering conversion', {
+                  depositId,
+                  userId,
+                  amountNgn
                 })
-                await sender.send(outboxItem)
+
+                // Auto-convert to USDC (idempotent)
+                // We use a try-catch to log conversion failure but still return 200 to the PSP
+                try {
+                  const synthesis = await (req.app.get('conversionService') as any).convertDeposit({
+                    depositId,
+                    userId,
+                    amountNgn,
+                  })
+
+                  // Auto-stake if conversion successful (idempotent by depositId)
+                  const outboxItem = await outboxStore.create({
+                    txType: TxType.STAKE,
+                    source: 'deposit',
+                    ref: depositId,
+                    payload: {
+                      txType: TxType.STAKE,
+                      amountUsdc: synthesis.amountUsdc,
+                      amountNgn: synthesis.amountNgn,
+                      fxRateNgnPerUsdc: synthesis.fxRateNgnPerUsdc,
+                      depositId,
+                      userId,
+                    },
+                  })
+                  await sender.send(outboxItem)
+
+                  logger.info('Auto-conversion and staking initiated from webhook', {
+                    depositId,
+                    conversionId: synthesis.conversionId,
+                    outboxId: outboxItem.id,
+                  })
+                } catch (convError) {
+                  logger.error('Auto-conversion failed in webhook context', {
+                    depositId,
+                    error: convError instanceof Error ? convError.message : String(convError),
+                  })
+                }
               }
 
-              logger.info('Deposit confirmed and wallet credited via webhook', {
+              logger.info('Deposit confirmation processing complete', {
                 depositId,
                 userId,
-                rail,
-                externalRef,
-                amountNgn,
-                newAvailableBalance: creditResult.newBalance.availableNgn,
                 credited: creditResult.credited,
-                providerStatus,
-                requestId: req.requestId,
               })
             }
           } else {
@@ -189,7 +214,7 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
         requireValidWebhookSignature(req)
 
         const { provider: bodyProvider, providerRef, reversalRef, eventType } = req.body
-        
+
         if (bodyProvider !== provider) {
           throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Provider mismatch')
         }
