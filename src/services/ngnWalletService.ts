@@ -18,6 +18,8 @@ export class NgnWalletService {
   private balances: Map<string, NgnBalanceResponse> = new Map()
   // Track credited deposits to prevent double-crediting (idempotency)
   private creditedDeposits = new Set<string>()
+  // Track staking reservations by canonical ref (source:ref) for idempotency
+  private stakingReservations = new Map<string, { amountNgn: number; timestamp: string }>()
 
   constructor() {
     // Initialize with some demo data
@@ -348,6 +350,214 @@ export class NgnWalletService {
     })
 
     return { reversed: true, newBalance: updatedBalance }
+  }
+
+  /**
+   * Reserve NGN for staking operation.
+   * Moves funds from available to held and creates STAKE_RESERVE ledger entry.
+   * Idempotent by canonical ref (externalRefSource:externalRef).
+   */
+  async reserveNgnForStaking(
+    userId: string,
+    externalRefSource: string,
+    externalRef: string,
+    amountNgn: number
+  ): Promise<{ reserved: boolean; newBalance: NgnBalanceResponse }> {
+    logger.info('Reserving NGN for staking', { userId, externalRefSource, externalRef, amountNgn })
+
+    const canonicalRef = `${externalRefSource}:${externalRef}`
+
+    // Idempotency check - prevent double-reservation
+    const existing = this.stakingReservations.get(canonicalRef)
+    if (existing) {
+      logger.info('Staking reservation already exists, skipping', { canonicalRef, userId })
+      const balance = await this.getBalance(userId)
+      return { reserved: false, newBalance: balance }
+    }
+
+    // Get or initialize balance
+    let balance = this.balances.get(userId)
+    if (!balance) {
+      balance = {
+        availableNgn: 0,
+        heldNgn: 0,
+        totalNgn: 0
+      }
+      this.balances.set(userId, balance)
+    }
+
+    // Check sufficient available balance
+    if (balance.availableNgn < amountNgn) {
+      throw new AppError(
+        ErrorCode.VALIDATION_ERROR,
+        409,
+        `Insufficient available balance. Available: ${balance.availableNgn}, Requested: ${amountNgn}`
+      )
+    }
+
+    // Move from available to held
+    const updatedBalance: NgnBalanceResponse = {
+      availableNgn: balance.availableNgn - amountNgn,
+      heldNgn: balance.heldNgn + amountNgn,
+      totalNgn: balance.totalNgn
+    }
+    this.balances.set(userId, updatedBalance)
+
+    // Track reservation
+    this.stakingReservations.set(canonicalRef, {
+      amountNgn,
+      timestamp: new Date().toISOString()
+    })
+
+    // Add ledger entry
+    const ledgerEntry: NgnLedgerEntry = {
+      id: canonicalRef,
+      type: 'stake_reserve',
+      amountNgn: -amountNgn,
+      status: 'pending',
+      timestamp: new Date().toISOString(),
+      reference: canonicalRef
+    }
+    this.ledger.unshift(ledgerEntry)
+
+    logger.info('NGN reserved for staking', {
+      userId,
+      canonicalRef,
+      amountNgn,
+      newAvailableNgn: updatedBalance.availableNgn,
+      newHeldNgn: updatedBalance.heldNgn
+    })
+
+    return { reserved: true, newBalance: updatedBalance }
+  }
+
+  /**
+   * Release NGN reservation back to available balance.
+   * Moves funds from held back to available and creates STAKE_RELEASE ledger entry.
+   * Used when conversion fails or staking is cancelled.
+   */
+  async releaseNgnReserve(
+    userId: string,
+    externalRefSource: string,
+    externalRef: string,
+    amountNgn: number
+  ): Promise<{ released: boolean; newBalance: NgnBalanceResponse }> {
+    logger.info('Releasing NGN reservation', { userId, externalRefSource, externalRef, amountNgn })
+
+    const canonicalRef = `${externalRefSource}:${externalRef}`
+
+    // Check if reservation exists
+    const reservation = this.stakingReservations.get(canonicalRef)
+    if (!reservation) {
+      logger.warn('Attempting to release non-existent reservation', { canonicalRef, userId })
+      const balance = await this.getBalance(userId)
+      return { released: false, newBalance: balance }
+    }
+
+    const balance = await this.getBalance(userId)
+
+    // Move from held back to available
+    const updatedBalance: NgnBalanceResponse = {
+      availableNgn: balance.availableNgn + amountNgn,
+      heldNgn: Math.max(0, balance.heldNgn - amountNgn),
+      totalNgn: balance.totalNgn
+    }
+    this.balances.set(userId, updatedBalance)
+
+    // Remove reservation tracking
+    this.stakingReservations.delete(canonicalRef)
+
+    // Add ledger entry
+    const ledgerEntry: NgnLedgerEntry = {
+      id: `${canonicalRef}-release`,
+      type: 'stake_release',
+      amountNgn: amountNgn,
+      status: 'confirmed',
+      timestamp: new Date().toISOString(),
+      reference: canonicalRef
+    }
+    this.ledger.unshift(ledgerEntry)
+
+    // Update the original reserve entry status
+    const reserveEntry = this.ledger.find(e => e.id === canonicalRef && e.type === 'stake_reserve')
+    if (reserveEntry) {
+      reserveEntry.status = 'failed'
+    }
+
+    logger.info('NGN reservation released', {
+      userId,
+      canonicalRef,
+      amountNgn,
+      newAvailableNgn: updatedBalance.availableNgn,
+      newHeldNgn: updatedBalance.heldNgn
+    })
+
+    return { released: true, newBalance: updatedBalance }
+  }
+
+  /**
+   * Debit NGN from held balance after successful conversion.
+   * Creates CONVERSION_DEBIT ledger entry.
+   * This is called after conversion completes successfully.
+   */
+  async debitNgnForConversion(
+    userId: string,
+    externalRefSource: string,
+    externalRef: string,
+    amountNgn: number
+  ): Promise<{ debited: boolean; newBalance: NgnBalanceResponse }> {
+    logger.info('Debiting NGN for conversion', { userId, externalRefSource, externalRef, amountNgn })
+
+    const canonicalRef = `${externalRefSource}:${externalRef}`
+
+    const balance = await this.getBalance(userId)
+
+    // Verify sufficient held balance
+    if (balance.heldNgn < amountNgn) {
+      throw new AppError(
+        ErrorCode.VALIDATION_ERROR,
+        409,
+        `Insufficient held balance. Held: ${balance.heldNgn}, Required: ${amountNgn}`
+      )
+    }
+
+    // Reduce held and total
+    const updatedBalance: NgnBalanceResponse = {
+      availableNgn: balance.availableNgn,
+      heldNgn: balance.heldNgn - amountNgn,
+      totalNgn: balance.totalNgn - amountNgn
+    }
+    this.balances.set(userId, updatedBalance)
+
+    // Remove reservation tracking (conversion completed)
+    this.stakingReservations.delete(canonicalRef)
+
+    // Add ledger entry
+    const ledgerEntry: NgnLedgerEntry = {
+      id: `${canonicalRef}-conversion`,
+      type: 'conversion_debit',
+      amountNgn: -amountNgn,
+      status: 'confirmed',
+      timestamp: new Date().toISOString(),
+      reference: canonicalRef
+    }
+    this.ledger.unshift(ledgerEntry)
+
+    // Update the original reserve entry status
+    const reserveEntry = this.ledger.find(e => e.id === canonicalRef && e.type === 'stake_reserve')
+    if (reserveEntry) {
+      reserveEntry.status = 'confirmed'
+    }
+
+    logger.info('NGN debited for conversion', {
+      userId,
+      canonicalRef,
+      amountNgn,
+      newHeldNgn: updatedBalance.heldNgn,
+      newTotalNgn: updatedBalance.totalNgn
+    })
+
+    return { debited: true, newBalance: updatedBalance }
   }
 
   // Helper method for testing/demo - simulate withdrawal processing
