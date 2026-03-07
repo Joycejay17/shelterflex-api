@@ -75,6 +75,16 @@ class DepositStore {
     return deposit
   }
 
+  async reverseByCanonical(rail: string, externalRef: string): Promise<Deposit | null> {
+    const deposit = await this.getByCanonical(rail, externalRef)
+    if (!deposit) return null
+    if (deposit.status === DepositStatus.REVERSED) return deposit
+    deposit.status = DepositStatus.REVERSED
+    deposit.updatedAt = new Date()
+    this.initiationsById.set(deposit.depositId, deposit)
+    return deposit
+  }
+
   // Confirmed deposit flow
   async confirm(input: ConfirmDepositRecordInput): Promise<DepositRecord> {
     const existing = this.deposits.get(input.depositId)
