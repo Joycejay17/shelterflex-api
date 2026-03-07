@@ -38,6 +38,8 @@ import { StubReceiptRepository } from "./indexer/receipt-repository.js"
 import { ReceiptIndexer } from "./indexer/worker.js"
 import { createReceiptsRouter } from "./routes/receiptsRoute.js"
 import { getPool } from "./db.js"
+import { StakingService } from "./services/stakingService.js"
+import { StakingFinalizer } from "./jobs/stakingFinalizer.js"
 
 
 export function createApp() {
@@ -74,6 +76,11 @@ export function createApp() {
 
   const conversionProvider = new StubConversionProvider(env.FX_RATE_NGN_PER_USDC)
   const conversionService = new ConversionService(conversionProvider, 'onramp')
+  const stakingService = new StakingService(sorobanAdapter)
+  
+  // Staking Finalizer Job
+  const stakingFinalizer = new StakingFinalizer(stakingService)
+  stakingFinalizer.start()
 
   // Indexer
   const receiptRepo = new StubReceiptRepository()
@@ -116,7 +123,7 @@ export function createApp() {
   app.use('/api/admin', createAdminRouter(sorobanAdapter))
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
-  app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService))
+  app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
   app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
   app.use('/api/deposits', createDepositsRouter(conversionService))
 
