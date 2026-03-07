@@ -8,12 +8,12 @@ import {
   type KeyStore,
   type EncryptedKeyRecord,
   type Decryptor,
-} from './custodialWalletService.js'
+} from './CustodialWalletService.js'
 import { TxType } from '../outbox/types.js'
 import { type EncryptedKeyEnvelope } from '../utils/encryption.js'
 
 class MockStore implements KeyStore {
-  constructor(private records: Map<string, { plain: Buffer; address: string }>) {}
+  constructor(private records: Map<string, { plain: Buffer; address: string }>) { }
   async getEncryptedKey(userId: string): Promise<EncryptedKeyRecord> {
     const r = this.records.get(userId)
     if (!r) throw new Error('missing user')
