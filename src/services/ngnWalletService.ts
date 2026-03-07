@@ -1,6 +1,6 @@
-import { 
-  WithdrawalRequest, 
-  WithdrawalResponse, 
+import {
+  WithdrawalRequest,
+  WithdrawalResponse,
   WithdrawalHistoryResponse,
   NgnBalanceResponse,
   NgnLedgerResponse,
@@ -50,7 +50,7 @@ export class NgnWalletService {
         reference: 'TOPUP-001'
       },
       {
-        id: '2', 
+        id: '2',
         type: 'withdrawal',
         amountNgn: -5000,
         status: 'confirmed',
@@ -125,7 +125,7 @@ export class NgnWalletService {
 
   async getBalance(userId: string): Promise<NgnBalanceResponse> {
     logger.info('Getting NGN balance', { userId })
-    
+
     let balance = this.balances.get(userId)
     if (!balance) {
       balance = {
@@ -160,7 +160,7 @@ export class NgnWalletService {
     if (frozen) {
       const balance = await this.getBalance(userId)
       const riskState = await userRiskStateStore.getByUserId(userId)
-      
+
       let message = 'Account frozen. '
       if (balance.totalNgn < 0) {
         message += `Negative balance: ${balance.totalNgn} NGN. Please top up to continue.`
@@ -194,9 +194,9 @@ export class NgnWalletService {
 
     // Idempotent check - if already reversed, skip
     if (deposit.reversedAt) {
-      logger.info('Deposit already reversed, skipping', { 
-        depositId: deposit.depositId, 
-        reversedAt: deposit.reversedAt 
+      logger.info('Deposit already reversed, skipping', {
+        depositId: deposit.depositId,
+        reversedAt: deposit.reversedAt
       })
       return
     }
@@ -297,8 +297,8 @@ export class NgnWalletService {
 
   async getLedger(userId: string, options: { limit?: number; cursor?: string } = {}): Promise<NgnLedgerResponse> {
     logger.info('Getting NGN ledger', { userId, options })
-    
-    let entries = [...this.ledger].sort((a, b) => 
+
+    let entries = [...this.ledger].sort((a, b) =>
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     )
 
@@ -333,8 +333,8 @@ export class NgnWalletService {
     const balance = await this.getBalance(userId)
     if (request.amountNgn > balance.availableNgn) {
       throw new AppError(
-        ErrorCode.VALIDATION_ERROR, 
-        400, 
+        ErrorCode.VALIDATION_ERROR,
+        400,
         `Insufficient balance. Available: ${balance.availableNgn}, Requested: ${request.amountNgn}`
       )
     }
@@ -374,10 +374,10 @@ export class NgnWalletService {
     }
     this.ledger.unshift(ledgerEntry)
 
-    logger.info('Withdrawal initiated successfully', { 
-      userId, 
+    logger.info('Withdrawal initiated successfully', {
+      userId,
       withdrawalId: withdrawal.id,
-      amount: request.amountNgn 
+      amount: request.amountNgn
     })
 
     return withdrawal
@@ -522,7 +522,7 @@ export class NgnWalletService {
   async getWithdrawalHistory(userId: string, options: { limit?: number; cursor?: string } = {}): Promise<WithdrawalHistoryResponse> {
     logger.info('Getting withdrawal history', { userId, options })
 
-    let entries = [...this.withdrawals].sort((a, b) => 
+    let entries = [...this.withdrawals].sort((a, b) =>
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     )
 
@@ -552,7 +552,7 @@ export class NgnWalletService {
 
     // Idempotency check - prevent double-crediting
     if (this.creditedDeposits.has(depositId)) {
-      logger.info('Deposit already credited, skipping', { depositId, userId })
+      logger.warn('IDEMPOTENCY HIT: Deposit already credited to wallet, skipping', { depositId, userId })
       const balance = await this.getBalance(userId)
       return { credited: false, newBalance: balance }
     }

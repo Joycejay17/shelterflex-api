@@ -106,15 +106,16 @@ export function createApp() {
 
   const conversionProvider = new StubConversionProvider(env.FX_RATE_NGN_PER_USDC)
   const conversionService = new ConversionService(conversionProvider, 'onramp')
+  app.set('conversionService', conversionService)
   const stakingService = new StakingService(sorobanAdapter)
-  
+
   // Staking Finalizer Job
   const stakingFinalizer = new StakingFinalizer(stakingService)
   stakingFinalizer.start()
 
   // Indexer
-  const receiptRepo = process.env.DATABASE_URL 
-    ? new PostgresReceiptRepository() 
+  const receiptRepo = process.env.DATABASE_URL
+    ? new PostgresReceiptRepository()
     : new StubReceiptRepository()
   const indexer = new ReceiptIndexer(sorobanAdapter, receiptRepo, {
     pollIntervalMs: parseInt(process.env.INDEXER_POLL_MS ?? '5000'),
