@@ -44,6 +44,9 @@ export class CustodialWalletServiceImpl implements CustodialWalletService {
         throw new WalletNotFoundError(userId)
       }
       secretKey = await this.decryptor.decrypt(record.envelope)
+      if (!secretKey) {
+        throw new Error("Secret key decryption failed: received null buffer")
+      }
       keypair = Keypair.fromSecret(secretKey.toString('utf8'))
       const publicKey = keypair.publicKey()
       secretKey.fill(0)
@@ -107,6 +110,9 @@ export class CustodialWalletServiceImpl implements CustodialWalletService {
 
       // Decrypt the secret key
       secretKey = await this.decryptor.decrypt(record.envelope)
+      if (!secretKey) {
+        throw new Error("Secret key decryption failed: received null buffer")
+      }
 
       // Derive Keypair from secret key
       keypair = Keypair.fromSecret(secretKey.toString('utf8'))
