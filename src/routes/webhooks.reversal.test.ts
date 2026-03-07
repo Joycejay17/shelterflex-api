@@ -21,6 +21,10 @@ describe('Webhooks - Deposit Reversal', () => {
     // Setup Express app
     app = express()
     app.use(express.json())
+    app.use((req: any, _res, next) => {
+      req.requestId = 'test-request-id'
+      next()
+    })
     app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
     app.use(errorHandler)
 
