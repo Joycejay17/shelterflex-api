@@ -1,5 +1,5 @@
 import { Keypair } from '@stellar/stellar-sdk'
-import { createHmac, randomBytes, scrypt } from 'node:crypto'
+import { createCipheriv, createDecipheriv, randomBytes, scrypt } from 'node:crypto'
 import { WalletStore } from '../models/wallet.js'
 
 export interface EncryptionService {
@@ -98,8 +98,6 @@ export class WalletServiceImpl implements WalletService {
  * Uses scrypt with environment variable to derive encryption keys
  */
 export class EnvironmentEncryptionService implements EncryptionService {
-  private keyCache: Map<string, Buffer> = new Map()
-
   constructor(private encryptionKeyBase: string) {
     if (!encryptionKeyBase || encryptionKeyBase.length < 32) {
       throw new Error('Encryption key must be at least 32 characters')
@@ -122,39 +120,74 @@ export class EnvironmentEncryptionService implements EncryptionService {
   }
 
   async encrypt(data: Buffer, keyId: string): Promise<{ cipherText: Buffer; keyId: string }> {
-    const salt = randomBytes(16)
-    const iv = randomBytes(16)
-    const key = await this.deriveKey(salt)
-    
-    // Simple XOR encryption for MVP (replace with AES in production)
-    const encrypted = Buffer.alloc(data.length)
-    for (let i = 0; i < data.length; i++) {
-      encrypted[i] = data[i] ^ key[i % key.length] ^ iv[i % iv.length]
+    const envelopeVersion = 1
+    const iv = randomBytes(12)
+    const key = await this.deriveKey(Buffer.from(keyId, 'utf8'))
+
+    const cipher = createCipheriv('aes-256-gcm', key, iv)
+    const encrypted = Buffer.concat([cipher.update(data), cipher.final()])
+    const authTag = cipher.getAuthTag()
+
+    const envelope = {
+      version: envelopeVersion,
+      iv: iv.toString('base64'),
+      authTag: authTag.toString('base64'),
+      ciphertext: encrypted.toString('base64'),
     }
 
-    // Combine salt + iv + encrypted data
-    const cipherText = Buffer.concat([salt, iv, encrypted])
-    
+    const cipherText = Buffer.from(JSON.stringify(envelope), 'utf8')
     return { cipherText, keyId }
   }
 
   async decrypt(cipherText: Buffer, keyId: string): Promise<Buffer> {
-    if (cipherText.length < 32) {
-      throw new Error('Invalid ciphertext: too short')
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(cipherText.toString('utf8'))
+    } catch {
+      throw new Error('Invalid ciphertext: not valid envelope JSON')
     }
 
-    const salt = cipherText.subarray(0, 16)
-    const iv = cipherText.subarray(16, 32)
-    const encrypted = cipherText.subarray(32)
-    
-    const key = await this.deriveKey(salt)
-    
-    // Reverse the XOR encryption
-    const decrypted = Buffer.alloc(encrypted.length)
-    for (let i = 0; i < encrypted.length; i++) {
-      decrypted[i] = encrypted[i] ^ key[i % key.length] ^ iv[i % iv.length]
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      !('version' in parsed) ||
+      !('iv' in parsed) ||
+      !('authTag' in parsed) ||
+      !('ciphertext' in parsed)
+    ) {
+      throw new Error('Invalid ciphertext: missing envelope fields')
     }
 
-    return decrypted
+    const envelope = parsed as {
+      version: number
+      iv: string
+      authTag: string
+      ciphertext: string
+    }
+
+    if (envelope.version !== 1) {
+      throw new Error(`Invalid ciphertext: unsupported envelope version ${String(envelope.version)}`)
+    }
+
+    const iv = Buffer.from(envelope.iv, 'base64')
+    const tag = Buffer.from(envelope.authTag, 'base64')
+    const encrypted = Buffer.from(envelope.ciphertext, 'base64')
+
+    if (iv.length !== 12) {
+      throw new Error('Invalid ciphertext: invalid IV length')
+    }
+    if (tag.length !== 16) {
+      throw new Error('Invalid ciphertext: invalid authTag length')
+    }
+
+    const key = await this.deriveKey(Buffer.from(keyId, 'utf8'))
+    const decipher = createDecipheriv('aes-256-gcm', key, iv)
+    decipher.setAuthTag(tag)
+
+    try {
+      return Buffer.concat([decipher.update(encrypted), decipher.final()])
+    } catch {
+      throw new Error('Decryption failed: authentication tag verification failed')
+    }
   }
 }

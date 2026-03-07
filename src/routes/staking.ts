@@ -5,11 +5,17 @@ import { logger } from '../utils/logger.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { validate } from '../middleware/validate.js'
+import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 import { depositStore } from '../models/depositStore.js'
+import { LinkedAddressStore } from '../models/linkedAddressStore.js'
+import { env } from '../schemas/env.js'
 import { depositInitiateSchema, type DepositInitiateRequest } from '../schemas/deposit.js'
 import { stakeFromDepositSchema, type StakeFromDepositRequest } from '../schemas/stakeFromDeposit.js'
 import { stakeFinalizeSchema, type StakeFinalizeRequest } from '../schemas/stakeFinalize.js'
 import { conversionStore } from '../models/conversionStore.js'
+import { WalletService } from '../services/walletService.js'
+import { stakingQuoteSchema, type StakingQuoteRequest } from '../schemas/stakingQuote.js'
+import { quoteStore } from '../models/quoteStore.js'
 import {
   stakeSchema,
   unstakeSchema,
@@ -21,9 +27,62 @@ import {
   type StakingPositionResponse,
 } from '../schemas/staking.js'
 
-export function createStakingRouter(adapter: SorobanAdapter) {
+function formatAmount6(amountMicro: bigint): string {
+  const negative = amountMicro < 0n
+  const abs = negative ? -amountMicro : amountMicro
+  const whole = abs / 1_000_000n
+  const frac = (abs % 1_000_000n).toString().padStart(6, '0')
+  return `${negative ? '-' : ''}${whole.toString()}.${frac}`
+}
+
+export function createStakingRouter(
+  adapter: SorobanAdapter,
+  walletService: WalletService,
+  linkedAddressStore: LinkedAddressStore,
+) {
   const router = Router()
   const sender = new OutboxSender(adapter)
+
+  router.post(
+    '/quote',
+    authenticateToken,
+    validate(stakingQuoteSchema),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const { amountNgn, paymentRail } = req.body as StakingQuoteRequest
+        const userId = req.user?.id
+        if (!userId) {
+          throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication required')
+        }
+        if (amountNgn <= 0) {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'amountNgn must be positive')
+        }
+        if (amountNgn > env.QUOTE_MAX_AMOUNT_NGN) {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Quote amount exceeds maximum')
+        }
+        const quote = await quoteStore.create({
+          userId,
+          amountNgn,
+          paymentRail,
+          fxRateNgnPerUsdc: env.FX_RATE_NGN_PER_USDC,
+          feePercent: env.QUOTE_FEE_PERCENT,
+          slippagePercent: env.QUOTE_SLIPPAGE_PERCENT,
+          expiryMs: env.QUOTE_EXPIRY_MS,
+        })
+        res.status(201).json({
+          quoteId: quote.quoteId,
+          amountNgn: quote.amountNgn,
+          estimatedAmountUsdc: quote.estimatedAmountUsdc,
+          fxRateNgnPerUsdc: quote.fxRateNgnPerUsdc,
+          feesNgn: quote.feesNgn,
+          expiresAt: quote.expiresAt.toISOString(),
+          disclaimer: 'Final USDC may differ slightly due to FX movements',
+        })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
 
   router.post(
     '/deposit/initiate',
@@ -40,6 +99,39 @@ export function createStakingRouter(adapter: SorobanAdapter) {
         if (!Number.isFinite(amountNgn) || amountNgn <= 0) {
           throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Invalid NGN amount')
         }
+        const originalRail = paymentRail
+        const internalRail =
+          originalRail === 'bank_transfer'
+            ? 'bank'
+            : originalRail === 'paystack' ||
+              originalRail === 'flutterwave' ||
+              originalRail === 'manual_admin'
+            ? 'psp'
+            : originalRail
+        if (originalRail !== 'psp' && originalRail !== 'bank') {
+          const quote = await quoteStore.getById(quoteId)
+          if (!quote) {
+            throw new AppError(ErrorCode.NOT_FOUND, 404, 'Quote not found')
+          }
+          if (quote.userId !== userId) {
+            throw new AppError(ErrorCode.FORBIDDEN, 403, 'Quote does not belong to user')
+          }
+          const now = Date.now()
+          if (quote.status !== 'active') {
+            throw new AppError(ErrorCode.CONFLICT, 409, 'Quote cannot be used')
+          }
+          if (quote.expiresAt.getTime() <= now) {
+            await quoteStore.markExpired(quote.quoteId)
+            throw new AppError(ErrorCode.CONFLICT, 409, 'Quote expired')
+          }
+          if (quote.amountNgn !== amountNgn) {
+            throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Amount mismatch with quote')
+          }
+          if (quote.paymentRail !== originalRail) {
+            throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Payment rail mismatch with quote')
+          }
+          await quoteStore.markUsed(quote.quoteId)
+        }
         const deposit = await depositStore.create({
           quoteId,
           userId,
@@ -51,11 +143,11 @@ export function createStakingRouter(adapter: SorobanAdapter) {
         let externalRef: string | undefined
         let redirectUrl: string | undefined
         let bankDetails: Record<string, string> | undefined
-        if (paymentRail === 'psp') {
+        if (internalRail === 'psp') {
           externalRefSource = 'psp'
           externalRef = `pi_${deposit.depositId}`
           redirectUrl = `https://pay.example.com/${externalRef}`
-        } else if (paymentRail === 'bank') {
+        } else if (internalRail === 'bank') {
           externalRefSource = 'bank'
           externalRef = `bnk_${deposit.depositId}`
           bankDetails = { accountNumber: '1234567890', bankName: 'Example Bank' }
@@ -436,21 +528,57 @@ export function createStakingRouter(adapter: SorobanAdapter) {
    */
   router.get(
     '/position',
-    async (req: Request, res: Response, next: NextFunction) => {
+    authenticateToken,
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
-        // Mock implementation - in a real system this would query the staking contract
-        const mockPosition: StakingPositionResponse = {
-          staked: '1000.000000',
-          claimable: '50.250000',
+        const userId = req.user?.id
+        if (!userId) {
+          throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication required')
         }
+
+        const accountHeader = req.headers['x-wallet-address']
+        let account: string
+        if (typeof accountHeader === 'string' && accountHeader.length > 0) {
+          account = accountHeader
+        } else if (env.CUSTODIAL_MODE_ENABLED) {
+          try {
+            account = await walletService.getPublicAddress(userId)
+          } catch (error) {
+            if (error instanceof Error && error.message.includes('Wallet not found')) {
+              throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'User wallet not found')
+            }
+            throw error
+          }
+        } else {
+          const linked = await linkedAddressStore.getLinkedAddress(userId)
+          if (!linked) {
+            throw new AppError(
+              ErrorCode.VALIDATION_ERROR,
+              400,
+              'No linked wallet address found for user',
+            )
+          }
+          account = linked
+        }
+
+        const [stakedMicro, claimableMicro] = await Promise.all([
+          adapter.getStakedBalance(account),
+          adapter.getClaimableRewards(account),
+        ])
+
+        const position: StakingPositionResponse = stakingPositionSchema.parse({
+          staked: formatAmount6(stakedMicro),
+          claimable: formatAmount6(claimableMicro),
+        })
 
         logger.info('Staking position requested', {
           requestId: req.requestId,
+          userId,
         })
 
         res.status(200).json({
           success: true,
-          position: mockPosition,
+          position,
         })
       } catch (error) {
         next(error)

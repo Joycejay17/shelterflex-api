@@ -22,6 +22,11 @@ export const envSchema = z.object({
   CUSTODIAL_SIGNING_PAUSED: z.coerce.boolean().default(false),
   WEBHOOK_SIGNATURE_ENABLED: z.coerce.boolean().default(false),
   WEBHOOK_SECRET: z.string().optional(),
+  FX_RATE_NGN_PER_USDC: z.coerce.number().positive().default(1600),
+  QUOTE_MAX_AMOUNT_NGN: z.coerce.number().positive().default(5_000_000),
+  QUOTE_EXPIRY_MS: z.coerce.number().positive().default(5 * 60_000),
+  QUOTE_FEE_PERCENT: z.coerce.number().min(0).max(1).default(0.015),
+  QUOTE_SLIPPAGE_PERCENT: z.coerce.number().min(0).max(1).default(0.005),
 }).refine((data) => {
   if (data.NODE_ENV !== 'development' && data.NODE_ENV !== 'test' && !data.USDC_TOKEN_ADDRESS) {
     return false
