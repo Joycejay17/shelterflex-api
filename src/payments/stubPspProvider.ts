@@ -5,6 +5,8 @@ import { requireValidWebhookSignature } from './webhookSignature.js'
 import type {
   InitiatePaymentInput,
   InitiatePaymentResult,
+  ExecutePayoutInput,
+  ExecutePayoutResult,
   InternalPaymentStatus,
   MapStatusInput,
   ParseWebhookResult,
@@ -85,5 +87,16 @@ export class StubPspProvider implements PaymentProvider {
     }
 
     return 'confirmed'
+  }
+
+  async executePayout(input: ExecutePayoutInput): Promise<ExecutePayoutResult> {
+    const externalRefSource = input.rail
+    const externalRef = `po_${input.internalRef}`
+
+    return {
+      externalRefSource,
+      externalRef,
+      status: 'confirmed',
+    }
   }
 }
