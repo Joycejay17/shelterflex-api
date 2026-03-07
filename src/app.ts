@@ -34,10 +34,12 @@ import { InMemoryWalletStore } from "./models/walletStore.js"
 import { InMemoryLinkedAddressStore } from "./models/linkedAddressStore.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
 import authRouter from "./routes/auth.js"
-import { StubReceiptRepository } from "./indexer/receipt-repository.js"
+import { StubReceiptRepository, PostgresReceiptRepository } from "./indexer/receipt-repository.js"
 import { ReceiptIndexer } from "./indexer/worker.js"
 import { createReceiptsRouter } from "./routes/receiptsRoute.js"
 import { getPool } from "./db.js"
+import { StakingService } from "./services/stakingService.js"
+import { StakingFinalizer } from "./jobs/stakingFinalizer.js"
 
 
 export function createApp() {
@@ -105,9 +107,16 @@ export function createApp() {
   const conversionProvider = new StubConversionProvider(env.FX_RATE_NGN_PER_USDC)
   const conversionService = new ConversionService(conversionProvider, 'onramp')
   app.set('conversionService', conversionService)
+  const stakingService = new StakingService(sorobanAdapter)
+
+  // Staking Finalizer Job
+  const stakingFinalizer = new StakingFinalizer(stakingService)
+  stakingFinalizer.start()
 
   // Indexer
-  const receiptRepo = new StubReceiptRepository()
+  const receiptRepo = process.env.DATABASE_URL
+    ? new PostgresReceiptRepository()
+    : new StubReceiptRepository()
   const indexer = new ReceiptIndexer(sorobanAdapter, receiptRepo, {
     pollIntervalMs: parseInt(process.env.INDEXER_POLL_MS ?? '5000'),
     startLedger: process.env.INDEXER_START_LEDGER ? parseInt(process.env.INDEXER_START_LEDGER) : undefined,
@@ -147,7 +156,7 @@ export function createApp() {
   app.use('/api/admin', createAdminRouter(sorobanAdapter))
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
-  app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService))
+  app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
   app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
   app.use('/api/deposits', createDepositsRouter(conversionService))
 
