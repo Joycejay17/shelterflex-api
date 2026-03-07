@@ -27,9 +27,9 @@ import { createWalletRouter } from "./routes/wallet.js"
 import { createNgnWalletRouter } from "./routes/ngnWallet.js"
 import { createAdminRiskRouter } from "./routes/adminRisk.js"
 import { createAdminWithdrawalsRouter } from "./routes/adminWithdrawals.js"
-import { WalletServiceImpl } from "./services/walletService.js"
+import { WalletServiceImpl, EnvironmentEncryptionService } from "./services/walletService.js"
+import { CustodialWalletServiceImpl } from "./services/CustodialWalletServiceImpl.js"
 import { NgnWalletService } from "./services/ngnWalletService.js"
-import { EnvironmentEncryptionService } from "./services/walletService.js"
 import { InMemoryWalletStore } from "./models/walletStore.js"
 import { InMemoryLinkedAddressStore } from "./models/linkedAddressStore.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
@@ -63,7 +63,37 @@ export function createApp() {
   // Initialize wallet service and store
   const walletStore = new InMemoryWalletStore()
   const encryptionService = new EnvironmentEncryptionService(env.ENCRYPTION_KEY)
-  const walletService = new WalletServiceImpl(walletStore, encryptionService)
+
+  // Bridge the old interfaces to the new security boundary interfaces
+  const keyStoreAdapter = {
+    getEncryptedKey: async (userId: string) => {
+      const key = await walletStore.getEncryptedKey(userId)
+      if (!key) throw new Error('Key not found')
+      const publicAddress = await walletStore.getPublicAddress(userId)
+      return {
+        envelope: JSON.parse(Buffer.from(key.cipherText, 'base64').toString('utf8')),
+        keyVersion: key.keyId,
+        publicAddress
+      }
+    },
+    getPublicAddress: (userId: string) => walletStore.getPublicAddress(userId)
+  }
+
+  const decryptorAdapter = {
+    decrypt: (envelope: unknown) => {
+      const cipherText = Buffer.from(JSON.stringify(envelope), 'utf8')
+      const env = envelope as { version: number } // Simple check
+      return encryptionService.decrypt(cipherText, 'env-key-1')
+    }
+  }
+
+  const custodialService = new CustodialWalletServiceImpl(
+    keyStoreAdapter as any,
+    decryptorAdapter as any,
+    sorobanConfig.networkPassphrase
+  )
+
+  const walletService = new WalletServiceImpl(walletStore, encryptionService, custodialService)
   const linkedAddressStore = new InMemoryLinkedAddressStore()
   const ngnWalletService = new NgnWalletService()
 
