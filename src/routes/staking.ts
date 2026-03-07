@@ -4,6 +4,7 @@ import { SorobanAdapter } from '../soroban/adapter.js'
 import { logger } from '../utils/logger.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
+import { getPaymentProvider } from '../payments/index.js'
 import { validate } from '../middleware/validate.js'
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 import { depositStore } from '../models/depositStore.js'
@@ -150,9 +151,17 @@ export function createStakingRouter(
         let redirectUrl: string | undefined
         let bankDetails: Record<string, string> | undefined
         if (internalRail === 'psp') {
-          externalRefSource = 'psp'
-          externalRef = `pi_${deposit.depositId}`
-          redirectUrl = `https://pay.example.com/${externalRef}`
+          const provider = getPaymentProvider(originalRail)
+          const init = await provider.initiatePayment({
+            amountNgn,
+            userId,
+            internalRef: deposit.depositId,
+            rail: originalRail,
+            customerMeta,
+          })
+          externalRefSource = init.externalRefSource
+          externalRef = init.externalRef
+          redirectUrl = init.redirectUrl
         } else if (internalRail === 'bank') {
           externalRefSource = 'bank'
           externalRef = `bnk_${deposit.depositId}`

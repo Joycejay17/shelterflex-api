@@ -59,6 +59,13 @@ export const envSchema = z.object({
     path: ['CUSTODIAL_WALLET_MASTER_KEY_ACTIVE_VERSION'],
   })
   .refine((data) => {
+    if (data.NODE_ENV !== 'production') return true
+    return !!data.WEBHOOK_SECRET
+  }, {
+    message: 'WEBHOOK_SECRET is required in production to validate webhook signatures',
+    path: ['WEBHOOK_SECRET'],
+  })
+  .refine((data) => {
     if (!data.WEBHOOK_SIGNATURE_ENABLED) return true
     return !!data.WEBHOOK_SECRET
   }, {
