@@ -29,7 +29,7 @@ export class ReceiptIndexer {
 
      private async poll() {
           const events = await this.adapter.getReceiptEvents(this.lastLedger)
-          if (!events.length) return
+          if (!events || !events.length) return
           await this.repo.upsertMany(events.map(parseReceiptEvent))
           const max = Math.max(...events.map(e => e.ledger))
           await this.repo.saveCheckpoint(max)
