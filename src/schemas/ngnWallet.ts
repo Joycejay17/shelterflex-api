@@ -14,7 +14,7 @@ export const withdrawalRequestSchema = z.object({
 export const withdrawalResponseSchema = z.object({
   id: z.string(),
   amountNgn: z.number(),
-  status: z.enum(['pending', 'approved', 'rejected', 'confirmed', 'failed']),
+  status: z.enum(['pending', 'approved', 'rejected', 'confirmed', 'failed', 'reversed']),
   bankAccount: bankAccountDetailsSchema,
   reference: z.string(),
   createdAt: z.string(),
@@ -37,7 +37,7 @@ export const ngnLedgerEntrySchema = z.object({
   id: z.string(),
   type: z.string(),
   amountNgn: z.number(),
-  status: z.enum(['pending', 'approved', 'rejected', 'confirmed', 'failed']),
+  status: z.enum(['pending', 'approved', 'rejected', 'confirmed', 'failed', 'reversed']),
   timestamp: z.string(),
   reference: z.string().nullable(),
 })
