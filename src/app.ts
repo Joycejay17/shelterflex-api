@@ -34,7 +34,7 @@ import { InMemoryWalletStore } from "./models/walletStore.js"
 import { InMemoryLinkedAddressStore } from "./models/linkedAddressStore.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
 import authRouter from "./routes/auth.js"
-import { StubReceiptRepository } from "./indexer/receipt-repository.js"
+import { StubReceiptRepository, PostgresReceiptRepository } from "./indexer/receipt-repository.js"
 import { ReceiptIndexer } from "./indexer/worker.js"
 import { createReceiptsRouter } from "./routes/receiptsRoute.js"
 import { getPool } from "./db.js"
@@ -83,7 +83,9 @@ export function createApp() {
   stakingFinalizer.start()
 
   // Indexer
-  const receiptRepo = new StubReceiptRepository()
+  const receiptRepo = process.env.DATABASE_URL 
+    ? new PostgresReceiptRepository() 
+    : new StubReceiptRepository()
   const indexer = new ReceiptIndexer(sorobanAdapter, receiptRepo, {
     pollIntervalMs: parseInt(process.env.INDEXER_POLL_MS ?? '5000'),
     startLedger: process.env.INDEXER_START_LEDGER ? parseInt(process.env.INDEXER_START_LEDGER) : undefined,
