@@ -3,6 +3,7 @@ import { validate } from '../middleware/validate.js'
 import { paymentsWebhookSchema } from '../schemas/deposit.js'
 import { depositReversalWebhookSchema } from '../schemas/risk.js'
 import { depositStore } from '../models/depositStore.js'
+import { ngnDepositStore } from '../models/ngnDepositStore.js'
 import { logger } from '../utils/logger.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
@@ -47,20 +48,29 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
           throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Rail mismatch')
         }
 
-        // Find deposit by canonical reference (idempotency key)
-        const existing = await depositStore.getByCanonical(rail, externalRef)
-        if (!existing) {
+        const existingStakingDeposit = await depositStore.getByCanonical(rail, externalRef)
+        const existingWalletDeposit = existingStakingDeposit
+          ? null
+          : await ngnDepositStore.getByCanonical(rail, externalRef)
+
+        if (!existingStakingDeposit && !existingWalletDeposit) {
           throw new AppError(ErrorCode.NOT_FOUND, 404, 'Deposit not found')
         }
 
-        const { depositId, userId, amountNgn } = existing
-        const reference = existing.externalRef || depositId
+        const depositId = existingStakingDeposit?.depositId ?? existingWalletDeposit!.depositId
+        const userId = existingStakingDeposit?.userId ?? existingWalletDeposit!.userId
+        const amountNgn = existingStakingDeposit?.amountNgn ?? existingWalletDeposit!.amountNgn
+        const reference = externalRef
 
         const internalStatus = provider.mapStatus({ rawStatus, providerStatus })
 
         // Handle failed status
         if (internalStatus === 'failed') {
-          await depositStore.fail(depositId)
+          if (existingStakingDeposit) {
+            await depositStore.fail(depositId)
+          } else {
+            await ngnDepositStore.setStatusById(depositId, 'failed')
+          }
           logger.warn('Deposit failed via webhook', {
             depositId,
             userId,
@@ -74,7 +84,9 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
 
         // Handle reversed/chargeback status
         if (internalStatus === 'reversed') {
-          const reversed = await depositStore.reverseByCanonical(rail, externalRef)
+          const reversed = existingStakingDeposit
+            ? await depositStore.reverseByCanonical(rail, externalRef)
+            : await ngnDepositStore.setStatusByCanonical(rail, externalRef, 'reversed')
           
           if (reversed) {
             // Debit wallet balance (idempotent - won't double-debit)
@@ -102,45 +114,54 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
 
         // Handle confirmed status
         if (internalStatus === 'confirmed') {
-          // Confirm deposit (idempotent - won't double-confirm)
-          const confirmed = await depositStore.confirmByCanonical(rail, externalRef)
+          if (existingStakingDeposit) {
+            const confirmed = await depositStore.confirmByCanonical(rail, externalRef)
 
-          if (confirmed && confirmed.confirmedAt) {
-            // Credit NGN wallet (idempotent - won't double-credit)
-            const creditResult = await ngnWalletService.creditTopUp(
-              userId,
-              depositId,
-              amountNgn,
-              reference
-            )
+            if (confirmed && confirmed.confirmedAt) {
+              const creditResult = await ngnWalletService.creditTopUp(userId, depositId, amountNgn, reference)
 
-            // Only create staking outbox item if this was a new credit
-            // (existing staking flow for deposits)
-            if (creditResult.credited) {
-              const amountUsdc = String(Math.round((amountNgn / 1600) * 1e6) / 1e6)
-              const outboxItem = await outboxStore.create({
-                txType: TxType.STAKE,
-                source: 'deposit',
-                ref: depositId,
-                payload: {
+              if (creditResult.credited) {
+                const amountUsdc = String(Math.round((amountNgn / 1600) * 1e6) / 1e6)
+                const outboxItem = await outboxStore.create({
                   txType: TxType.STAKE,
-                  amountUsdc,
-                },
-              })
-              await sender.send(outboxItem)
-            }
+                  source: 'deposit',
+                  ref: depositId,
+                  payload: {
+                    txType: TxType.STAKE,
+                    amountUsdc,
+                  },
+                })
+                await sender.send(outboxItem)
+              }
 
-            logger.info('Deposit confirmed and wallet credited via webhook', {
-              depositId,
-              userId,
-              rail,
-              externalRef,
-              amountNgn,
-              newAvailableBalance: creditResult.newBalance.availableNgn,
-              credited: creditResult.credited,
-              providerStatus,
-              requestId: req.requestId,
-            })
+              logger.info('Deposit confirmed and wallet credited via webhook', {
+                depositId,
+                userId,
+                rail,
+                externalRef,
+                amountNgn,
+                newAvailableBalance: creditResult.newBalance.availableNgn,
+                credited: creditResult.credited,
+                providerStatus,
+                requestId: req.requestId,
+              })
+            }
+          } else {
+            const confirmed = await ngnDepositStore.setStatusByCanonical(rail, externalRef, 'confirmed')
+            if (confirmed) {
+              const creditResult = await ngnWalletService.creditTopUp(userId, depositId, amountNgn, reference)
+              logger.info('Wallet topup confirmed and wallet credited via webhook', {
+                depositId,
+                userId,
+                rail,
+                externalRef,
+                amountNgn,
+                newAvailableBalance: creditResult.newBalance.availableNgn,
+                credited: creditResult.credited,
+                providerStatus,
+                requestId: req.requestId,
+              })
+            }
           }
         }
 

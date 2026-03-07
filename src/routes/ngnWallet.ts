@@ -13,6 +13,9 @@ import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 import { requireNotFrozen } from '../middleware/risk.js'
+import { ngnTopupInitiateSchema, ngnTopupInitiateResponseSchema, type NgnTopupInitiateRequest } from '../schemas/ngnTopup.js'
+import { ngnDepositStore } from '../models/ngnDepositStore.js'
+import { getPaymentProvider } from '../payments/index.js'
 
 export function createNgnWalletRouter(ngnWalletService: NgnWalletService): Router {
   const router = Router()
@@ -140,6 +143,105 @@ export function createNgnWalletRouter(ngnWalletService: NgnWalletService): Route
       }
     }
   })
+
+  router.post(
+    '/topup/initiate',
+    authenticateToken,
+    validate(ngnTopupInitiateSchema, 'body'),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const userId = req.user!.id
+        const body = req.body as NgnTopupInitiateRequest
+        const idempotencyKeyRaw = req.header('Idempotency-Key')
+        const idempotencyKey = typeof idempotencyKeyRaw === 'string' && idempotencyKeyRaw.trim() !== '' ? idempotencyKeyRaw.trim() : null
+
+        if (idempotencyKey) {
+          const existing = await ngnDepositStore.getByUserIdAndIdempotencyKey(userId, idempotencyKey)
+          if (existing) {
+            if (!existing.externalRefSource || !existing.externalRef) {
+              throw new AppError(ErrorCode.CONFLICT, 409, 'Deposit initiation is in progress')
+            }
+            const response = {
+              success: true,
+              depositId: existing.depositId,
+              externalRefSource: existing.externalRefSource,
+              externalRef: existing.externalRef,
+              ...(existing.redirectUrl ? { redirectUrl: existing.redirectUrl } : {}),
+              ...(existing.bankDetails ? { bankDetails: existing.bankDetails } : {}),
+            }
+            res.status(200).json(ngnTopupInitiateResponseSchema.parse(response))
+            return
+          }
+        }
+
+        const deposit = await ngnDepositStore.create({
+          userId,
+          amountNgn: body.amountNgn,
+          rail: body.rail,
+          idempotencyKey,
+        })
+
+        let externalRefSource: string
+        let externalRef: string
+        let redirectUrl: string | undefined
+        let bankDetails: Record<string, string> | undefined
+
+        if (body.rail === 'bank_transfer') {
+          externalRefSource = 'bank'
+          externalRef = `bnk_${deposit.depositId}`
+          bankDetails = { accountNumber: '1234567890', bankName: 'Example Bank' }
+        } else {
+          const provider = getPaymentProvider(body.rail)
+          const init = await provider.initiatePayment({
+            amountNgn: body.amountNgn,
+            userId,
+            internalRef: deposit.depositId,
+            rail: body.rail,
+          })
+          externalRefSource = init.externalRefSource
+          externalRef = init.externalRef
+          redirectUrl = init.redirectUrl
+          if (init.bankDetails) {
+            bankDetails = init.bankDetails
+          }
+        }
+
+        await ngnDepositStore.attachExternalRef({
+          depositId: deposit.depositId,
+          externalRefSource,
+          externalRef,
+          redirectUrl: redirectUrl ?? null,
+          bankDetails: bankDetails ?? null,
+        })
+
+        await ngnWalletService.recordTopUpPending(deposit.depositId, body.amountNgn, externalRef)
+
+        logger.info('NGN topup initiated', {
+          userId,
+          depositId: deposit.depositId,
+          rail: body.rail,
+          requestId: req.requestId,
+        })
+
+        const response = {
+          success: true,
+          depositId: deposit.depositId,
+          externalRefSource,
+          externalRef,
+          ...(redirectUrl ? { redirectUrl } : {}),
+          ...(bankDetails ? { bankDetails } : {}),
+        }
+
+        res.status(201).json(ngnTopupInitiateResponseSchema.parse(response))
+      } catch (error) {
+        if (error instanceof AppError) {
+          res.status(error.status).json({ error: { code: error.code, message: error.message } })
+        } else {
+          next(error)
+        }
+      }
+    },
+  )
 
   return router
 }
