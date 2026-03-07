@@ -34,7 +34,6 @@ router.post(
 
     // MVP: No email provider integrated. For development, log OTP.
     // Never persist plaintext OTP.
-    // eslint-disable-next-line no-console
     console.log(`[auth] OTP for ${email}: ${otp}`)
 
     res.json({ message: 'OTP sent to your email' })
