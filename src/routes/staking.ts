@@ -13,7 +13,9 @@ import { depositInitiateSchema, type DepositInitiateRequest } from '../schemas/d
 import { stakeFromDepositSchema, type StakeFromDepositRequest } from '../schemas/stakeFromDeposit.js'
 import { stakeFinalizeSchema, type StakeFinalizeRequest } from '../schemas/stakeFinalize.js'
 import { conversionStore } from '../models/conversionStore.js'
+import { ConversionService } from '../services/conversionService.js'
 import { WalletService } from '../services/walletService.js'
+import { NgnWalletService } from '../services/ngnWalletService.js'
 import { stakingQuoteSchema, type StakingQuoteRequest } from '../schemas/stakingQuote.js'
 import { quoteStore } from '../models/quoteStore.js'
 import {
@@ -21,10 +23,12 @@ import {
   unstakeSchema,
   claimStakeRewardSchema,
   stakingPositionSchema,
+  stakeNgnSchema,
   type StakeRequest,
   type UnstakeRequest,
   type ClaimStakeRewardRequest,
   type StakingPositionResponse,
+  type StakeNgnRequest,
 } from '../schemas/staking.js'
 
 function formatAmount6(amountMicro: bigint): string {
@@ -39,6 +43,8 @@ export function createStakingRouter(
   adapter: SorobanAdapter,
   walletService: WalletService,
   linkedAddressStore: LinkedAddressStore,
+  ngnWalletService?: NgnWalletService,
+  conversionService?: ConversionService,
 ) {
   const router = Router()
   const sender = new OutboxSender(adapter)
@@ -380,6 +386,190 @@ export function createStakingRouter(
             ? 'Staking confirmed and receipt written to chain'
             : 'Staking confirmed, receipt queued for retry',
         })
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+
+  /**
+   * POST /api/staking/stake-ngn
+   * 
+   * Stake using NGN balance from internal wallet.
+   * Flow:
+   * 1. Reserve NGN (move from available to held)
+   * 2. Convert NGN to USDC
+   * 3. Debit NGN from held (after conversion)
+   * 4. Create on-chain stake transaction
+   * 
+   * Idempotent by externalRefSource:externalRef combination.
+   * Never stakes on-chain without NGN reserve.
+   */
+  router.post(
+    '/stake-ngn',
+    authenticateToken,
+    validate(stakeNgnSchema),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        if (!ngnWalletService || !conversionService) {
+          throw new AppError(
+            ErrorCode.INTERNAL_ERROR,
+            503,
+            'NGN staking service not available'
+          )
+        }
+
+        const userId = req.user?.id
+        if (!userId) {
+          throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication required')
+        }
+
+        const { amountNgn, externalRefSource, externalRef } = req.body as StakeNgnRequest
+
+        logger.info('NGN staking request received', {
+          userId,
+          amountNgn,
+          externalRefSource,
+          externalRef,
+          requestId: req.requestId,
+        })
+
+        // Step 1: Reserve NGN (idempotent by canonical ref)
+        // This moves funds from available to held and creates STAKE_RESERVE ledger entry
+        const reserveResult = await ngnWalletService.reserveNgnForStaking(
+          userId,
+          externalRefSource,
+          externalRef,
+          amountNgn
+        )
+
+        if (!reserveResult.reserved) {
+          // Already reserved - idempotent return
+          logger.info('NGN already reserved for this staking request', {
+            userId,
+            externalRefSource,
+            externalRef,
+            requestId: req.requestId,
+          })
+          
+          // Check if conversion already completed
+          const syntheticDepositId = `stake:${externalRefSource}:${externalRef}`
+          const existingConversion = await conversionStore.getByDepositId(syntheticDepositId)
+          
+          if (existingConversion?.status === 'completed') {
+            // Conversion already done, check if outbox item exists
+            const existingOutbox = await outboxStore.getByExternalRef(
+              externalRefSource,
+              externalRef
+            )
+            
+            return res.status(200).json({
+              success: true,
+              message: 'Staking already processed',
+              conversionId: existingConversion.conversionId,
+              amountUsdc: existingConversion.amountUsdc,
+              outboxId: existingOutbox?.id,
+            })
+          }
+          
+          // Still processing, return current status
+          return res.status(202).json({
+            success: true,
+            message: 'Staking in progress',
+            status: existingConversion?.status || 'reserved',
+          })
+        }
+
+        let conversion: any = null
+        try {
+          // Step 2: Create and execute conversion (idempotent)
+          conversion = await conversionService.convertForStaking({
+            externalRefSource,
+            externalRef,
+            userId,
+            amountNgn,
+          })
+
+          // Step 3: Debit NGN from held after successful conversion
+          await ngnWalletService.debitNgnForConversion(
+            userId,
+            externalRefSource,
+            externalRef,
+            amountNgn
+          )
+
+          // Step 4: Create outbox item for on-chain stake (idempotent)
+          const outboxItem = await outboxStore.create({
+            txType: TxType.STAKE,
+            source: externalRefSource,
+            ref: externalRef,
+            payload: {
+              txType: TxType.STAKE,
+              amountUsdc: conversion.amountUsdc,
+              amountNgn: conversion.amountNgn,
+              fxRateNgnPerUsdc: conversion.fxRateNgnPerUsdc,
+              externalRefSource,
+              externalRef,
+              userId,
+            },
+          })
+
+          // Attempt immediate on-chain write
+          const sent = await sender.send(outboxItem)
+
+          const updatedItem = await outboxStore.getById(outboxItem.id)
+          if (!updatedItem) {
+            throw new AppError(
+              ErrorCode.INTERNAL_ERROR,
+              500,
+              'Failed to retrieve outbox item after send attempt'
+            )
+          }
+
+          logger.info('NGN staking completed successfully', {
+            userId,
+            amountNgn,
+            amountUsdc: conversion.amountUsdc,
+            conversionId: conversion.conversionId,
+            outboxId: updatedItem.id,
+            requestId: req.requestId,
+          })
+
+          res.status(sent ? 200 : 202).json({
+            success: true,
+            conversionId: conversion.conversionId,
+            amountUsdc: conversion.amountUsdc,
+            fxRateNgnPerUsdc: conversion.fxRateNgnPerUsdc,
+            outboxId: updatedItem.id,
+            txId: updatedItem.txId,
+            status: updatedItem.status,
+            message: sent
+              ? 'NGN staking confirmed and receipt written to chain'
+              : 'NGN staking confirmed, receipt queued for retry',
+          })
+        } catch (conversionError) {
+          // Conversion failed - release NGN reserve
+          logger.error('Conversion failed, releasing NGN reserve', {
+            userId,
+            externalRefSource,
+            externalRef,
+            error: conversionError instanceof Error ? conversionError.message : String(conversionError),
+            requestId: req.requestId,
+          })
+
+          await ngnWalletService.releaseNgnReserve(
+            userId,
+            externalRefSource,
+            externalRef,
+            amountNgn
+          )
+
+          throw new AppError(
+            ErrorCode.INTERNAL_ERROR,
+            500,
+            `Conversion failed: ${conversionError instanceof Error ? conversionError.message : String(conversionError)}`
+          )
+        }
       } catch (error) {
         next(error)
       }
