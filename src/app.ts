@@ -25,6 +25,7 @@ import { StubConversionProvider } from "./services/conversionProvider.js"
 import { ConversionService } from "./services/conversionService.js"
 import { createWalletRouter } from "./routes/wallet.js"
 import { createNgnWalletRouter } from "./routes/ngnWallet.js"
+import { createAdminRiskRouter } from "./routes/adminRisk.js"
 import { WalletServiceImpl } from "./services/walletService.js"
 import { NgnWalletService } from "./services/ngnWalletService.js"
 import { EnvironmentEncryptionService } from "./services/walletService.js"
@@ -108,12 +109,13 @@ export function createApp() {
   app.use('/api', createReceiptsRouter(receiptRepo))
   app.use('/api/wallet', createWalletRateLimiter(env), createWalletRouter(walletService))
   app.use('/api/wallet/ngn', createNgnWalletRouter(ngnWalletService))
+  app.use('/api/admin/risk', createAdminRiskRouter(ngnWalletService))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter))
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
   app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore))
-  app.use('/api/webhooks', createWebhooksRouter())
+  app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
   app.use('/api/deposits', createDepositsRouter(conversionService))
 
 
