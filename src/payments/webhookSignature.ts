@@ -3,6 +3,15 @@ import type { Request } from 'express'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 
+// Extend Express Request to support rawBody middleware
+declare global {
+  namespace Express {
+    interface Request {
+      rawBody?: string
+    }
+  }
+}
+
 export type PaymentRail = 'paystack' | 'flutterwave' | 'bank_transfer' | 'manual_admin' | 'psp'
 
 export interface WebhookValidationResult {
