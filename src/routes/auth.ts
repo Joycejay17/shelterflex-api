@@ -194,7 +194,8 @@ router.post(
       const linkedAddressStore = new PostgresLinkedAddressStore()
       try {
         await linkedAddressStore.setLinkedAddress(user.id, normalizedAddress)
-      } catch {
+      } catch (error) {
+        console.error('Failed to set linked address:', error)
       }
     }
 
