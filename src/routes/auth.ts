@@ -9,6 +9,7 @@ import { generateOtpSalt, hashOtp, verifyOtpHash } from '../utils/otp.js'
 import { generateNonce, createChallengeMessage, verifySignature } from '../utils/wallet.js'
 import { otpChallengeStore, sessionStore, userStore, walletChallengeStore } from '../models/authStore.js'
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
+import { PostgresLinkedAddressStore } from '../models/linkedAddressStore.js'
 
 const router = Router()
 
@@ -145,7 +146,7 @@ router.post(
 router.post(
   '/wallet/verify',
   validate(walletVerifySchema, 'body'),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     const address = req.body.address as string
     const signature = req.body.signature as string
     const normalizedAddress = address.toLowerCase()
@@ -188,6 +189,14 @@ router.post(
 
     const token = generateToken()
     sessionStore.create(user.email, token)
+
+    if (process.env.DATABASE_URL) {
+      const linkedAddressStore = new PostgresLinkedAddressStore()
+      try {
+        await linkedAddressStore.setLinkedAddress(user.id, normalizedAddress)
+      } catch {
+      }
+    }
 
     res.json({ token, user })
   },
