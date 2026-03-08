@@ -1,6 +1,7 @@
-import { Keypair } from '@stellar/stellar-sdk'
 import { createCipheriv, createDecipheriv, randomBytes, scrypt } from 'node:crypto'
+import { Keypair } from '@stellar/stellar-sdk'
 import { WalletStore } from '../models/wallet.js'
+import { CustodialWalletService } from './CustodialWalletService.js'
 
 export interface EncryptionService {
   encrypt(data: Buffer, keyId: string): Promise<{ cipherText: Buffer; keyId: string }>
@@ -18,8 +19,9 @@ export interface WalletService {
 export class WalletServiceImpl implements WalletService {
   constructor(
     private walletStore: WalletStore,
-    private encryptionService: EncryptionService
-  ) {}
+    private encryptionService: EncryptionService,
+    private custodialService: CustodialWalletService
+  ) { }
 
   async createWalletForUser(userId: string): Promise<{ publicKey: string }> {
     // Check if wallet already exists
@@ -30,7 +32,7 @@ export class WalletServiceImpl implements WalletService {
 
     // Generate new Stellar keypair
     const keypair = Keypair.random()
-    const secretKey = keypair.rawSecretKey()
+    const secretKey = Buffer.from(keypair.secret(), 'utf8')
     const publicKey = keypair.publicKey()
 
     // Encrypt the secret key
@@ -53,43 +55,11 @@ export class WalletServiceImpl implements WalletService {
   }
 
   async signMessage(userId: string, message: string): Promise<{ signature: string; publicKey: string }> {
-    const encryptedKey = await this.walletStore.getEncryptedKey(userId)
-    if (!encryptedKey) {
-      throw new Error(`No wallet found for user ${userId}`)
-    }
-
-    const secretKey = await this.encryptionService.decrypt(
-      Buffer.from(encryptedKey.cipherText, 'base64'),
-      encryptedKey.keyId
-    )
-
-    const keypair = Keypair.fromRawEd25519Seed(secretKey)
-    const signature = keypair.sign(Buffer.from(message)).toString('base64')
-
-    return {
-      signature,
-      publicKey: keypair.publicKey(),
-    }
+    return this.custodialService.signMessage(userId, message)
   }
 
   async signSorobanTransaction(userId: string, xdr: string): Promise<{ signature: string; publicKey: string }> {
-    const encryptedKey = await this.walletStore.getEncryptedKey(userId)
-    if (!encryptedKey) {
-      throw new Error(`No wallet found for user ${userId}`)
-    }
-
-    const secretKey = await this.encryptionService.decrypt(
-      Buffer.from(encryptedKey.cipherText, 'base64'),
-      encryptedKey.keyId
-    )
-
-    const keypair = Keypair.fromRawEd25519Seed(secretKey)
-    const signature = keypair.sign(Buffer.from(xdr, 'base64')).toString('base64')
-
-    return {
-      signature,
-      publicKey: keypair.publicKey(),
-    }
+    return this.custodialService.signTransaction(userId, xdr)
   }
 }
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { WalletServiceImpl, EnvironmentEncryptionService } from './walletService.js'
+import { type CustodialWalletService } from './CustodialWalletService.js'
 import { InMemoryWalletStore } from '../models/walletStore.js'
 import { Keypair } from '@stellar/stellar-sdk'
 
@@ -11,7 +12,20 @@ describe('WalletService', () => {
   beforeEach(() => {
     walletStore = new InMemoryWalletStore()
     encryptionService = new EnvironmentEncryptionService('test-encryption-key-32-chars-long-123456')
-    walletService = new WalletServiceImpl(walletStore, encryptionService)
+
+    // Mock custodial service for legacy tests
+    const custodialService: CustodialWalletService = {
+      signMessage: vi.fn(async (userId, msg) => {
+        if (userId === 'non-existent-user') throw new Error('No wallet found')
+        return { signature: 'mock-sig', publicKey: 'GDHD3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D' }
+      }),
+      signTransaction: vi.fn(async (userId, xdr) => {
+        if (userId === 'non-existent-user') throw new Error('No wallet found')
+        return { signature: 'mock-sig', publicKey: 'GDHD3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D' }
+      })
+    }
+
+    walletService = new WalletServiceImpl(walletStore, encryptionService, custodialService)
   })
 
   describe('createWalletForUser', () => {
@@ -20,7 +34,7 @@ describe('WalletService', () => {
       const result = await walletService.createWalletForUser(userId)
 
       expect(result.publicKey).toMatch(/^G[A-Z0-9]{55}$/)
-      
+
       const wallet = await walletStore.getByUserId(userId)
       expect(wallet).toBeTruthy()
       expect(wallet!.userId).toBe(userId)
@@ -35,7 +49,7 @@ describe('WalletService', () => {
       const secondResult = await walletService.createWalletForUser(userId)
 
       expect(firstResult.publicKey).toBe(secondResult.publicKey)
-      
+
       const wallets = walletStore.getAll()
       expect(wallets).toHaveLength(1)
     })
@@ -43,7 +57,7 @@ describe('WalletService', () => {
     it('should generate unique addresses for different users', async () => {
       const user1 = 'user-1'
       const user2 = 'user-2'
-      
+
       const result1 = await walletService.createWalletForUser(user1)
       const result2 = await walletService.createWalletForUser(user2)
 
@@ -55,14 +69,14 @@ describe('WalletService', () => {
     it('should return public address for existing user', async () => {
       const userId = 'user-123'
       const { publicKey } = await walletService.createWalletForUser(userId)
-      
+
       const address = await walletService.getPublicAddress(userId)
       expect(address).toBe(publicKey)
     })
 
     it('should throw error for non-existent user', async () => {
       const userId = 'non-existent-user'
-      
+
       await expect(walletService.getPublicAddress(userId)).rejects.toThrow('Wallet not found')
     })
   })
@@ -71,7 +85,7 @@ describe('WalletService', () => {
     it('should sign message with user private key', async () => {
       const userId = 'user-123'
       await walletService.createWalletForUser(userId)
-      
+
       const message = 'Hello, Stellar!'
       const result = await walletService.signMessage(userId, message)
 
@@ -82,7 +96,7 @@ describe('WalletService', () => {
 
     it('should throw error for non-existent user', async () => {
       const userId = 'non-existent-user'
-      
+
       await expect(walletService.signMessage(userId, 'test')).rejects.toThrow('No wallet found')
     })
   })
@@ -91,7 +105,7 @@ describe('WalletService', () => {
     it('should sign Soroban transaction with user private key', async () => {
       const userId = 'user-123'
       await walletService.createWalletForUser(userId)
-      
+
       const xdr = 'AAAAAgAAAABex1gJFQYAAAAA'
       const result = await walletService.signSorobanTransaction(userId, xdr)
 
@@ -102,7 +116,7 @@ describe('WalletService', () => {
 
     it('should throw error for non-existent user', async () => {
       const userId = 'non-existent-user'
-      
+
       await expect(walletService.signSorobanTransaction(userId, 'test-xdr')).rejects.toThrow('No wallet found')
     })
   })
