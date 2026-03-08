@@ -15,6 +15,11 @@ import type {
 
 export class StubPspProvider implements PaymentProvider {
   readonly name = 'psp'
+  private readonly rail: string
+
+  constructor(rail: string = 'psp') {
+    this.rail = rail
+  }
 
   async initiatePayment(input: InitiatePaymentInput): Promise<InitiatePaymentResult> {
     const externalRefSource = input.rail
@@ -36,7 +41,8 @@ export class StubPspProvider implements PaymentProvider {
   }
 
   async parseAndValidateWebhook(req: Request): Promise<ParseWebhookResult> {
-    requireValidWebhookSignature(req)
+    // Use provider-specific signature validation with the rail
+    requireValidWebhookSignature(req, this.rail as any)
 
     const body = req.body as {
       externalRefSource?: string

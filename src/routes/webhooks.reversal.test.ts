@@ -28,8 +28,12 @@ describe('Webhooks - Deposit Reversal', () => {
     app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
     app.use(errorHandler)
 
-    // Disable webhook signature for tests
+    // Disable webhook signature for tests and clear secrets
     process.env.WEBHOOK_SIGNATURE_ENABLED = 'false'
+    delete process.env.PAYSTACK_SECRET
+    delete process.env.FLUTTERWAVE_SECRET
+    delete process.env.MANUAL_ADMIN_SECRET
+    delete process.env.WEBHOOK_SECRET
   })
 
   describe('POST /api/webhooks/reversals/:provider', () => {

@@ -15,6 +15,9 @@ describe('Payments webhook', () => {
     await quoteStore.clear()
     delete process.env.WEBHOOK_SIGNATURE_ENABLED
     delete process.env.WEBHOOK_SECRET
+    delete process.env.PAYSTACK_SECRET
+    delete process.env.FLUTTERWAVE_SECRET
+    delete process.env.MANUAL_ADMIN_SECRET
   })
 
   afterEach(async () => {
@@ -57,7 +60,7 @@ describe('Payments webhook', () => {
 
   it('rejects invalid signature when enabled', async () => {
     process.env.WEBHOOK_SIGNATURE_ENABLED = 'true'
-    process.env.WEBHOOK_SECRET = 'secret123'
+    process.env.PAYSTACK_SECRET = 'paystack_secret_123'
 
     const quote = await quoteStore.create({
       userId: 'user-002',
@@ -84,9 +87,52 @@ describe('Payments webhook', () => {
 
     await request(app)
       .post('/api/webhooks/payments/paystack')
-      .set('x-webhook-signature', 'wrong')
+      .set('x-paystack-signature', 'wrong')
       .send(payload)
       .expect(401)
+  })
+
+  it('accepts valid Paystack signature when enabled', async () => {
+    const crypto = await import('node:crypto')
+    const secret = 'paystack_test_secret'
+    process.env.WEBHOOK_SIGNATURE_ENABLED = 'true'
+    process.env.PAYSTACK_SECRET = secret
+
+    const quote = await quoteStore.create({
+      userId: 'user-002-valid',
+      amountNgn: 320000,
+      paymentRail: 'paystack',
+      fxRateNgnPerUsdc: 1600,
+      feePercent: 0,
+      slippagePercent: 0,
+      expiryMs: 3600000,
+    })
+
+    const init = await request(app)
+      .post('/api/staking/deposit/initiate')
+      .set('x-user-id', 'user-002-valid')
+      .send({ quoteId: quote.quoteId, paymentRail: 'paystack' })
+      .expect(201)
+
+    const { externalRef } = init.body
+    const payload = {
+      externalRefSource: 'paystack',
+      externalRef,
+      status: 'confirmed',
+    }
+
+    // Generate valid HMAC-SHA512 signature
+    const rawBody = JSON.stringify(payload)
+    const validSignature = crypto
+      .createHmac('sha512', secret)
+      .update(rawBody, 'utf8')
+      .digest('hex')
+
+    await request(app)
+      .post('/api/webhooks/payments/paystack')
+      .set('x-paystack-signature', validSignature)
+      .send(payload)
+      .expect(200)
   })
 
   it('credits NGN wallet on confirmation', async () => {
