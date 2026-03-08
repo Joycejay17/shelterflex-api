@@ -30,8 +30,8 @@ import { createAdminWithdrawalsRouter } from "./routes/adminWithdrawals.js"
 import { WalletServiceImpl, EnvironmentEncryptionService } from "./services/walletService.js"
 import { CustodialWalletServiceImpl } from "./services/CustodialWalletServiceImpl.js"
 import { NgnWalletService } from "./services/ngnWalletService.js"
-import { InMemoryWalletStore } from "./models/walletStore.js"
-import { InMemoryLinkedAddressStore } from "./models/linkedAddressStore.js"
+import { InMemoryWalletStore, PostgresWalletStore } from "./models/walletStore.js"
+import { InMemoryLinkedAddressStore, PostgresLinkedAddressStore } from "./models/linkedAddressStore.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
 import authRouter from "./routes/auth.js"
 import { StubReceiptRepository, PostgresReceiptRepository } from "./indexer/receipt-repository.js"
@@ -63,7 +63,9 @@ export function createApp() {
 
   // Initialize earnings service with stub data layer
   // Initialize wallet service and store
-  const walletStore = new InMemoryWalletStore()
+  const walletStore = process.env.DATABASE_URL
+    ? new PostgresWalletStore()
+    : new InMemoryWalletStore()
   const encryptionService = new EnvironmentEncryptionService(env.ENCRYPTION_KEY)
 
   // Bridge the old interfaces to the new security boundary interfaces
@@ -96,7 +98,9 @@ export function createApp() {
   )
 
   const walletService = new WalletServiceImpl(walletStore, encryptionService, custodialService)
-  const linkedAddressStore = new InMemoryLinkedAddressStore()
+  const linkedAddressStore = process.env.DATABASE_URL
+    ? new PostgresLinkedAddressStore()
+    : new InMemoryLinkedAddressStore()
   const ngnWalletService = new NgnWalletService()
 
   const rewardsDataLayer = new StubRewardsDataLayer()
