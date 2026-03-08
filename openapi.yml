@@ -1737,6 +1737,95 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/staking/quote:
+    post:
+      summary: Get staking quote
+      description: Returns a priced conversion from NGN to USDC for staking. Includes fees, slippage, and expiry window.
+      operationId: getStakingQuote
+      tags:
+        - Staking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - amountNgn
+                - paymentRail
+              properties:
+                amountNgn:
+                  type: number
+                  description: Amount in Nigerian Naira to stake
+                  minimum: 1
+                  example: 160000
+                paymentRail:
+                  type: string
+                  enum: [paystack, flutterwave, bank_transfer, manual_admin]
+                  description: Payment provider for the deposit
+                  example: manual_admin
+      responses:
+        '201':
+          description: Quote created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - quoteId
+                  - amountNgn
+                  - estimatedAmountUsdc
+                  - fxRateNgnPerUsdc
+                  - feesNgn
+                  - expiresAt
+                  - disclaimer
+                properties:
+                  quoteId:
+                    type: string
+                    format: uuid
+                    description: Unique identifier for the quote
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  amountNgn:
+                    type: number
+                    description: Original NGN amount
+                    example: 160000
+                  estimatedAmountUsdc:
+                    type: string
+                    description: Estimated USDC amount after fees and FX conversion (6 decimal places)
+                    pattern: '^\d+(\.\d{1,6})?$'
+                    example: "97.560976"
+                  fxRateNgnPerUsdc:
+                    type: number
+                    description: FX rate used (NGN per 1 USDC)
+                    example: 1600
+                  feesNgn:
+                    type: number
+                    description: Fees deducted in NGN
+                    example: 2400
+                  expiresAt:
+                    type: string
+                    format: date-time
+                    description: Quote expiry timestamp (ISO 8601)
+                    example: "2024-01-15T10:05:00Z"
+                  disclaimer:
+                    type: string
+                    description: Disclaimer about FX rate fluctuations
+                    example: "Final USDC may differ slightly due to FX movements"
+        '400':
+          description: Validation error (invalid amount, exceeds maximum, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
   /api/staking/deposit/initiate:
     post:
       summary: Initiate NGN deposit for staking
