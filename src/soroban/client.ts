@@ -4,6 +4,8 @@ export type SorobanConfig = {
   contractId?: string
   stakingPoolId?: string
   stakingRewardsId?: string
+  usdcTokenId?: string
+  adminSecret?: string
 }
 
 export function getSorobanConfigFromEnv(env: NodeJS.ProcessEnv): SorobanConfig {
@@ -13,5 +15,7 @@ export function getSorobanConfigFromEnv(env: NodeJS.ProcessEnv): SorobanConfig {
     contractId: env.SOROBAN_CONTRACT_ID,
     stakingPoolId: env.SOROBAN_STAKING_POOL_ID,
     stakingRewardsId: env.SOROBAN_STAKING_REWARDS_ID,
+    usdcTokenId: env.SOROBAN_USDC_TOKEN_ID,
+    adminSecret: env.SOROBAN_ADMIN_SECRET,
   }
 }
