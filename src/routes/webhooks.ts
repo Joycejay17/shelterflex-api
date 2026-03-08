@@ -209,9 +209,8 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
       try {
         const provider = String(req.params.provider)
 
-        // Enforce webhook signature validation (always on in production)
-        // Reversal webhooks have a different payload shape, so we validate signature only.
-        requireValidWebhookSignature(req)
+        // Enforce provider-specific webhook signature validation (always on in production)
+        requireValidWebhookSignature(req, provider as any)
 
         const { provider: bodyProvider, providerRef, reversalRef, eventType } = req.body
 
