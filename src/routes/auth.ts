@@ -86,9 +86,6 @@ router.post(
       const user = await userStore.getOrCreateByEmail(email)
       const token = generateToken()
       await sessionStore.create(email, token, { ip: req.ip, userAgent: req.get('User-Agent') })
-    const user = userStore.getOrCreateByEmail(email)
-    const token = generateToken()
-    sessionStore.create(email, token, { userAgent: req.get('User-Agent') })
 
       res.json({ token, user })
     } catch (error) {
@@ -105,7 +102,6 @@ router.post('/logout', async (req: Request, res: Response) => {
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
   if (token) {
     await sessionStore.deleteByToken(token)
-    sessionStore.revokeByToken(token)
   }
   res.json({ message: 'Logged out' })
 })
@@ -212,7 +208,6 @@ router.post(
 
       const token = generateToken()
       await sessionStore.create(user.email, token, { ip: req.ip, userAgent: req.get('User-Agent') })
-      sessionStore.create(user.email, token, { userAgent: req.get('User-Agent') })
 
       if (process.env.DATABASE_URL) {
         const linkedAddressStore = new PostgresLinkedAddressStore()

@@ -12,44 +12,8 @@ import {
 } from '../repositories/AuthRepository.js'
 
 export type { UserRole, User, OtpChallenge, Session, WalletChallenge }
-export type UserRole = 'tenant' | 'landlord' | 'agent'
-
-export interface User {
-  id: string
-  email: string
-  createdAt: Date
-  name: string
-  role: UserRole
-  walletAddress?: string
-}
-
-export interface OtpChallenge {
-  email: string
-  otpHash: string
-  salt: string
-  expiresAt: Date
-  attempts: number
-}
-
-export interface Session {
-  token: string
-  email: string
-  createdAt: Date
-  expiresAt: Date
-  lastSeenAt: Date
-  revokedAt?: Date
-  userAgent?: string
-}
 
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
-
-export interface WalletChallenge {
-  address: string
-  challengeXdr: string
-  nonce: string
-  expiresAt: Date
-  attempts: number
-}
 
 class UserStore {
   private postgresRepo = new PostgresUserRepository()
@@ -243,20 +207,15 @@ class SessionStore {
   private postgresRepo = new PostgresSessionRepository()
   private fallbackCache = new Map<string, Session>()
 
-  async create(email: string, token: string, auditInfo?: { ip?: string; userAgent?: string }): Promise<Session> {
-  create(
+  async create(
     email: string,
     token: string,
-    options?: { ttlMs?: number; userAgent?: string },
-  ): Session {
-    const now = new Date()
+    auditInfo?: { ip?: string; userAgent?: string },
+  ): Promise<Session> {
     const session: Session = {
       token,
       email,
-      createdAt: now,
-      lastSeenAt: now,
-      expiresAt: new Date(now.getTime() + (options?.ttlMs ?? SESSION_TTL_MS)),
-      ...(options?.userAgent ? { userAgent: options.userAgent } : {}),
+      createdAt: new Date(),
     }
 
     try {
@@ -272,31 +231,17 @@ class SessionStore {
   async getByToken(token: string): Promise<Session | undefined> {
     try {
       const session = await this.postgresRepo.getByToken(token)
-      if (session) {
-        return {
-          token: session.token,
-          email: session.email,
-          createdAt: session.createdAt
-        }
+      if (!session) return undefined
+
+      return {
+        token: session.token,
+        email: session.email,
+        createdAt: session.createdAt,
       }
-      return undefined
     } catch (error) {
       console.warn('Postgres session lookup failed, using fallback cache:', error)
       return this.fallbackCache.get(token)
     }
-  getByToken(token: string): Session | undefined {
-    const session = this.sessionsByToken.get(token)
-    if (!session) return undefined
-    if (session.revokedAt) return undefined
-    if (new Date() > session.expiresAt) return undefined
-    // Touch lastSeenAt
-    session.lastSeenAt = new Date()
-    return session
-  }
-
-  /** Returns the raw session record even if expired/revoked — for internal use only. */
-  getRawByToken(token: string): Session | undefined {
-    return this.sessionsByToken.get(token)
   }
 
   async deleteByToken(token: string): Promise<void> {
@@ -308,29 +253,17 @@ class SessionStore {
     }
   }
 
-  revokeByToken(token: string): void {
-    const session = this.sessionsByToken.get(token)
-    if (session) {
-      session.revokedAt = new Date()
-    }
-  }
-
   revokeAllByEmail(email: string): number {
+    // Postgres-backed session revocation-by-user would require userId, not email.
+    // This fallback implementation only affects in-memory sessions.
     let count = 0
-    for (const session of this.sessionsByToken.values()) {
-      if (session.email === email && !session.revokedAt) {
-        session.revokedAt = new Date()
+    for (const [token, session] of this.fallbackCache.entries()) {
+      if (session.email === email) {
+        this.fallbackCache.delete(token)
         count++
       }
     }
     return count
-  }
-
-  getActiveSessionsByEmail(email: string): Session[] {
-    const now = new Date()
-    return Array.from(this.sessionsByToken.values()).filter(
-      (s) => s.email === email && !s.revokedAt && now <= s.expiresAt,
-    )
   }
 
   clear(): void {

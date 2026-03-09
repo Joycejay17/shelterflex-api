@@ -28,8 +28,6 @@ export async function authenticateToken(req: AuthenticatedRequest, res: Response
   }
 
   const session = await sessionStore.getByToken(token)
-  // getByToken already checks expiry + revocation and touches lastSeenAt
-  const session = sessionStore.getByToken(token)
   if (!session) {
     logger.warn('Unauthorized access attempt - invalid or expired token', {
       ip: req.ip,
