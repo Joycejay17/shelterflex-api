@@ -40,6 +40,7 @@ import { createReceiptsRouter } from "./routes/receiptsRoute.js"
 import { getPool } from "./db.js"
 import { StakingService } from "./services/stakingService.js"
 import { StakingFinalizer } from "./jobs/stakingFinalizer.js"
+import { initOutboxStore, PostgresOutboxStore } from "./outbox/store.js"
 
 
 export function createApp() {
@@ -125,6 +126,11 @@ export function createApp() {
   // Staking Finalizer Job
   const stakingFinalizer = new StakingFinalizer(stakingService)
   stakingFinalizer.start()
+
+  // Outbox store — swap to Postgres when DATABASE_URL is set
+  if (process.env.DATABASE_URL) {
+    initOutboxStore(new PostgresOutboxStore())
+  }
 
   // Indexer
   const receiptRepo = process.env.DATABASE_URL

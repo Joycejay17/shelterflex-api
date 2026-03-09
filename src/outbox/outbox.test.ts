@@ -115,7 +115,7 @@ describe('Outbox Store', () => {
       payload: { dealId: 'deal-002', amount: '2000', payer: 'GDEF456' },
     })
 
-    await outboxStore.updateStatus(item2.id, OutboxStatus.FAILED, 'Network error')
+    await outboxStore.updateStatus(item2.id, OutboxStatus.FAILED, { error: 'Network error' })
 
     const pending = await outboxStore.listByStatus(OutboxStatus.PENDING)
     const failed = await outboxStore.listByStatus(OutboxStatus.FAILED)
@@ -136,7 +136,7 @@ describe('Outbox Store', () => {
     const updated = await outboxStore.updateStatus(
       item.id,
       OutboxStatus.FAILED,
-      'Connection timeout',
+      { error: 'Connection timeout' },
     )
 
     expect(updated?.status).toBe(OutboxStatus.FAILED)
