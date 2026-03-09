@@ -27,7 +27,7 @@ import { createWalletRouter } from "./routes/wallet.js"
 import { createNgnWalletRouter } from "./routes/ngnWallet.js"
 import { createAdminRiskRouter } from "./routes/adminRisk.js"
 import { createAdminWithdrawalsRouter } from "./routes/adminWithdrawals.js"
-import { WalletServiceImpl, EnvironmentEncryptionService } from "./services/walletService.js"
+import { WalletServiceImpl, EnvironmentEncryptionService, KeyringEncryptionService, readEncryptionKeyringFromEnv } from "./services/walletService.js"
 import { CustodialWalletServiceImpl } from "./services/CustodialWalletServiceImpl.js"
 import { NgnWalletService } from "./services/ngnWalletService.js"
 import { InMemoryWalletStore, PostgresWalletStore } from "./models/walletStore.js"
@@ -66,7 +66,11 @@ export function createApp() {
   const walletStore = process.env.DATABASE_URL
     ? new PostgresWalletStore()
     : new InMemoryWalletStore()
-  const encryptionService = new EnvironmentEncryptionService(env.ENCRYPTION_KEY)
+  const keyring = readEncryptionKeyringFromEnv(process.env as Record<string, string | undefined>)
+  const hasKeyring = Object.keys(keyring).length > 0
+  const encryptionService = hasKeyring
+    ? new KeyringEncryptionService(keyring)
+    : new EnvironmentEncryptionService(env.ENCRYPTION_KEY)
 
   // Bridge the old interfaces to the new security boundary interfaces
   const keyStoreAdapter = {
@@ -84,10 +88,15 @@ export function createApp() {
   }
 
   const decryptorAdapter = {
-    decrypt: (envelope: unknown) => {
+    decrypt: async (envelope: unknown) => {
       const cipherText = Buffer.from(JSON.stringify(envelope), 'utf8')
-      const env = envelope as { version: number } // Simple check
-      return encryptionService.decrypt(cipherText, 'env-key-1')
+      const record = envelope as { version: number }
+      void record
+      const keyVersion = (envelope as any)?.keyVersion
+      if (typeof keyVersion !== 'string' || !keyVersion) {
+        throw new Error('Missing key version for decryption')
+      }
+      return encryptionService.decrypt(cipherText, keyVersion)
     }
   }
 
@@ -157,7 +166,7 @@ export function createApp() {
   app.use('/api/admin/risk', createAdminRiskRouter(ngnWalletService))
   app.use('/api/admin', createAdminWithdrawalsRouter(ngnWalletService))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
-  app.use('/api/admin', createAdminRouter(sorobanAdapter))
+  app.use('/api/admin', createAdminRouter(sorobanAdapter, walletStore as any, encryptionService as any))
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
   app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
