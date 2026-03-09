@@ -77,7 +77,7 @@ export function createAdminRouter(adapter: SorobanAdapter, walletStore?: WalletS
           work.push(userId)
         } else {
           throw new AppError(
-            ErrorCode.NOT_IMPLEMENTED,
+            ErrorCode.INTERNAL_ERROR,
             501,
             'Batch rewrap is not implemented for this wallet store; supply userId',
           )
