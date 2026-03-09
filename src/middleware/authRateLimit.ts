@@ -18,15 +18,19 @@ function bumpCounter(map: Map<string, Counter>, key: string, windowMs: number): 
   if (!existing || now >= existing.resetAtMs) {
     const c: Counter = { count: 1, resetAtMs: now + windowMs }
     map.set(key, c)
+    console.log(`[RateLimit] Reset/New entry for ${key}. Count: 1`)
     return c
   }
 
   existing.count += 1
+  console.log(`[RateLimit] Bumped ${key}. Count: ${existing.count}`)
   return existing
 }
 
 const emailOtpRequestCounters = new Map<string, Counter>()
 const ipOtpRequestCounters = new Map<string, Counter>()
+const walletChallengeRequestCounters = new Map<string, Counter>()
+const ipWalletChallengeRequestCounters = new Map<string, Counter>()
 
 export function otpRequestRateLimit(options?: {
   windowMs?: number
@@ -71,7 +75,53 @@ export function otpRequestRateLimit(options?: {
   }
 }
 
+export function walletAuthRateLimit(options?: {
+  windowMs?: number
+  maxPerAddress?: number
+  maxPerIp?: number
+}) {
+  const windowMs = options?.windowMs ?? 15 * 60 * 1000
+  const maxPerAddress = options?.maxPerAddress ?? 20
+  const maxPerIp = options?.maxPerIp ?? 50
+
+  return (req: Request, _res: Response, next: NextFunction) => {
+    const address = typeof req.body?.address === 'string' ? req.body.address : ''
+    const ip = req.ip
+
+    if (address) {
+      const c = bumpCounter(walletChallengeRequestCounters, address.toLowerCase(), windowMs)
+      if (c.count > maxPerAddress) {
+        return next(
+          new AppError(
+            ErrorCode.TOO_MANY_REQUESTS,
+            429,
+            'Too many requests for this wallet. Please try again later.',
+          ),
+        )
+      }
+    }
+
+    if (ip) {
+      const c = bumpCounter(ipWalletChallengeRequestCounters, ip, windowMs)
+      if (c.count > maxPerIp) {
+        return next(
+          new AppError(
+            ErrorCode.TOO_MANY_REQUESTS,
+            429,
+            'Too many requests from this IP. Please try again later.',
+          ),
+        )
+      }
+    }
+
+    next()
+  }
+}
+
 export function _testOnly_clearAuthRateLimits() {
+  console.log('[RateLimit] Clearing all rate limit maps')
   emailOtpRequestCounters.clear()
   ipOtpRequestCounters.clear()
+  walletChallengeRequestCounters.clear()
+  ipWalletChallengeRequestCounters.clear()
 }

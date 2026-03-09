@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { validate } from '../middleware/validate.js'
-import { otpRequestRateLimit } from '../middleware/authRateLimit.js'
+import { otpRequestRateLimit, walletAuthRateLimit } from '../middleware/authRateLimit.js'
 import { requestOtpSchema, verifyOtpSchema, walletChallengeSchema, walletVerifySchema } from '../schemas/auth.js'
 import { generateOtp, generateToken } from '../utils/tokens.js'
 import { generateOtpSalt, hashOtp, verifyOtpHash } from '../utils/otp.js'
@@ -113,6 +113,7 @@ router.get('/me', authenticateToken, (req: AuthenticatedRequest, res: Response) 
 router.post(
   '/wallet/challenge',
   validate(walletChallengeSchema, 'body'),
+  walletAuthRateLimit(),
   (req: Request, res: Response) => {
     const address = req.body.address as string
     const normalizedAddress = address.toLowerCase()
@@ -146,60 +147,65 @@ router.post(
 router.post(
   '/wallet/verify',
   validate(walletVerifySchema, 'body'),
-  async (req: Request, res: Response) => {
-    const address = req.body.address as string
-    const signature = req.body.signature as string
-    const normalizedAddress = address.toLowerCase()
+  walletAuthRateLimit(),
+  async (req: Request, res: Response, next: import('express').NextFunction) => {
+    try {
+      const address = req.body.address as string
+      const signature = req.body.signature as string
+      const normalizedAddress = address.toLowerCase()
 
-    const challenge = walletChallengeStore.getByAddress(normalizedAddress)
-    if (!challenge) {
-      throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'No challenge requested for this address')
-    }
-
-    if (new Date() > challenge.expiresAt) {
-      walletChallengeStore.deleteByAddress(normalizedAddress)
-      throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Challenge has expired')
-    }
-
-    if (challenge.attempts >= WALLET_MAX_ATTEMPTS) {
-      walletChallengeStore.deleteByAddress(normalizedAddress)
-      throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Too many failed attempts')
-    }
-
-    const isValid = verifySignature(normalizedAddress, challenge.message, signature)
-    if (!isValid) {
-      challenge.attempts += 1
-      walletChallengeStore.set(challenge)
-      throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid signature')
-    }
-
-    walletChallengeStore.deleteByAddress(normalizedAddress)
-
-    // Check if user already exists with this wallet
-    let user = userStore.getByWalletAddress(normalizedAddress)
-    
-    if (!user) {
-      // Create new user with wallet as primary identifier
-      // We need an email for the user store, so we'll create a placeholder
-      const placeholderEmail = `${normalizedAddress}@wallet.user`
-      user = userStore.getOrCreateByEmail(placeholderEmail)
-      userStore.linkWalletToUser(placeholderEmail, normalizedAddress)
-      user.name = `Wallet ${normalizedAddress.slice(0, 6)}...${normalizedAddress.slice(-4)}`
-    }
-
-    const token = generateToken()
-    sessionStore.create(user.email, token)
-
-    if (process.env.DATABASE_URL) {
-      const linkedAddressStore = new PostgresLinkedAddressStore()
-      try {
-        await linkedAddressStore.setLinkedAddress(user.id, normalizedAddress)
-      } catch (error) {
-        console.error('Failed to set linked address:', error)
+      const challenge = walletChallengeStore.getByAddress(normalizedAddress)
+      if (!challenge) {
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
       }
-    }
 
-    res.json({ token, user })
+      if (new Date() > challenge.expiresAt) {
+        walletChallengeStore.deleteByAddress(normalizedAddress)
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
+      }
+
+      if (challenge.attempts >= WALLET_MAX_ATTEMPTS) {
+        walletChallengeStore.deleteByAddress(normalizedAddress)
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
+      }
+
+      const isValid = verifySignature(normalizedAddress, challenge.message, signature)
+      if (!isValid) {
+        challenge.attempts += 1
+        walletChallengeStore.set(challenge)
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
+      }
+
+      walletChallengeStore.deleteByAddress(normalizedAddress)
+
+      // Check if user already exists with this wallet
+      let user = userStore.getByWalletAddress(normalizedAddress)
+      
+      if (!user) {
+        // Create new user with wallet as primary identifier
+        // We need an email for the user store, so we'll create a placeholder
+        const placeholderEmail = `${normalizedAddress}@wallet.user`
+        user = userStore.getOrCreateByEmail(placeholderEmail)
+        userStore.linkWalletToUser(placeholderEmail, normalizedAddress)
+        user.name = `Wallet ${normalizedAddress.slice(0, 6)}...${normalizedAddress.slice(-4)}`
+      }
+
+      const token = generateToken()
+      sessionStore.create(user.email, token)
+
+      if (process.env.DATABASE_URL) {
+        const linkedAddressStore = new PostgresLinkedAddressStore()
+        try {
+          await linkedAddressStore.setLinkedAddress(user.id, normalizedAddress)
+        } catch (error) {
+          console.error('Failed to set linked address:', error)
+        }
+      }
+
+      res.json({ token, user })
+    } catch (error) {
+      next(error)
+    }
   },
 )
 
