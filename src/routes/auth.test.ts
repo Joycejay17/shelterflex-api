@@ -97,7 +97,7 @@ describe('Auth Routes (Wallet)', () => {
   })
 
   it('POST /api/auth/wallet/challenge should create challenge XDR', async () => {
-    const address = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    const address = 'GCSHKPO7MLEXGSZZF2KF54LMNDXNLORLRKD24DXXWHVJ5U6CVXVQAOVT'
 
     const res = await request.post('/api/auth/wallet/challenge').send({ address })
     expect(res.status).toBe(200)
@@ -105,9 +105,9 @@ describe('Auth Routes (Wallet)', () => {
     expect(res.body).toHaveProperty('challengeXdr')
     expect(res.body).toHaveProperty('expiresAt')
 
-    const challenge = walletChallengeStore.getByAddress(address.toLowerCase())
+    const challenge = walletChallengeStore.getByAddress(address)
     expect(challenge).toBeDefined()
-    expect(challenge!.address).toBe(address.toLowerCase())
+    expect(challenge!.address).toBe(address)
     expect(typeof challenge!.challengeXdr).toBe('string')
     expect(challenge!.attempts).toBe(0)
   })
@@ -117,11 +117,11 @@ describe('Auth Routes (Wallet)', () => {
   })
 
   it('POST /api/auth/wallet/verify should fail with expired challenge', async () => {
-    const address = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    const address = 'GCSHKPO7MLEXGSZZF2KF54LMNDXNLORLRKD24DXXWHVJ5U6CVXVQAOVT'
 
-    // Create an expired challenge
+    // Seed with uppercase canonical address (normalizeStellarAddress output)
     const expiredChallenge = {
-      address: address.toLowerCase(),
+      address: address,
       challengeXdr: 'mock-xdr',
       nonce: 'mock-nonce',
       expiresAt: new Date(Date.now() - 1000), // Already expired
@@ -139,11 +139,11 @@ describe('Auth Routes (Wallet)', () => {
   })
 
   it('verify should increment attempts and eventually fail after too many attempts', async () => {
-    const address = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    const address = 'GCSHKPO7MLEXGSZZF2KF54LMNDXNLORLRKD24DXXWHVJ5U6CVXVQAOVT'
 
-    // Create a challenge
+    // Seed with uppercase canonical address (normalizeStellarAddress output)
     const challenge = {
-      address: address.toLowerCase(),
+      address: address,
       challengeXdr: 'mock-xdr',
       nonce: 'mock-nonce',
       expiresAt: new Date(Date.now() + 60000),
