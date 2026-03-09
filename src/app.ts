@@ -31,6 +31,7 @@ import { createRiskRouter } from "./routes/risk.js"
 import { WalletServiceImpl, EnvironmentEncryptionService, KeyringEncryptionService, readEncryptionKeyringFromEnv } from "./services/walletService.js"
 import { CustodialWalletServiceImpl } from "./services/CustodialWalletServiceImpl.js"
 import { NgnWalletService } from "./services/ngnWalletService.js"
+import { createAdminReconciliationRouter } from "./routes/adminReconciliation.js"
 import { InMemoryWalletStore, PostgresWalletStore } from "./models/walletStore.js"
 import { InMemoryLinkedAddressStore, PostgresLinkedAddressStore } from "./models/linkedAddressStore.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
@@ -190,6 +191,7 @@ export function createApp() {
   app.use('/api/admin', createAdminWithdrawalsRouter(ngnWalletService))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter, walletStore as any, encryptionService as any))
+  app.use('/api/admin/reconciliation', createAdminReconciliationRouter(ngnWalletService))
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
   app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))

@@ -34,6 +34,47 @@ class ConversionStore {
     return pool
   }
 
+  async listByStatus(options?: {
+    status?: 'pending' | 'completed' | 'failed'
+    limit?: number
+    cursorCreatedAt?: Date
+  }): Promise<ConversionRecord[]> {
+    const pool = await this.pool()
+    const limit = Math.max(1, Math.min(1000, options?.limit ?? 50))
+    const status = options?.status
+    const cursor = options?.cursorCreatedAt
+
+    if (!pool) {
+      let items = Array.from(this.byId.values())
+      if (status) {
+        items = items.filter((r) => r.status === status)
+      }
+      items.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      if (cursor) {
+        items = items.filter((r) => r.createdAt < cursor)
+      }
+      return items.slice(0, limit)
+    }
+
+    const params: any[] = []
+    const where: string[] = []
+    if (status) {
+      params.push(status)
+      where.push(`status = $${params.length}`)
+    }
+    if (cursor) {
+      params.push(cursor.toISOString())
+      where.push(`created_at < $${params.length}`)
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+    params.push(limit)
+    const { rows } = await pool.query(
+      `SELECT * FROM conversions ${whereSql} ORDER BY created_at DESC LIMIT $${params.length}`,
+      params,
+    )
+    return rows.map(mapRow)
+  }
+
   async getByConversionId(conversionId: string): Promise<ConversionRecord | null> {
     const pool = await this.pool()
     if (!pool) {
