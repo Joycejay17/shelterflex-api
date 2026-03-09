@@ -2,8 +2,6 @@ import { randomBytes } from 'node:crypto'
 import {
   Account,
   Keypair,
-  Memo,
-  MemoType,
   Networks,
   Operation,
   Transaction,
@@ -15,47 +13,55 @@ export function generateNonce(): string {
   return randomBytes(16).toString('hex')
 }
 
+/**
+ * Builds a SEP-0010-style challenge transaction.
+ * The nonce is stored as a manageData operation value (not in the memo) to
+ * avoid the 28-byte Stellar text memo limit.
+ */
 export function generateChallengeXdr(publicKey: string, nonce: string): string {
-  const clientAccount = new Account(publicKey, '0') // Sequence number 0
-
-  const challengeMemo = `SEP-0010 challenge: ${nonce}`
+  const clientAccount = new Account(publicKey, '0')
 
   const transaction = new TransactionBuilder(clientAccount, {
     fee: '100',
-    networkPassphrase: Networks.TESTNET, // TODO: Make configurable
+    networkPassphrase: Networks.TESTNET,
     timebounds: {
       minTime: Math.floor(Date.now() / 1000),
       maxTime: Math.floor(Date.now() / 1000) + 300, // 5 minutes
     },
   })
-    .addMemo(Memo.text(challengeMemo))
-    .addOperation(Operation.manageData({
-      name: 'web_auth_domain',
-      value: 'shelterflex.com', // TODO: Make configurable
-    }))
+    .addOperation(
+      Operation.manageData({
+        name: 'web_auth_domain',
+        value: 'shelterflex.com',
+      }),
+    )
+    .addOperation(
+      Operation.manageData({
+        name: 'nonce',
+        value: nonce, // 32 hex chars = 32 bytes, fits manageData value (max 64 bytes)
+      }),
+    )
     .build()
 
-  // Do not sign the transaction - client will sign it
   return transaction.toEnvelope().toXDR('base64')
 }
 
 export function verifySignedChallenge(publicKey: string, signedXdr: string, expectedNonce: string): boolean {
   try {
     const envelope = xdr.TransactionEnvelope.fromXDR(signedXdr, 'base64')
-    const transaction = new Transaction(envelope, Networks.TESTNET) // TODO: Make configurable
+    const transaction = new Transaction(envelope, Networks.TESTNET)
 
     // Verify the transaction was signed by the public key
     const keypair = Keypair.fromPublicKey(publicKey)
     const txHash = transaction.hash()
-    
-    // Get signatures from envelope
+
     let signatures: xdr.DecoratedSignature[] = []
     if (envelope.switch().name === 'envelopeTypeTx') {
-      signatures = envelope.v0().signatures()
+      signatures = envelope.v1().signatures()
     } else if (envelope.switch().name === 'envelopeTypeTxV0') {
       signatures = envelope.v0().signatures()
     }
-    
+
     const validSignature = signatures.some((sig: xdr.DecoratedSignature) => {
       try {
         return keypair.verify(txHash, sig.signature())
@@ -63,33 +69,26 @@ export function verifySignedChallenge(publicKey: string, signedXdr: string, expe
         return false
       }
     })
-    if (!validSignature) {
-      return false
-    }
+    if (!validSignature) return false
 
-    // Verify memo contains the expected nonce
-    const memo = transaction.memo
-    if (!(memo instanceof Memo)) {
-      return false
+    // Extract nonce from manageData operations
+    let foundNonce: string | undefined
+    for (const op of transaction.operations) {
+      if (op.type === 'manageData' && op.name === 'nonce' && op.value) {
+        foundNonce = op.value.toString('utf8')
+        break
+      }
     }
-
-    const memoText = memo.value?.toString()
-    if (!memoText?.includes(`SEP-0010 challenge: ${expectedNonce}`)) {
-      return false
-    }
+    if (foundNonce !== expectedNonce) return false
 
     // Verify time bounds
     const timeBounds = transaction.timeBounds
-    if (!timeBounds) {
-      return false
-    }
+    if (!timeBounds) return false
 
     const now = Math.floor(Date.now() / 1000)
     const minTime = parseInt(timeBounds.minTime)
     const maxTime = parseInt(timeBounds.maxTime)
-    if (now < minTime || now > maxTime) {
-      return false
-    }
+    if (now < minTime || now > maxTime) return false
 
     return true
   } catch (error) {
