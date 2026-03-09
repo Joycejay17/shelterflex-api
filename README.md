@@ -30,7 +30,16 @@ Run tests with coverage report:
 npm run test:coverage
 ```
 
-Tests are located in `src/**/*.test.ts` files and use Vitest + Supertest. They do not require external network access — all blockchain interactions are stubbed.
+Run Soroban integration tests (requires configuration):
+
+```bash
+npm run test:integration
+```
+
+Tests are located in `src/**/*.test.ts` files and use Vitest + Supertest. 
+
+- **Unit tests** do not require external network access — all blockchain interactions are stubbed.
+- **Integration tests** make actual calls to Soroban testnet and require proper environment configuration. See [docs/soroban-integration-tests.md](docs/soroban-integration-tests.md) for details.
 
 ## Database migrations
 
@@ -47,6 +56,7 @@ The repository includes a migration runner script in `src/repositories/test.ts` 
 |---|---|
 | API specification (OpenAPI) | [openapi.yml](openapi.yml) |
 | Error handling contract | [src/docs/ERROR-INFO.md](src/docs/ERROR-INFO.md) |
+| Soroban integration tests | [docs/soroban-integration-tests.md](docs/soroban-integration-tests.md) |
 
 ## API Specification
 
