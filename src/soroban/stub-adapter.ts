@@ -1,6 +1,7 @@
 import { SorobanAdapter, RecordReceiptParams } from './adapter.js'
 import { SorobanConfig } from './client.js'
 import { RawReceiptEvent } from '../indexer/event-parser.js'
+import { logger } from '../utils/logger.js'
 
 // In-memory store for stub balances
 const stubBalances = new Map<string, bigint>()
@@ -10,10 +11,10 @@ export class StubSorobanAdapter implements SorobanAdapter {
 
      constructor(config: SorobanConfig) {
           this.config = config
-          console.log('🔧 Using StubSorobanAdapter - no real Soroban calls will be made')
-          console.log(`📝 Configured with RPC: ${config.rpcUrl}`)
+          logger.info('Soroban adapter: stub')
+          logger.debug('Soroban stub config', { rpcUrl: config.rpcUrl })
           if (config.contractId) {
-               console.log(`📝 Contract ID: ${config.contractId}`)
+               logger.debug('Soroban stub config', { contractId: config.contractId })
           }
      }
 
@@ -24,7 +25,7 @@ export class StubSorobanAdapter implements SorobanAdapter {
                stubBalances.set(account, balance)
           }
           const balance = stubBalances.get(account)!
-          console.log(`[Stub] getBalance(${account}) -> ${balance.toString()}`)
+          logger.debug('Soroban stub: getBalance', { account, balance: balance.toString() })
           return balance
      }
 
@@ -32,7 +33,11 @@ export class StubSorobanAdapter implements SorobanAdapter {
           const currentBalance = await this.getBalance(account)
           const newBalance = currentBalance + amount
           stubBalances.set(account, newBalance)
-          console.log(`[Stub] credit(${account}, ${amount.toString()}) -> new balance: ${newBalance.toString()}`)
+          logger.debug('Soroban stub: credit', {
+               account,
+               amount: amount.toString(),
+               newBalance: newBalance.toString(),
+          })
      }
 
      async debit(account: string, amount: bigint): Promise<void> {
@@ -42,27 +47,36 @@ export class StubSorobanAdapter implements SorobanAdapter {
           }
           const newBalance = currentBalance - amount
           stubBalances.set(account, newBalance)
-          console.log(`[Stub] debit(${account}, ${amount.toString()}) -> new balance: ${newBalance.toString()}`)
+          logger.debug('Soroban stub: debit', {
+               account,
+               amount: amount.toString(),
+               newBalance: newBalance.toString(),
+          })
      }
 
      async getStakedBalance(account: string): Promise<bigint> {
           const hash = this.simpleHash(`staked:${this.config.contractId ?? 'stub'}:${account}`)
           const staked = BigInt(hash % 5_000) * 1_000_000n
-          console.log(`[Stub] getStakedBalance(${account}) -> ${staked.toString()}`)
+          logger.debug('Soroban stub: getStakedBalance', { account, staked: staked.toString() })
           return staked
      }
 
      async getClaimableRewards(account: string): Promise<bigint> {
           const hash = this.simpleHash(`claimable:${this.config.contractId ?? 'stub'}:${account}`)
           const claimable = BigInt(hash % 250) * 1_000_000n
-          console.log(`[Stub] getClaimableRewards(${account}) -> ${claimable.toString()}`)
+          logger.debug('Soroban stub: getClaimableRewards', { account, claimable: claimable.toString() })
           return claimable
      }
 
      async recordReceipt(params: RecordReceiptParams): Promise<void> {
           // Stub: log the receipt recording. In production, calls the Soroban contract.
           // TODO: Replace with: client.invoke('record_receipt', params)
-          console.log(`[Stub] recordReceipt txId=${params.txId} txType=${params.txType} amountUsdc=${params.amountUsdc} dealId=${params.dealId}`)
+          logger.info('Soroban stub: recordReceipt', {
+               txId: params.txId,
+               txType: params.txType,
+               amountUsdc: params.amountUsdc,
+               dealId: params.dealId,
+          })
      }
 
      getConfig(): SorobanConfig {
@@ -94,22 +108,22 @@ export class StubSorobanAdapter implements SorobanAdapter {
 
      // Admin operations (stub implementations)
      async pause(contractId: string): Promise<string> {
-          console.log(`[Stub] pause(${contractId})`)
+          logger.info('Soroban stub: pause', { contractId })
           return 'stub_tx_hash_pause'
      }
 
      async unpause(contractId: string): Promise<string> {
-          console.log(`[Stub] unpause(${contractId})`)
+          logger.info('Soroban stub: unpause', { contractId })
           return 'stub_tx_hash_unpause'
      }
 
      async setOperator(contractId: string, operatorAddress: string | null): Promise<string> {
-          console.log(`[Stub] setOperator(${contractId}, ${operatorAddress})`)
+          logger.info('Soroban stub: setOperator', { contractId, operatorAddress })
           return 'stub_tx_hash_set_operator'
      }
 
      async init(contractId: string, adminAddress: string, operatorAddress?: string): Promise<string> {
-          console.log(`[Stub] init(${contractId}, ${adminAddress}, ${operatorAddress})`)
+          logger.info('Soroban stub: init', { contractId, adminAddress, operatorAddress })
           return 'stub_tx_hash_init'
      }
 }
