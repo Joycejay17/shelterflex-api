@@ -928,4 +928,23 @@ export class NgnWalletService {
 
     logger.info('Withdrawal processed', { withdrawalId, status, failureReason })
   }
+
+  async listNegativeBalances(options: { limit?: number; cursor?: string; includeNonNegative?: boolean } = {}): Promise<{ items: Array<{ userId: string; balance: NgnBalanceResponse }>; nextCursor: string | null }> {
+    const limit = Math.max(1, Math.min(1000, options?.limit ?? 50))
+    const includeNonNegative = options?.includeNonNegative ?? false
+    let items = Array.from(this.balances.entries()).map(([userId, balance]) => ({ userId, balance }))
+    if (!includeNonNegative) {
+      items = items.filter(({ balance }) => balance.totalNgn < 0 || balance.availableNgn < 0)
+    }
+    items.sort((a, b) => a.balance.totalNgn - b.balance.totalNgn || a.userId.localeCompare(b.userId))
+    if (options?.cursor) {
+      const [cursorTotalStr, cursorUserId] = options.cursor.split(':')
+      const cursorTotal = Number(cursorTotalStr)
+      items = items.filter(it => it.balance.totalNgn < cursorTotal || (it.balance.totalNgn === cursorTotal && it.userId > cursorUserId))
+    }
+    const slice = items.slice(0, limit)
+    const last = slice[slice.length - 1]
+    const nextCursor = slice.length === limit && last ? `${last.balance.totalNgn}:${last.userId}` : null
+    return { items: slice, nextCursor }
+  }
 }
