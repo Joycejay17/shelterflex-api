@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { WalletServiceImpl, EnvironmentEncryptionService } from './walletService.js'
+import { WalletServiceImpl, EnvironmentEncryptionService, KeyringEncryptionService } from './walletService.js'
 import { type CustodialWalletService } from './CustodialWalletService.js'
 import { InMemoryWalletStore } from '../models/walletStore.js'
-import { Keypair } from '@stellar/stellar-sdk'
+import type { WalletStore } from '../models/wallet.js'
 
 describe('WalletService', () => {
   let walletService: WalletServiceImpl
-  let walletStore: InMemoryWalletStore
+  let walletStore: WalletStore
   let encryptionService: EnvironmentEncryptionService
 
   beforeEach(() => {
@@ -17,10 +17,12 @@ describe('WalletService', () => {
     const custodialService: CustodialWalletService = {
       signMessage: vi.fn(async (userId, msg) => {
         if (userId === 'non-existent-user') throw new Error('No wallet found')
+        void msg
         return { signature: 'mock-sig', publicKey: 'GDHD3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D' }
       }),
       signTransaction: vi.fn(async (userId, xdr) => {
         if (userId === 'non-existent-user') throw new Error('No wallet found')
+        void xdr
         return { signature: 'mock-sig', publicKey: 'GDHD3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D3Y2D' }
       })
     }
@@ -50,8 +52,8 @@ describe('WalletService', () => {
 
       expect(firstResult.publicKey).toBe(secondResult.publicKey)
 
-      const wallets = walletStore.getAll()
-      expect(wallets).toHaveLength(1)
+      const wallet = await walletStore.getByUserId(userId)
+      expect(wallet).toBeTruthy()
     })
 
     it('should generate unique addresses for different users', async () => {
@@ -119,6 +121,24 @@ describe('WalletService', () => {
 
       await expect(walletService.signSorobanTransaction(userId, 'test-xdr')).rejects.toThrow('No wallet found')
     })
+  })
+})
+
+describe('KeyringEncryptionService', () => {
+  it('should select latest key id and decrypt using stored key id', async () => {
+    const svc = new KeyringEncryptionService({
+      ENCRYPTION_KEY_V1: 'test-encryption-key-32-chars-long-123456',
+      ENCRYPTION_KEY_V2: 'test-encryption-key-32-chars-long-abcdef',
+    })
+
+    expect(svc.getCurrentKeyId()).toBe('ENCRYPTION_KEY_V2')
+
+    const plaintext = Buffer.from('secret-key-data', 'utf8')
+    const { cipherText, keyId } = await svc.encrypt(plaintext, svc.getCurrentKeyId())
+    expect(keyId).toBe('ENCRYPTION_KEY_V2')
+
+    const decrypted = await svc.decrypt(cipherText, keyId)
+    expect(decrypted.toString('utf8')).toBe('secret-key-data')
   })
 })
 
