@@ -47,6 +47,23 @@ export class InMemoryWalletStore implements WalletStore {
     }
   }
 
+  async listUserIdsByKeyId(
+    keyId: string,
+    limit: number,
+    cursorUserId?: string,
+  ): Promise<{ userIds: string[]; nextCursorUserId?: string }> {
+    const ids = Array.from(this.wallets.values())
+      .filter((w) => w.keyId === keyId)
+      .map((w) => w.userId)
+      .sort((a, b) => a.localeCompare(b))
+
+    const startIndex = cursorUserId ? ids.findIndex((id) => id > cursorUserId) : 0
+    const start = startIndex < 0 ? ids.length : startIndex
+    const slice = ids.slice(start, start + limit)
+    const nextCursorUserId = slice.length === limit ? slice[slice.length - 1] : undefined
+    return { userIds: slice, nextCursorUserId }
+  }
+
   async updateEncryption(
     userId: string,
     newEncryptedSecretKey: string,
@@ -151,6 +168,35 @@ export class PostgresWalletStore implements WalletStore {
       cipherText: String(row.encrypted_secret_key),
       keyId: String(row.key_id),
     }
+  }
+
+  async listUserIdsByKeyId(
+    keyId: string,
+    limit: number,
+    cursorUserId?: string,
+  ): Promise<{ userIds: string[]; nextCursorUserId?: string }> {
+    const pool = await this.pool()
+    const effectiveLimit = Math.max(1, Math.min(1000, limit))
+
+    const values: any[] = [keyId, effectiveLimit]
+    let cursorSql = ''
+    if (cursorUserId) {
+      values.push(cursorUserId)
+      cursorSql = ' AND user_id > $3'
+    }
+
+    const { rows } = await pool.query(
+      `SELECT user_id
+       FROM wallets
+       WHERE key_id = $1${cursorSql}
+       ORDER BY user_id ASC
+       LIMIT $2`,
+      values,
+    )
+
+    const userIds = rows.map((r: any) => String(r.user_id))
+    const nextCursorUserId = userIds.length === effectiveLimit ? userIds[userIds.length - 1] : undefined
+    return { userIds, nextCursorUserId }
   }
 
   async updateEncryption(
