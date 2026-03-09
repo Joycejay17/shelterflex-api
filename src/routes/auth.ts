@@ -6,7 +6,7 @@ import { otpRequestRateLimit } from '../middleware/authRateLimit.js'
 import { requestOtpSchema, verifyOtpSchema, walletChallengeSchema, walletVerifySchema } from '../schemas/auth.js'
 import { generateOtp, generateToken } from '../utils/tokens.js'
 import { generateOtpSalt, hashOtp, verifyOtpHash } from '../utils/otp.js'
-import { generateNonce, createChallengeMessage, verifySignature } from '../utils/wallet.js'
+import { generateNonce, generateChallengeXdr, verifySignedChallenge } from '../utils/wallet.js'
 import { otpChallengeStore, sessionStore, userStore, walletChallengeStore } from '../models/authStore.js'
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 import { PostgresLinkedAddressStore } from '../models/linkedAddressStore.js'
@@ -108,7 +108,7 @@ router.get('/me', authenticateToken, (req: AuthenticatedRequest, res: Response) 
 
 /**
  * POST /api/auth/wallet/challenge
- * Body: { address } -> { message, nonce }
+ * Body: { address } -> { challengeXdr, expiresAt }
  */
 router.post(
   '/wallet/challenge',
@@ -124,31 +124,31 @@ router.post(
     }
 
     const nonce = generateNonce()
-    const message = createChallengeMessage(address, nonce)
+    const challengeXdr = generateChallengeXdr(address, nonce)
     const expiresAt = new Date(Date.now() + WALLET_TTL_MS)
 
     walletChallengeStore.set({
       address: normalizedAddress,
-      message,
+      challengeXdr,
       nonce,
       expiresAt,
       attempts: 0,
     })
 
-    res.json({ message, nonce })
+    res.json({ challengeXdr, expiresAt })
   },
 )
 
 /**
  * POST /api/auth/wallet/verify
- * Body: { address, signature } -> { token, user }
+ * Body: { address, signedChallengeXdr } -> { token, user }
  */
 router.post(
   '/wallet/verify',
   validate(walletVerifySchema, 'body'),
   async (req: Request, res: Response) => {
     const address = req.body.address as string
-    const signature = req.body.signature as string
+    const signedChallengeXdr = req.body.signedChallengeXdr as string
     const normalizedAddress = address.toLowerCase()
 
     const challenge = walletChallengeStore.getByAddress(normalizedAddress)
@@ -166,7 +166,7 @@ router.post(
       throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Too many failed attempts')
     }
 
-    const isValid = verifySignature(normalizedAddress, challenge.message, signature)
+    const isValid = verifySignedChallenge(normalizedAddress, signedChallengeXdr, challenge.nonce)
     if (!isValid) {
       challenge.attempts += 1
       walletChallengeStore.set(challenge)
