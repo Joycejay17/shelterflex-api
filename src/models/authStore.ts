@@ -23,7 +23,13 @@ export interface Session {
   token: string
   email: string
   createdAt: Date
+  expiresAt: Date
+  lastSeenAt: Date
+  revokedAt?: Date
+  userAgent?: string
 }
+
+export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 export interface WalletChallenge {
   address: string
@@ -121,11 +127,19 @@ class WalletChallengeStore {
 class SessionStore {
   private readonly sessionsByToken: Map<string, Session> = new Map()
 
-  create(email: string, token: string): Session {
+  create(
+    email: string,
+    token: string,
+    options?: { ttlMs?: number; userAgent?: string },
+  ): Session {
+    const now = new Date()
     const session: Session = {
       token,
       email,
-      createdAt: new Date(),
+      createdAt: now,
+      lastSeenAt: now,
+      expiresAt: new Date(now.getTime() + (options?.ttlMs ?? SESSION_TTL_MS)),
+      ...(options?.userAgent ? { userAgent: options.userAgent } : {}),
     }
 
     this.sessionsByToken.set(token, session)
@@ -133,11 +147,47 @@ class SessionStore {
   }
 
   getByToken(token: string): Session | undefined {
+    const session = this.sessionsByToken.get(token)
+    if (!session) return undefined
+    if (session.revokedAt) return undefined
+    if (new Date() > session.expiresAt) return undefined
+    // Touch lastSeenAt
+    session.lastSeenAt = new Date()
+    return session
+  }
+
+  /** Returns the raw session record even if expired/revoked — for internal use only. */
+  getRawByToken(token: string): Session | undefined {
     return this.sessionsByToken.get(token)
   }
 
   deleteByToken(token: string): void {
     this.sessionsByToken.delete(token)
+  }
+
+  revokeByToken(token: string): void {
+    const session = this.sessionsByToken.get(token)
+    if (session) {
+      session.revokedAt = new Date()
+    }
+  }
+
+  revokeAllByEmail(email: string): number {
+    let count = 0
+    for (const session of this.sessionsByToken.values()) {
+      if (session.email === email && !session.revokedAt) {
+        session.revokedAt = new Date()
+        count++
+      }
+    }
+    return count
+  }
+
+  getActiveSessionsByEmail(email: string): Session[] {
+    const now = new Date()
+    return Array.from(this.sessionsByToken.values()).filter(
+      (s) => s.email === email && !s.revokedAt && now <= s.expiresAt,
+    )
   }
 
   clear(): void {
