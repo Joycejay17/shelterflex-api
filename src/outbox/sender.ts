@@ -62,25 +62,24 @@ export class OutboxSender {
       return true
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      item.retryCount = (item.retryCount || 0) + 1;
       // Exponential backoff: 2^retryCount * 1000ms, capped at 1 hour
-      const backoffMs = Math.min(Math.pow(2, item.retryCount) * 1000, 60 * 60 * 1000);
-      item.nextRetryAt = new Date(Date.now() + backoffMs);
-      item.processedAt = new Date();
-      item.lastError = errorMessage;
+      // Note: item.retryCount used here is the current value, updateStatus will increment it in DB
+      const currentRetryCount = item.retryCount || 0
+      const backoffMs = Math.min(Math.pow(2, currentRetryCount) * 1000, 60 * 60 * 1000)
+      const nextRetryAt = new Date(Date.now() + backoffMs)
 
       logger.error('Failed to send outbox item', {
         outboxId: item.id,
         txId: item.txId,
-        retryCount: item.retryCount,
-        lastError: item.lastError,
+        retryCount: currentRetryCount,
+        lastError: errorMessage,
       })
 
-      // Mark as failed
-      await outboxStore.updateStatus(item.id, OutboxStatus.FAILED, errorMessage)
-
-      // Persist retry fields (in-memory only)
-      outboxStore.items.set(item.id, item)
+      // Mark as failed and persist retry info
+      await outboxStore.updateStatus(item.id, OutboxStatus.FAILED, {
+        error: errorMessage,
+        nextRetryAt,
+      })
 
       return false
     }

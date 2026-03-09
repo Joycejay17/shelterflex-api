@@ -17,7 +17,11 @@ export interface IOutboxStore {
   getById(id: string): Promise<OutboxItem | null>
   getByExternalRef(source: string, ref: string): Promise<OutboxItem | null>
   listByStatus(status: OutboxStatus): Promise<OutboxItem[]>
-  updateStatus(id: string, status: OutboxStatus, error?: string): Promise<OutboxItem | null>
+  updateStatus(
+    id: string,
+    status: OutboxStatus,
+    options?: { error?: string; nextRetryAt?: Date | null },
+  ): Promise<OutboxItem | null>
   listByDealId(dealId: string, txType?: TxType): Promise<OutboxItem[]>
   listAll(limit?: number): Promise<OutboxItem[]>
   clear(): Promise<void>
@@ -98,17 +102,24 @@ class InMemoryOutboxStore implements IOutboxStore {
 
   async listByStatus(status: OutboxStatus) {
     return [...this.items.values()]
-      .filter(i => i.status === status)
+      .filter((i) => i.status === status)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
   }
 
-  async updateStatus(id: string, status: OutboxStatus, error?: string) {
+  async updateStatus(
+    id: string,
+    status: OutboxStatus,
+    options?: { error?: string; nextRetryAt?: Date | null },
+  ) {
     const item = this.items.get(id)
     if (!item) return null
     item.status = status
     item.attempts += 1
+    item.retryCount += 1
     item.updatedAt = new Date()
-    if (error !== undefined) item.lastError = error
+    item.processedAt = new Date()
+    if (options?.error !== undefined) item.lastError = options.error
+    if (options?.nextRetryAt !== undefined) item.nextRetryAt = options.nextRetryAt
     this.items.set(id, item)
     return item
   }
@@ -203,18 +214,24 @@ export class PostgresOutboxStore implements IOutboxStore {
     return rows.map(mapRow)
   }
 
-  async updateStatus(id: string, status: OutboxStatus, error?: string): Promise<OutboxItem | null> {
+  async updateStatus(
+    id: string,
+    status: OutboxStatus,
+    options?: { error?: string; nextRetryAt?: Date | null },
+  ): Promise<OutboxItem | null> {
     const pool = await this.pool()
     const { rows } = await pool.query(
       `UPDATE outbox_items
-       SET status      = $2,
-           attempts    = attempts + 1,
-           retry_count = retry_count + 1,
-           last_error  = COALESCE($3, last_error),
-           processed_at = CASE WHEN $2 = 'sent' THEN NOW() ELSE processed_at END
+       SET status        = $2,
+           attempts      = attempts + 1,
+           retry_count   = retry_count + 1,
+           last_error    = COALESCE($3, last_error),
+           next_retry_at = $4,
+           processed_at  = NOW(),
+           updated_at    = NOW()
        WHERE id = $1
        RETURNING *`,
-      [id, status, error ?? null],
+      [id, status, options?.error ?? null, options?.nextRetryAt ?? null],
     )
     return rows.length ? mapRow(rows[0]) : null
   }

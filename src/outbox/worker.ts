@@ -49,14 +49,8 @@ export class OutboxWorker {
         retryCount: item.retryCount,
         lastError: item.lastError,
       })
-      const success = await this.sender.send(item)
-      // Update retry fields
-      item.retryCount += 1
-      item.nextRetryAt = new Date(Date.now() + getBackoffMs(item.retryCount))
-      item.processedAt = new Date()
-      await outboxStore.updateStatus(item.id, success ? OutboxStatus.SENT : OutboxStatus.FAILED, item.lastError)
-      // Persist retry fields (in real DB, update these fields)
-      outboxStore.items.set(item.id, item)
+      // sender.send handles updating retry info and status in store
+      await this.sender.send(item)
     }
   }
 }

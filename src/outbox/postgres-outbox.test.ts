@@ -107,7 +107,7 @@ describe('PostgresOutboxStore', () => {
 
   it('updateStatus: sends UPDATE and increments attempts', async () => {
     mockPool.query.mockResolvedValueOnce({ rows: [makeRow({ status: OutboxStatus.FAILED, attempts: 1 })] })
-    const updated = await repo.updateStatus('uuid-1', OutboxStatus.FAILED, 'timeout')
+    const updated = await repo.updateStatus('uuid-1', OutboxStatus.FAILED, { error: 'timeout' })
     expect(updated?.status).toBe(OutboxStatus.FAILED)
     expect(updated?.attempts).toBe(1)
     const [sql, params] = mockPool.query.mock.calls[0] as [string, unknown[]]
