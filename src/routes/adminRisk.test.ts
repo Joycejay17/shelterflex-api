@@ -22,9 +22,9 @@ describe('Admin Risk Routes', () => {
     userStore.clear()
     sessionStore.clear()
 
-    const adminUser = userStore.getOrCreateByEmail('admin@test.com')
+    const adminUser = await userStore.getOrCreateByEmail('admin@test.com')
     const testToken = `test-token-${Date.now()}-${Math.random().toString(36).substring(7)}`
-    const session = sessionStore.create('admin@test.com', testToken)
+    const session = await sessionStore.create('admin@test.com', testToken)
     authToken = session.token
 
     // Setup Express app
