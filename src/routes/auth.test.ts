@@ -44,7 +44,7 @@ describe('Auth Routes (OTP)', () => {
     const res = await request.post('/api/auth/request-otp').send({ email })
     expect(res.status).toBe(200)
 
-    const challenge = otpChallengeStore.getByEmail(email)
+    const challenge = await otpChallengeStore.getByEmail(email)
     expect(challenge).toBeDefined()
     expect(challenge!.email).toBe(email)
     expect(typeof challenge!.otpHash).toBe('string')
@@ -79,11 +79,11 @@ describe('Auth Routes (OTP)', () => {
 
     for (let i = 0; i < 5; i++) {
       const res = await request.post('/api/auth/verify-otp').send({ email, otp: '000000' })
-      expect(res.status).toBe(401)
+      expectErrorShape(res, 'UNAUTHORIZED', 401)
     }
 
     const res = await request.post('/api/auth/verify-otp').send({ email, otp: '123456' })
-    expect(res.status).toBe(401)
+    expectErrorShape(res, 'UNAUTHORIZED', 401)
   })
 
   it.skip('request-otp should rate limit by email', async () => {
