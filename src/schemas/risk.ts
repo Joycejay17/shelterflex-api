@@ -37,6 +37,13 @@ export const frozenUsersResponseSchema = z.object({
   users: z.array(userRiskStateSchema),
 })
 
+export const riskStateResponseSchema = z.object({
+  isFrozen: z.boolean(),
+  freezeReason: freezeReasonSchema.nullable(),
+  deficitNgn: z.number(),
+  updatedAt: z.string(),
+})
+
 export const depositReversalWebhookSchema = z.object({
   provider: z.enum(['onramp', 'offramp']),
   providerRef: z.string(),
@@ -51,4 +58,5 @@ export type FreezeUserRequest = z.infer<typeof freezeUserRequestSchema>
 export type UnfreezeUserRequest = z.infer<typeof unfreezeUserRequestSchema>
 export type UserRiskDetailResponse = z.infer<typeof userRiskDetailResponseSchema>
 export type FrozenUsersResponse = z.infer<typeof frozenUsersResponseSchema>
+export type RiskStateResponse = z.infer<typeof riskStateResponseSchema>
 export type DepositReversalWebhook = z.infer<typeof depositReversalWebhookSchema>
