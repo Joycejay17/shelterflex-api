@@ -13,7 +13,7 @@ export interface AuthenticatedRequest extends Request {
   }
 }
 
-export function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+export async function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
 
@@ -27,8 +27,7 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
     throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication token required')
   }
 
-  // getByToken already checks expiry + revocation and touches lastSeenAt
-  const session = sessionStore.getByToken(token)
+  const session = await sessionStore.getByToken(token)
   if (!session) {
     logger.warn('Unauthorized access attempt - invalid or expired token', {
       ip: req.ip,
@@ -40,7 +39,7 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
     throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid or expired token')
   }
 
-  const user = userStore.getByEmail(session.email)
+  const user = await userStore.getByEmail(session.email)
   if (!user) {
     logger.warn('Unauthorized access attempt - user not found', {
       ip: req.ip,
