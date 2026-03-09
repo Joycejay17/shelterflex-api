@@ -18,12 +18,10 @@ function bumpCounter(map: Map<string, Counter>, key: string, windowMs: number): 
   if (!existing || now >= existing.resetAtMs) {
     const c: Counter = { count: 1, resetAtMs: now + windowMs }
     map.set(key, c)
-    console.log(`[RateLimit] Reset/New entry for ${key}. Count: 1`)
     return c
   }
 
   existing.count += 1
-  console.log(`[RateLimit] Bumped ${key}. Count: ${existing.count}`)
   return existing
 }
 
@@ -119,7 +117,6 @@ export function walletAuthRateLimit(options?: {
 }
 
 export function _testOnly_clearAuthRateLimits() {
-  console.log('[RateLimit] Clearing all rate limit maps')
   emailOtpRequestCounters.clear()
   ipOtpRequestCounters.clear()
   walletChallengeRequestCounters.clear()

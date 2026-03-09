@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from 'express'
+import { Router, type Request, type Response, type NextFunction } from 'express'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { validate } from '../middleware/validate.js'
@@ -147,10 +147,17 @@ router.post(
 router.post(
   '/wallet/verify',
   validate(walletVerifySchema, 'body'),
-  async (req: Request, res: Response) => {
-    const address = req.body.address as string
-    const signedChallengeXdr = req.body.signedChallengeXdr as string
-    const normalizedAddress = address.toLowerCase()
+  walletAuthRateLimit(),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const address = req.body.address as string
+      const signedChallengeXdr = req.body.signedChallengeXdr as string
+      const normalizedAddress = address.toLowerCase()
+
+      const challenge = walletChallengeStore.getByAddress(normalizedAddress)
+      if (!challenge) {
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
+      }
 
       if (new Date() > challenge.expiresAt) {
         walletChallengeStore.deleteByAddress(normalizedAddress)
@@ -162,7 +169,7 @@ router.post(
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
       }
 
-      const isValid = verifySignature(normalizedAddress, challenge.message, signature)
+      const isValid = verifySignedChallenge(normalizedAddress, signedChallengeXdr, challenge.nonce)
       if (!isValid) {
         challenge.attempts += 1
         walletChallengeStore.set(challenge)
@@ -171,12 +178,16 @@ router.post(
 
       walletChallengeStore.deleteByAddress(normalizedAddress)
 
-    const isValid = verifySignedChallenge(normalizedAddress, signedChallengeXdr, challenge.nonce)
-    if (!isValid) {
-      challenge.attempts += 1
-      walletChallengeStore.set(challenge)
-      throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid signature')
-    }
+      // Check if user already exists with this wallet
+      let user = userStore.getByWalletAddress(normalizedAddress)
+
+      if (!user) {
+        // Create new user with wallet as primary identifier
+        const placeholderEmail = `${normalizedAddress}@wallet.user`
+        user = userStore.getOrCreateByEmail(placeholderEmail)
+        userStore.linkWalletToUser(placeholderEmail, normalizedAddress)
+        user.name = `Wallet ${normalizedAddress.slice(0, 6)}...${normalizedAddress.slice(-4)}`
+      }
 
       const token = generateToken()
       sessionStore.create(user.email, token)
