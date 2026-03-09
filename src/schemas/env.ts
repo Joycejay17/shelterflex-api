@@ -34,6 +34,8 @@ export const envSchema = z.object({
   QUOTE_EXPIRY_MS: z.coerce.number().positive().default(5 * 60_000),
   QUOTE_FEE_PERCENT: z.coerce.number().min(0).max(1).default(0.015),
   QUOTE_SLIPPAGE_PERCENT: z.coerce.number().min(0).max(1).default(0.005),
+  // OTP delivery provider: 'console' for dev, 'email' for production
+  OTP_DELIVERY_PROVIDER: z.enum(['console', 'email']).default('console'),
 }).refine((data) => {
   // Accept either field name; prefer SOROBAN_USDC_TOKEN_ID if provided
   const tokenId = data.SOROBAN_USDC_TOKEN_ID || data.USDC_TOKEN_ADDRESS

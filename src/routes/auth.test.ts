@@ -32,7 +32,7 @@ describe('Auth Routes (OTP)', () => {
     const res = await request.post('/api/auth/request-otp').send({ email })
     expect(res.status).toBe(200)
 
-    const challenge = otpChallengeStore.getByEmail(email)
+    const challenge = await otpChallengeStore.getByEmail(email)
     expect(challenge).toBeDefined()
     expect(challenge!.email).toBe(email)
     expect(typeof challenge!.otpHash).toBe('string')
@@ -55,7 +55,7 @@ describe('Auth Routes (OTP)', () => {
     expect(res.body).toHaveProperty('user')
     expect(res.body.user).toHaveProperty('email', email)
 
-    const session = sessionStore.getByToken('session-token-abc')
+    const session = await sessionStore.getByToken('session-token-abc')
     expect(session).toBeDefined()
     expect(session!.email).toBe(email)
   })

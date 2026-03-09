@@ -34,10 +34,10 @@ function write(level: LogLevel, message: string, fields?: LogFields): void {
           ...fields,
      };
 
-     // Never leak secrets
-     const REDACTED_KEYS = new Set([
+    // Never leak secrets
+    const REDACTED_KEYS = new Set([
           'password', 'secret', 'token', 'authorization', 'apiKey', 'api_key',
-          'privateKey', 'private_key', 'accessToken', 'access_token',
+          'privateKey', 'private_key', 'accessToken', 'access_token', 'otp',
      ]);
      for (const key of REDACTED_KEYS) {
           if (key in entry) entry[key] = '[REDACTED]';
