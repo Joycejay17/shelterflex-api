@@ -18,11 +18,11 @@ describe('Admin Withdrawals Routes', () => {
     userStore.clear()
     sessionStore.clear()
 
-    const adminUser = userStore.getOrCreateByEmail('admin@test.com')
+    const adminUser = await userStore.getOrCreateByEmail('admin@test.com')
     userId = adminUser.id
 
     const testToken = `test-token-${Date.now()}`
-    const session = sessionStore.create('admin@test.com', testToken)
+    const session = await sessionStore.create('admin@test.com', testToken)
     authToken = session.token
 
     app = express()
@@ -32,7 +32,7 @@ describe('Admin Withdrawals Routes', () => {
   })
 
   it('should approve a pending withdrawal idempotently', async () => {
-    const user = userStore.getOrCreateByEmail('user1@test.com')
+    const user = await userStore.getOrCreateByEmail('user1@test.com')
 
     const initiated = await ngnWalletService.initiateWithdrawal(user.id, {
       amountNgn: 1000,
@@ -60,7 +60,7 @@ describe('Admin Withdrawals Routes', () => {
   })
 
   it('should reject a pending withdrawal idempotently', async () => {
-    const user = userStore.getOrCreateByEmail('user2@test.com')
+    const user = await userStore.getOrCreateByEmail('user2@test.com')
 
     const initiated = await ngnWalletService.initiateWithdrawal(user.id, {
       amountNgn: 1000,
