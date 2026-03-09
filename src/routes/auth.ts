@@ -81,7 +81,7 @@ router.post(
 
     const user = userStore.getOrCreateByEmail(email)
     const token = generateToken()
-    sessionStore.create(email, token)
+    sessionStore.create(email, token, { userAgent: req.get('User-Agent') })
 
     res.json({ token, user })
   },
@@ -94,9 +94,19 @@ router.post('/logout', (req: Request, res: Response) => {
   const authHeader = req.headers.authorization
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
   if (token) {
-    sessionStore.deleteByToken(token)
+    sessionStore.revokeByToken(token)
   }
   res.json({ message: 'Logged out' })
+})
+
+/**
+ * POST /api/auth/logout-all
+ * Invalidates every active session for the calling user.
+ */
+router.post('/logout-all', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
+  const email = req.user!.email
+  const count = sessionStore.revokeAllByEmail(email)
+  res.json({ message: `Logged out from ${count} session(s)` })
 })
 
 /**
@@ -117,12 +127,6 @@ router.post(
   (req: Request, res: Response) => {
     const address = req.body.address as string
     const normalizedAddress = address.toLowerCase()
-
-    // Check if wallet is already linked to another user
-    const existingUser = userStore.getByWalletAddress(normalizedAddress)
-    if (existingUser) {
-      // Allow existing user to request new challenge
-    }
 
     const nonce = generateNonce()
     const challengeXdr = generateChallengeXdr(address, nonce)
@@ -152,6 +156,7 @@ router.post(
     try {
       const address = req.body.address as string
       const signedChallengeXdr = req.body.signedChallengeXdr as string
+      // Stellar public keys are inherently uppercase — do not lowercase for SDK calls
       const normalizedAddress = address.toLowerCase()
 
       const challenge = walletChallengeStore.getByAddress(normalizedAddress)
@@ -169,7 +174,8 @@ router.post(
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
       }
 
-      const isValid = verifySignedChallenge(normalizedAddress, signedChallengeXdr, challenge.nonce)
+      // Pass original-case address to the Stellar SDK — it requires uppercase keys
+      const isValid = verifySignedChallenge(address, signedChallengeXdr, challenge.nonce)
       if (!isValid) {
         challenge.attempts += 1
         walletChallengeStore.set(challenge)
@@ -182,7 +188,6 @@ router.post(
       let user = userStore.getByWalletAddress(normalizedAddress)
 
       if (!user) {
-        // Create new user with wallet as primary identifier
         const placeholderEmail = `${normalizedAddress}@wallet.user`
         user = userStore.getOrCreateByEmail(placeholderEmail)
         userStore.linkWalletToUser(placeholderEmail, normalizedAddress)
@@ -190,7 +195,7 @@ router.post(
       }
 
       const token = generateToken()
-      sessionStore.create(user.email, token)
+      sessionStore.create(user.email, token, { userAgent: req.get('User-Agent') })
 
       if (process.env.DATABASE_URL) {
         const linkedAddressStore = new PostgresLinkedAddressStore()

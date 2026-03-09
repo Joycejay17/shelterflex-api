@@ -22,19 +22,20 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
       ip: req.ip,
       userAgent: req.get('User-Agent'),
       requestId: req.requestId,
-      path: req.path
+      path: req.path,
     })
     throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication token required')
   }
 
+  // getByToken already checks expiry + revocation and touches lastSeenAt
   const session = sessionStore.getByToken(token)
   if (!session) {
-    logger.warn('Unauthorized access attempt - invalid token', {
+    logger.warn('Unauthorized access attempt - invalid or expired token', {
       ip: req.ip,
       userAgent: req.get('User-Agent'),
       requestId: req.requestId,
       path: req.path,
-      token: token.substring(0, 8) + '...'
+      token: token.substring(0, 8) + '...',
     })
     throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid or expired token')
   }
@@ -46,7 +47,7 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
       userAgent: req.get('User-Agent'),
       requestId: req.requestId,
       path: req.path,
-      email: session.email
+      email: session.email,
     })
     throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'User not found')
   }
@@ -56,8 +57,8 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
     userId: user.id,
     email: user.email,
     requestId: req.requestId,
-    path: req.path
+    path: req.path,
   })
-  
+
   next()
 }
