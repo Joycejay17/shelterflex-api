@@ -27,6 +27,7 @@ import { createWalletRouter } from "./routes/wallet.js"
 import { createNgnWalletRouter } from "./routes/ngnWallet.js"
 import { createAdminRiskRouter } from "./routes/adminRisk.js"
 import { createAdminWithdrawalsRouter } from "./routes/adminWithdrawals.js"
+import { createRiskRouter } from "./routes/risk.js"
 import { WalletServiceImpl, EnvironmentEncryptionService, KeyringEncryptionService, readEncryptionKeyringFromEnv } from "./services/walletService.js"
 import { CustodialWalletServiceImpl } from "./services/CustodialWalletServiceImpl.js"
 import { NgnWalletService } from "./services/ngnWalletService.js"
@@ -169,6 +170,7 @@ export function createApp() {
   app.use('/api', createReceiptsRouter(receiptRepo))
   app.use('/api/wallet', createWalletRateLimiter(env), createWalletRouter(walletService))
   app.use('/api/wallet/ngn', createNgnWalletRouter(ngnWalletService))
+  app.use('/api/risk', createRiskRouter(ngnWalletService))
   app.use('/api/admin/risk', createAdminRiskRouter(ngnWalletService))
   app.use('/api/admin', createAdminWithdrawalsRouter(ngnWalletService))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
