@@ -10,13 +10,18 @@ import { generateNonce, generateChallengeXdr, verifySignedChallenge, normalizeSt
 import { otpChallengeStore, sessionStore, userStore, walletChallengeStore } from '../models/authStore.js'
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 import { PostgresLinkedAddressStore } from '../models/linkedAddressStore.js'
+import { createOtpDeliveryProvider } from '../services/otpDeliveryFactory.js'
 
 const router = Router()
 
 const OTP_TTL_MS = 10 * 60 * 1000
+const OTP_TTL_MINUTES = OTP_TTL_MS / (60 * 1000)
 const OTP_MAX_ATTEMPTS = 5
 const WALLET_TTL_MS = 5 * 60 * 1000
 const WALLET_MAX_ATTEMPTS = 3
+
+// Initialize OTP delivery provider
+const otpDeliveryProvider = createOtpDeliveryProvider()
 
 /**
  * POST /api/auth/request-otp
@@ -37,9 +42,10 @@ router.post(
 
       await otpChallengeStore.set({ email, otpHash, salt, expiresAt, attempts: 0 })
 
-      // MVP: No email provider integrated. For development, log OTP.
-      // Never persist plaintext OTP.
-      console.log(`[auth] OTP for ${email}: ${otp}`)
+      // Send OTP via configured delivery provider
+      // The provider handles logging appropriately (console in dev, email in production)
+      // Plaintext OTP is never stored or logged in production mode
+      await otpDeliveryProvider.sendOtp(email, otp, OTP_TTL_MINUTES)
 
       res.json({ message: 'OTP sent to your email' })
     } catch (error) {
