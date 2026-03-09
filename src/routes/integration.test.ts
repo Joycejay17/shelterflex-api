@@ -34,6 +34,30 @@ describe('Integration Tests', () => {
     })
   })
 
+  describe('GET /health/details', () => {
+    it('should return 200 with correct response shape', async () => {
+      const response = await request.get('/health/details')
+
+      expect(response.status).toBe(200)
+      expect(response.body).toHaveProperty('version')
+      expect(typeof response.body.version).toBe('string')
+      expect(response.body).toHaveProperty('nodeEnv')
+      expect(typeof response.body.nodeEnv).toBe('string')
+      expect(response.body).toHaveProperty('sorobanAdapterMode')
+      expect(['stub', 'real']).toContain(response.body.sorobanAdapterMode)
+      expect(response.body).toHaveProperty('databaseEnabled')
+      expect(typeof response.body.databaseEnabled).toBe('boolean')
+      expect(response.body).toHaveProperty('requestId')
+      expect(typeof response.body.requestId).toBe('string')
+    })
+
+    it('should include x-request-id header', async () => {
+      const response = await request.get('/health/details')
+
+      expectRequestId(response)
+    })
+  })
+
   describe('GET /soroban/config', () => {
     it('should return 200 with correct config shape', async () => {
       const response = await request.get('/soroban/config')
