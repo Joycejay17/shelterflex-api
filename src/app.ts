@@ -172,7 +172,7 @@ export function createApp() {
   app.use('/api/admin/risk', createAdminRiskRouter(ngnWalletService))
   app.use('/api/admin', createAdminWithdrawalsRouter(ngnWalletService))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
-  app.use('/api/admin', createAdminRouter(sorobanAdapter, walletStore as any, encryptionService as any))
+  app.use('/api/admin', createAdminRouter(sorobanAdapter, walletStore as any, encryptionService as any, indexer))
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
   app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
