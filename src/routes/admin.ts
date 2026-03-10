@@ -19,20 +19,18 @@ import { ListingStatus } from '../models/listing.js'
 import { env } from '../schemas/env.js'
 import type { WalletStore } from '../models/wallet.js'
 import type { EncryptionService } from '../services/walletService.js'
+import { ReceiptIndexer } from '../indexer/worker.js'
 
-export function createAdminRouter(adapter: SorobanAdapter, walletStore?: WalletStore, encryptionService?: EncryptionService) {
+export function createAdminRouter(adapter: SorobanAdapter, walletStore?: WalletStore, encryptionService?: EncryptionService, indexer?: ReceiptIndexer) {
   const router = Router()
   const sender = new OutboxSender(adapter)
 
-  // ---------------------------------------------------------------------------
-  // Admin secret guard — applies to every /outbox* subroute
-  // ---------------------------------------------------------------------------
-  function requireAdminSecret(req: Request, res: Response, next: NextFunction) {
+  // Admin auth guard helper
+  function requireAdminSecret(req: Request) {
     const headerSecret = req.headers['x-admin-secret']
     if (env.MANUAL_ADMIN_SECRET && headerSecret !== env.MANUAL_ADMIN_SECRET) {
-      return next(new AppError(ErrorCode.FORBIDDEN, 403, 'Invalid admin secret'))
+      throw new AppError(ErrorCode.FORBIDDEN, 403, 'Invalid admin secret')
     }
-    return next()
   }
 
   router.post(
@@ -674,6 +672,130 @@ export function createAdminRouter(adapter: SorobanAdapter, walletStore?: WalletS
       }
     },
   )
+
+  /**
+   * GET /api/admin/indexer/metrics
+   * 
+   * Get ReceiptIndexer metrics and status
+   */
+  router.get('/indexer/metrics', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      requireAdminSecret(req)
+
+      if (!indexer) {
+        throw new AppError(
+          ErrorCode.INTERNAL_ERROR,
+          501,
+          'ReceiptIndexer is not configured on this deployment',
+        )
+      }
+
+      const metrics = indexer.getMetrics()
+
+      logger.info('Indexer metrics retrieved', {
+        requestId: req.requestId,
+        metrics,
+      })
+
+      res.json({
+        metrics,
+      })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  /**
+   * POST /api/admin/indexer/pause
+   * 
+   * Pause the ReceiptIndexer (stops polling)
+   */
+  router.post('/indexer/pause', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      requireAdminSecret(req)
+
+      if (!indexer) {
+        throw new AppError(
+          ErrorCode.INTERNAL_ERROR,
+          501,
+          'ReceiptIndexer is not configured on this deployment',
+        )
+      }
+
+      logger.info('Indexer pause requested', {
+        requestId: req.requestId,
+      })
+
+      // Audit log: admin indexer action (pause)
+      auditAdminWalletAction(req, {
+        action: 'INDEXER_PAUSE',
+        details: {},
+      })
+
+      indexer.pause()
+
+      const metrics = indexer.getMetrics()
+
+      logger.info('Indexer paused', {
+        requestId: req.requestId,
+        isPaused: metrics.isPaused,
+      })
+
+      res.json({
+        success: true,
+        message: 'Indexer paused successfully',
+        metrics,
+      })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  /**
+   * POST /api/admin/indexer/resume
+   * 
+   * Resume the ReceiptIndexer (continues polling)
+   */
+  router.post('/indexer/resume', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      requireAdminSecret(req)
+
+      if (!indexer) {
+        throw new AppError(
+          ErrorCode.INTERNAL_ERROR,
+          501,
+          'ReceiptIndexer is not configured on this deployment',
+        )
+      }
+
+      logger.info('Indexer resume requested', {
+        requestId: req.requestId,
+      })
+
+      // Audit log: admin indexer action (resume)
+      auditAdminWalletAction(req, {
+        action: 'INDEXER_RESUME',
+        details: {},
+      })
+
+      indexer.resume()
+
+      const metrics = indexer.getMetrics()
+
+      logger.info('Indexer resumed', {
+        requestId: req.requestId,
+        isPaused: metrics.isPaused,
+      })
+
+      res.json({
+        success: true,
+        message: 'Indexer resumed successfully',
+        metrics,
+      })
+    } catch (error) {
+      next(error)
+    }
+  })
 
   return router
 }
