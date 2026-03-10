@@ -1,10 +1,10 @@
 export type PgClientLike = {
-  query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }>
+  query: (text: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number }>
   release: () => void
 }
 
 export type PgPoolLike = {
-  query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }>
+  query: (text: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number }>
   connect: () => Promise<PgClientLike>
 }
 
