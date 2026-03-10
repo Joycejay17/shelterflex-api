@@ -54,7 +54,7 @@ The repository includes a migration runner script in `src/repositories/test.ts` 
 
 | Topic | File |
 |---|---|
-| API specification (OpenAPI) | [openapi.yml](openapi.yml) |
+| API specification (OpenAPI) | [docs/openapi.yml](docs/openapi.yml) |
 | Error handling contract | [src/docs/ERROR-INFO.md](src/docs/ERROR-INFO.md) |
 | Soroban integration tests | [docs/soroban-integration-tests.md](docs/soroban-integration-tests.md) |
 | Admin signing service | [docs/ADMIN_SIGNING.md](docs/ADMIN_SIGNING.md) |
@@ -180,7 +180,7 @@ Returns **400** with structured field-level errors on invalid input.
   }
 }
 ```
-The complete API specification is available in [OpenAPI format](openapi.yml). It includes:
+The complete API specification is available in [OpenAPI format](docs/openapi.yml). It includes:
 - All available endpoints
 - Request/response schemas
 - Error response formats
