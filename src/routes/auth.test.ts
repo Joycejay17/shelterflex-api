@@ -122,7 +122,7 @@ describe('Auth Routes (Wallet)', () => {
     expect(res.body).toHaveProperty('challengeXdr')
     expect(res.body).toHaveProperty('expiresAt')
 
-    const challenge = walletChallengeStore.getByAddress(address)
+    const challenge = await walletChallengeStore.getByAddress(address.toLowerCase())
     expect(challenge).toBeDefined()
     expect(challenge!.address).toBe(address)
     expect(typeof challenge!.challengeXdr).toBe('string')

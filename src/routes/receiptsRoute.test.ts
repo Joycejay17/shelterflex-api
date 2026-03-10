@@ -35,15 +35,15 @@ describe('GET /api/admin/receipts', () => {
   let repo: StubReceiptRepository
   let token: string
 
-  beforeEach(() => {
+  beforeEach(async () => {
     repo = new StubReceiptRepository()
     sessionStore.clear()
     userStore.clear()
 
     // Create a user + session for auth
-    const user = userStore.getOrCreateByEmail('admin@test.com')
+    const user = await userStore.getOrCreateByEmail('admin@test.com')
     token = generateToken()
-    sessionStore.create(user.email, token)
+    await sessionStore.create(user.email, token)
   })
 
   it('returns 401 without a token', async () => {
