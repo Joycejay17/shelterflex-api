@@ -2,12 +2,37 @@ import { logger } from '../utils/logger.js'
 import { conversionStore } from '../models/conversionStore.js'
 import { type ConversionRecord } from '../models/conversion.js'
 import { type ConversionProvider } from './conversionProvider.js'
+import { outboxStore, TxType } from '../outbox/index.js'
+import { getUsdcTokenAddress } from '../utils/token.js'
 
 export class ConversionService {
   constructor(
     private provider: ConversionProvider,
     private fxProviderName: 'onramp' | 'offramp' | 'manual_admin',
   ) {}
+
+  private async ensureConversionReceiptOutbox(conversion: ConversionRecord): Promise<void> {
+    if (!conversion.providerRef) return
+
+    await outboxStore.create({
+      txType: TxType.CONVERSION,
+      source: this.fxProviderName,
+      ref: conversion.providerRef,
+      payload: {
+        txType: TxType.CONVERSION,
+        amountUsdc: conversion.amountUsdc,
+        tokenAddress: getUsdcTokenAddress(),
+        dealId: 'conversion',
+        amountNgn: conversion.amountNgn,
+        fxRateNgnPerUsdc: conversion.fxRateNgnPerUsdc,
+        fxProvider: conversion.provider,
+        conversionId: conversion.conversionId,
+        depositId: conversion.depositId,
+        conversionProviderRef: conversion.providerRef,
+        userId: conversion.userId,
+      },
+    })
+  }
 
   /**
    * Execute conversion once per deposit.
@@ -20,6 +45,7 @@ export class ConversionService {
   }): Promise<ConversionRecord> {
     const existing = await conversionStore.getByDepositId(params.depositId)
     if (existing?.status === 'completed') {
+      await this.ensureConversionReceiptOutbox(existing)
       return existing
     }
 
@@ -31,6 +57,7 @@ export class ConversionService {
     })
 
     if (pending.status === 'completed') {
+      await this.ensureConversionReceiptOutbox(pending)
       return pending
     }
 
@@ -50,6 +77,8 @@ export class ConversionService {
       if (!completed) {
         throw new Error('Failed to mark conversion completed')
       }
+
+      await this.ensureConversionReceiptOutbox(completed)
 
       return completed
     } catch (e) {
@@ -79,6 +108,7 @@ export class ConversionService {
     
     const existing = await conversionStore.getByDepositId(syntheticDepositId)
     if (existing?.status === 'completed') {
+      await this.ensureConversionReceiptOutbox(existing)
       return existing
     }
 
@@ -90,6 +120,7 @@ export class ConversionService {
     })
 
     if (pending.status === 'completed') {
+      await this.ensureConversionReceiptOutbox(pending)
       return pending
     }
 
@@ -109,6 +140,8 @@ export class ConversionService {
       if (!completed) {
         throw new Error('Failed to mark conversion completed')
       }
+
+      await this.ensureConversionReceiptOutbox(completed)
 
       return completed
     } catch (e) {

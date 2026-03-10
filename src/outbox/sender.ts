@@ -41,6 +41,7 @@ export class OutboxSender {
         case TxType.STAKE:
         case TxType.UNSTAKE:
         case TxType.STAKE_REWARD_CLAIM:
+        case TxType.CONVERSION:
           await this.sendReceipt(item)
           break
         default:
@@ -92,8 +93,13 @@ export class OutboxSender {
   private async sendReceipt(item: OutboxItem): Promise<void> {
     const { payload } = item
 
-    // Handle staking transactions differently - they don't require dealId or tokenAddress
-    if (item.txType === TxType.STAKE || item.txType === TxType.UNSTAKE || item.txType === TxType.STAKE_REWARD_CLAIM) {
+    // Handle tx types that don't require dealId/listingId semantics
+    if (
+      item.txType === TxType.STAKE ||
+      item.txType === TxType.UNSTAKE ||
+      item.txType === TxType.STAKE_REWARD_CLAIM ||
+      item.txType === TxType.CONVERSION
+    ) {
       // For staking transactions, we need at least amountUsdc and txType
       if (!payload.amountUsdc && item.txType !== TxType.STAKE_REWARD_CLAIM) {
         throw new Error('Invalid staking payload: missing required field amountUsdc')
@@ -107,8 +113,14 @@ export class OutboxSender {
         txId: item.txId,
         txType: item.txType as import('./types.js').TxType,
         amountUsdc: payload.amountUsdc ? String(payload.amountUsdc) : '0',
-        tokenAddress: process.env.USDC_TOKEN_ADDRESS || '0x0000000000000000000000000000000000000000',
-        dealId: 'staking-transaction',
+        tokenAddress: payload.tokenAddress
+          ? String(payload.tokenAddress)
+          : process.env.USDC_TOKEN_ADDRESS || '0x0000000000000000000000000000000000000000',
+        dealId: payload.dealId
+          ? String(payload.dealId)
+          : item.txType === TxType.CONVERSION
+            ? 'conversion'
+            : 'staking-transaction',
         amountNgn: payload.amountNgn != null ? Number(payload.amountNgn) : undefined,
         fxRate: payload.fxRateNgnPerUsdc != null ? Number(payload.fxRateNgnPerUsdc) : undefined,
         fxProvider: payload.fxProvider ? String(payload.fxProvider) : undefined,

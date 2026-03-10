@@ -27,9 +27,11 @@ import { createWalletRouter } from "./routes/wallet.js"
 import { createNgnWalletRouter } from "./routes/ngnWallet.js"
 import { createAdminRiskRouter } from "./routes/adminRisk.js"
 import { createAdminWithdrawalsRouter } from "./routes/adminWithdrawals.js"
+import { createRiskRouter } from "./routes/risk.js"
 import { WalletServiceImpl, EnvironmentEncryptionService, KeyringEncryptionService, readEncryptionKeyringFromEnv } from "./services/walletService.js"
 import { CustodialWalletServiceImpl } from "./services/CustodialWalletServiceImpl.js"
 import { NgnWalletService } from "./services/ngnWalletService.js"
+import { createAdminReconciliationRouter } from "./routes/adminReconciliation.js"
 import { InMemoryWalletStore, PostgresWalletStore } from "./models/walletStore.js"
 import { InMemoryLinkedAddressStore, PostgresLinkedAddressStore } from "./models/linkedAddressStore.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
@@ -41,6 +43,8 @@ import { getPool } from "./db.js"
 import { StakingService } from "./services/stakingService.js"
 import { StakingFinalizer } from "./jobs/stakingFinalizer.js"
 import { initOutboxStore, PostgresOutboxStore } from "./outbox/store.js"
+import { OutboxSender } from "./outbox/sender.js"
+import { OutboxWorker } from "./outbox/worker.js"
 
 
 export function createApp() {
@@ -132,6 +136,19 @@ export function createApp() {
     initOutboxStore(new PostgresOutboxStore())
   }
 
+  // OutboxWorker — runs the retry loop in non-test environments
+  if (env.NODE_ENV !== 'test') {
+    const outboxSender = new OutboxSender(sorobanAdapter)
+    const outboxWorker = new OutboxWorker(outboxSender)
+    const intervalMs = parseInt(process.env.OUTBOX_WORKER_INTERVAL_MS ?? '60000', 10)
+    outboxWorker.start(intervalMs)
+
+    // Graceful shutdown
+    const stopWorker = () => outboxWorker.stop()
+    process.once('SIGTERM', stopWorker)
+    process.once('SIGINT', stopWorker)
+  }
+
   // Indexer
   const receiptRepo = process.env.DATABASE_URL
     ? new PostgresReceiptRepository()
@@ -169,10 +186,12 @@ export function createApp() {
   app.use('/api', createReceiptsRouter(receiptRepo))
   app.use('/api/wallet', createWalletRateLimiter(env), createWalletRouter(walletService))
   app.use('/api/wallet/ngn', createNgnWalletRouter(ngnWalletService))
+  app.use('/api/risk', createRiskRouter(ngnWalletService))
   app.use('/api/admin/risk', createAdminRiskRouter(ngnWalletService))
   app.use('/api/admin', createAdminWithdrawalsRouter(ngnWalletService))
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter, walletStore as any, encryptionService as any, indexer))
+  app.use('/api/admin/reconciliation', createAdminReconciliationRouter(ngnWalletService))
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
   app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))

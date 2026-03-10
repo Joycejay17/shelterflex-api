@@ -15,6 +15,44 @@ class DepositStore {
   // Confirmed deposits (idempotent by depositId)
   private deposits = new Map<string, DepositRecord>()
 
+  async listInitiations(options?: {
+    status?: DepositStatus
+    limit?: number
+    cursorCreatedAt?: Date
+  }): Promise<Deposit[]> {
+    const limit = Math.max(1, Math.min(1000, options?.limit ?? 50))
+    const status = options?.status
+    const cursor = options?.cursorCreatedAt
+    let items = Array.from(this.initiationsById.values())
+    if (status) {
+      items = items.filter((d) => d.status === status)
+    }
+    items.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    if (cursor) {
+      items = items.filter((d) => d.createdAt < cursor)
+    }
+    return items.slice(0, limit)
+  }
+
+  async listConfirmedRecords(options?: {
+    reversed?: boolean
+    limit?: number
+    cursorCreatedAt?: Date
+  }): Promise<DepositRecord[]> {
+    const limit = Math.max(1, Math.min(1000, options?.limit ?? 50))
+    const reversedOnly = options?.reversed ?? false
+    const cursor = options?.cursorCreatedAt
+    let items = Array.from(this.deposits.values())
+    if (reversedOnly) {
+      items = items.filter((d) => d.reversedAt != null)
+    }
+    items.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    if (cursor) {
+      items = items.filter((d) => d.createdAt < cursor)
+    }
+    return items.slice(0, limit)
+  }
+
   // Initiation flow
   async create(input: CreateDepositInput): Promise<Deposit> {
     const now = new Date()
