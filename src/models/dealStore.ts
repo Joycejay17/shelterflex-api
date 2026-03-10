@@ -4,15 +4,16 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { 
-  Deal, 
-  CreateDealInput, 
-  DealWithSchedule, 
-  ScheduleItem, 
-  DealFilters, 
+import { getPool, type PgPoolLike } from '../db.js'
+import {
+  Deal,
+  CreateDealInput,
+  DealWithSchedule,
+  ScheduleItem,
+  DealFilters,
   PaginatedDeals,
   DealStatus,
-  ScheduleItemStatus 
+  ScheduleItemStatus,
 } from './deal.js'
 import { generateRepaymentSchedule } from '../utils/scheduleGenerator.js'
 
@@ -20,21 +21,54 @@ export interface StoredDeal extends Deal {
   schedule: ScheduleItem[]
 }
 
-class DealStore {
+interface DealStorePort {
+  create(input: CreateDealInput): Promise<DealWithSchedule>
+  findById(dealId: string): Promise<DealWithSchedule | null>
+  findMany(filters?: DealFilters): Promise<PaginatedDeals>
+  updateStatus(dealId: string, status: DealStatus): Promise<DealWithSchedule | null>
+  updateScheduleItemStatus(
+    dealId: string,
+    period: number,
+    status: ScheduleItemStatus,
+  ): Promise<DealWithSchedule | null>
+  clear(): Promise<void>
+}
+
+const DEFAULT_PAGE_SIZE = 20
+
+function validateCreateInput(input: CreateDealInput): void {
+  if (input.annualRentNgn <= 0) {
+    throw new Error('Annual rent must be greater than 0')
+  }
+
+  if (input.depositNgn < input.annualRentNgn * 0.2) {
+    throw new Error('Deposit must be at least 20% of annual rent')
+  }
+
+  const allowedTerms = [3, 6, 12]
+  if (!allowedTerms.includes(input.termMonths)) {
+    throw new Error(`Term months must be one of: ${allowedTerms.join(', ')}`)
+  }
+
+  if (input.depositNgn >= input.annualRentNgn) {
+    throw new Error('Deposit must be less than annual rent')
+  }
+}
+
+class InMemoryDealStore implements DealStorePort {
   private deals: Map<string, StoredDeal> = new Map()
 
   async create(input: CreateDealInput): Promise<DealWithSchedule> {
-    // Validate business rules
-    this.validateCreateInput(input)
+    validateCreateInput(input)
 
     const dealId = randomUUID()
     const now = new Date()
-    
+
     const schedule = generateRepaymentSchedule({
       annualRentNgn: input.annualRentNgn,
       depositNgn: input.depositNgn,
       termMonths: input.termMonths,
-      startDate: now
+      startDate: now,
     })
 
     const deal: StoredDeal = {
@@ -48,14 +82,14 @@ class DealStore {
       termMonths: input.termMonths,
       createdAt: now,
       status: DealStatus.DRAFT,
-      schedule
+      schedule,
     }
 
     this.deals.set(dealId, deal)
 
     return {
       ...deal,
-      schedule: [...schedule]
+      schedule: [...schedule],
     }
   }
 
@@ -65,37 +99,34 @@ class DealStore {
 
     return {
       ...deal,
-      schedule: [...deal.schedule]
+      schedule: [...deal.schedule],
     }
   }
 
   async findMany(filters: DealFilters = {}): Promise<PaginatedDeals> {
     let filteredDeals = Array.from(this.deals.values())
 
-    // Apply filters
     if (filters.tenantId) {
-      filteredDeals = filteredDeals.filter(deal => deal.tenantId === filters.tenantId)
+      filteredDeals = filteredDeals.filter((deal) => deal.tenantId === filters.tenantId)
     }
     if (filters.landlordId) {
-      filteredDeals = filteredDeals.filter(deal => deal.landlordId === filters.landlordId)
+      filteredDeals = filteredDeals.filter((deal) => deal.landlordId === filters.landlordId)
     }
     if (filters.status) {
-      filteredDeals = filteredDeals.filter(deal => deal.status === filters.status)
+      filteredDeals = filteredDeals.filter((deal) => deal.status === filters.status)
     }
 
-    // Sort by createdAt descending
     filteredDeals.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
 
-    // Pagination
     const page = filters.page || 1
-    const pageSize = filters.pageSize || 20
+    const pageSize = filters.pageSize || DEFAULT_PAGE_SIZE
     const startIndex = (page - 1) * pageSize
     const endIndex = startIndex + pageSize
 
     const paginatedDeals = filteredDeals.slice(startIndex, endIndex)
 
     return {
-      deals: paginatedDeals.map(deal => ({
+      deals: paginatedDeals.map((deal) => ({
         dealId: deal.dealId,
         tenantId: deal.tenantId,
         landlordId: deal.landlordId,
@@ -105,12 +136,12 @@ class DealStore {
         financedAmountNgn: deal.financedAmountNgn,
         termMonths: deal.termMonths,
         createdAt: deal.createdAt,
-        status: deal.status
+        status: deal.status,
       })),
       total: filteredDeals.length,
       page,
       pageSize,
-      totalPages: Math.ceil(filteredDeals.length / pageSize)
+      totalPages: Math.ceil(filteredDeals.length / pageSize),
     }
   }
 
@@ -122,57 +153,338 @@ class DealStore {
 
     return {
       ...deal,
-      schedule: [...deal.schedule]
+      schedule: [...deal.schedule],
     }
   }
 
   async updateScheduleItemStatus(
-    dealId: string, 
-    period: number, 
-    status: ScheduleItemStatus
+    dealId: string,
+    period: number,
+    status: ScheduleItemStatus,
   ): Promise<DealWithSchedule | null> {
     const deal = this.deals.get(dealId)
     if (!deal) return null
 
-    const scheduleItem = deal.schedule.find(item => item.period === period)
+    const scheduleItem = deal.schedule.find((item) => item.period === period)
     if (!scheduleItem) return null
 
     scheduleItem.status = status
 
     return {
       ...deal,
-      schedule: [...deal.schedule]
+      schedule: [...deal.schedule],
     }
   }
 
-  private validateCreateInput(input: CreateDealInput): void {
-    if (input.annualRentNgn <= 0) {
-      throw new Error('Annual rent must be greater than 0')
-    }
-
-    if (input.depositNgn < input.annualRentNgn * 0.2) {
-      throw new Error('Deposit must be at least 20% of annual rent')
-    }
-
-    const allowedTerms = [3, 6, 12] // Configurable - move to config later
-    if (!allowedTerms.includes(input.termMonths)) {
-      throw new Error(`Term months must be one of: ${allowedTerms.join(', ')}`)
-    }
-
-    if (input.depositNgn >= input.annualRentNgn) {
-      throw new Error('Deposit must be less than annual rent')
-    }
-  }
-
-  // Helper method for testing
   async clear(): Promise<void> {
     this.deals.clear()
   }
+}
 
-  // Helper method to get all deals (for testing)
-  async getAll(): Promise<StoredDeal[]> {
-    return Array.from(this.deals.values())
+type DealRow = {
+  deal_id: string
+  tenant_id: string
+  landlord_id: string
+  listing_id: string | null
+  annual_rent_ngn: string | number
+  deposit_ngn: string | number
+  financed_amount_ngn: string | number
+  term_months: number
+  status: DealStatus
+  created_at: Date
+  updated_at: Date
+}
+
+type ScheduleRow = {
+  period: number
+  due_date: Date
+  amount_ngn: string | number
+  status: ScheduleItemStatus
+}
+
+class PostgresDealStore implements DealStorePort {
+  private async pool(): Promise<PgPoolLike> {
+    const pool = await getPool()
+    if (!pool) {
+      throw new Error('Database pool is not available (DATABASE_URL/pg not configured)')
+    }
+    return pool
+  }
+
+  async isAvailable(): Promise<boolean> {
+    return (await getPool()) !== null
+  }
+
+  async create(input: CreateDealInput): Promise<DealWithSchedule> {
+    validateCreateInput(input)
+
+    const schedule = generateRepaymentSchedule({
+      annualRentNgn: input.annualRentNgn,
+      depositNgn: input.depositNgn,
+      termMonths: input.termMonths,
+      startDate: new Date(),
+    })
+
+    const dealId = randomUUID()
+    const pool = await this.pool()
+    const client = await pool.connect()
+
+    try {
+      await client.query('BEGIN')
+
+      const dealResult = await client.query(
+        `INSERT INTO tenant_deals (
+          deal_id,
+          tenant_id,
+          landlord_id,
+          listing_id,
+          annual_rent_ngn,
+          deposit_ngn,
+          financed_amount_ngn,
+          term_months,
+          status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *`,
+        [
+          dealId,
+          input.tenantId,
+          input.landlordId,
+          input.listingId ?? null,
+          input.annualRentNgn,
+          input.depositNgn,
+          input.annualRentNgn - input.depositNgn,
+          input.termMonths,
+          DealStatus.DRAFT,
+        ],
+      )
+
+      const row = dealResult.rows[0] as DealRow
+
+      for (const item of schedule) {
+        await client.query(
+          `INSERT INTO tenant_deal_schedules (
+            deal_id,
+            period,
+            due_date,
+            amount_ngn,
+            status
+          ) VALUES ($1, $2, $3, $4, $5)`,
+          [dealId, item.period, new Date(item.dueDate), item.amountNgn, item.status],
+        )
+      }
+
+      await client.query('COMMIT')
+
+      return {
+        ...this.mapDeal(row),
+        schedule,
+      }
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  async findById(dealId: string): Promise<DealWithSchedule | null> {
+    const pool = await this.pool()
+    return this.fetchDealWithSchedule(pool, dealId)
+  }
+
+  async findMany(filters: DealFilters = {}): Promise<PaginatedDeals> {
+    const pool = await this.pool()
+    const where: string[] = []
+    const values: unknown[] = []
+
+    if (filters.tenantId) {
+      values.push(filters.tenantId)
+      where.push(`tenant_id = $${values.length}`)
+    }
+
+    if (filters.landlordId) {
+      values.push(filters.landlordId)
+      where.push(`landlord_id = $${values.length}`)
+    }
+
+    if (filters.status) {
+      values.push(filters.status)
+      where.push(`status = $${values.length}`)
+    }
+
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : ''
+    const page = filters.page && filters.page > 0 ? filters.page : 1
+    const pageSize = filters.pageSize && filters.pageSize > 0 ? filters.pageSize : DEFAULT_PAGE_SIZE
+    const offset = (page - 1) * pageSize
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*) as count FROM tenant_deals ${whereClause}`,
+      values,
+    )
+
+    const queryValues = [...values, pageSize, offset]
+    const dataResult = await pool.query(
+      `SELECT * FROM tenant_deals ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+      queryValues,
+    )
+
+    const total = Number((countResult.rows[0] as { count: string }).count)
+    const deals = dataResult.rows.map((row) => this.mapDeal(row as DealRow))
+
+    return {
+      deals,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    }
+  }
+
+  async updateStatus(dealId: string, status: DealStatus): Promise<DealWithSchedule | null> {
+    const pool = await this.pool()
+    const { rows } = await pool.query(
+      `UPDATE tenant_deals
+       SET status = $2, updated_at = NOW()
+       WHERE deal_id = $1
+       RETURNING *`,
+      [dealId, status],
+    )
+
+    if (rows.length === 0) {
+      return null
+    }
+
+    return this.fetchDealWithSchedule(pool, dealId)
+  }
+
+  async updateScheduleItemStatus(
+    dealId: string,
+    period: number,
+    status: ScheduleItemStatus,
+  ): Promise<DealWithSchedule | null> {
+    const pool = await this.pool()
+    const result = await pool.query(
+      `UPDATE tenant_deal_schedules
+       SET status = $3, updated_at = NOW()
+       WHERE deal_id = $1 AND period = $2`,
+      [dealId, period, status],
+    )
+
+    if (result.rowCount === 0) {
+      return null
+    }
+
+    return this.fetchDealWithSchedule(pool, dealId)
+  }
+
+  async clear(): Promise<void> {
+    const pool = await this.pool()
+    if (process.env.NODE_ENV !== 'test') {
+      throw new Error('dealStore.clear() is only supported in test env when using Postgres')
+    }
+    await pool.query('TRUNCATE tenant_deal_schedules RESTART IDENTITY CASCADE')
+    await pool.query('TRUNCATE tenant_deals RESTART IDENTITY CASCADE')
+  }
+
+  private mapDeal(row: DealRow): Deal {
+    return {
+      dealId: row.deal_id,
+      tenantId: row.tenant_id,
+      landlordId: row.landlord_id,
+      listingId: row.listing_id ?? undefined,
+      annualRentNgn: toNumber(row.annual_rent_ngn),
+      depositNgn: toNumber(row.deposit_ngn),
+      financedAmountNgn: toNumber(row.financed_amount_ngn),
+      termMonths: row.term_months,
+      createdAt: new Date(row.created_at),
+      status: row.status,
+    }
+  }
+
+  private async fetchDealWithSchedule(
+    pool: PgPoolLike,
+    dealId: string,
+  ): Promise<DealWithSchedule | null> {
+    const { rows } = await pool.query('SELECT * FROM tenant_deals WHERE deal_id = $1', [dealId])
+    if (rows.length === 0) {
+      return null
+    }
+
+    const deal = this.mapDeal(rows[0] as DealRow)
+    const scheduleRows = await pool.query(
+      `SELECT period, due_date, amount_ngn, status
+       FROM tenant_deal_schedules
+       WHERE deal_id = $1
+       ORDER BY period ASC`,
+      [dealId],
+    )
+
+    return {
+      ...deal,
+      schedule: scheduleRows.rows.map((row) => this.mapScheduleRow(row as ScheduleRow)),
+    }
+  }
+
+  private mapScheduleRow(row: ScheduleRow): ScheduleItem {
+    return {
+      period: row.period,
+      dueDate: new Date(row.due_date).toISOString(),
+      amountNgn: toNumber(row.amount_ngn),
+      status: row.status,
+    }
   }
 }
 
-export const dealStore = new DealStore()
+class HybridDealStore implements DealStorePort {
+  private memory = new InMemoryDealStore()
+  private postgres = new PostgresDealStore()
+
+  private async adapter(): Promise<DealStorePort> {
+    if (await this.postgres.isAvailable()) {
+      return this.postgres
+    }
+    return this.memory
+  }
+
+  async create(input: CreateDealInput): Promise<DealWithSchedule> {
+    const adapter = await this.adapter()
+    return adapter.create(input)
+  }
+
+  async findById(dealId: string): Promise<DealWithSchedule | null> {
+    const adapter = await this.adapter()
+    return adapter.findById(dealId)
+  }
+
+  async findMany(filters: DealFilters = {}): Promise<PaginatedDeals> {
+    const adapter = await this.adapter()
+    return adapter.findMany(filters)
+  }
+
+  async updateStatus(dealId: string, status: DealStatus): Promise<DealWithSchedule | null> {
+    const adapter = await this.adapter()
+    return adapter.updateStatus(dealId, status)
+  }
+
+  async updateScheduleItemStatus(
+    dealId: string,
+    period: number,
+    status: ScheduleItemStatus,
+  ): Promise<DealWithSchedule | null> {
+    const adapter = await this.adapter()
+    return adapter.updateScheduleItemStatus(dealId, period, status)
+  }
+
+  async clear(): Promise<void> {
+    const adapter = await this.adapter()
+    return adapter.clear()
+  }
+}
+
+function toNumber(value: string | number): number {
+  return typeof value === 'number' ? value : Number(value)
+}
+
+export const dealStore = new HybridDealStore()
