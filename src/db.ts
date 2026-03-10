@@ -1,8 +1,18 @@
-type PgPoolLike = {
-  query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }>
+export type PgClientLike = {
+  query: (text: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number }>
+  release: () => void
+}
+
+export type PgPoolLike = {
+  query: (text: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number }>
+  connect: () => Promise<PgClientLike>
 }
 
 let pool: PgPoolLike | null = null
+
+export function setPool(newPool: PgPoolLike | null) {
+  pool = newPool
+}
 
 export async function getPool(): Promise<PgPoolLike | null> {
   if (pool) return pool
