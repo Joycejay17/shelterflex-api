@@ -26,7 +26,7 @@ export function createAdminRouter(adapter: SorobanAdapter, walletStore?: WalletS
   const sender = new OutboxSender(adapter)
 
   // Admin auth guard helper
-  function requireAdminAuth(req: Request) {
+  function requireAdminSecret(req: Request) {
     const headerSecret = req.headers['x-admin-secret']
     if (env.MANUAL_ADMIN_SECRET && headerSecret !== env.MANUAL_ADMIN_SECRET) {
       throw new AppError(ErrorCode.FORBIDDEN, 403, 'Invalid admin secret')
@@ -680,7 +680,7 @@ export function createAdminRouter(adapter: SorobanAdapter, walletStore?: WalletS
    */
   router.get('/indexer/metrics', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdminAuth(req)
+      requireAdminSecret(req)
 
       if (!indexer) {
         throw new AppError(
@@ -712,7 +712,7 @@ export function createAdminRouter(adapter: SorobanAdapter, walletStore?: WalletS
    */
   router.post('/indexer/pause', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdminAuth(req)
+      requireAdminSecret(req)
 
       if (!indexer) {
         throw new AppError(
@@ -758,7 +758,7 @@ export function createAdminRouter(adapter: SorobanAdapter, walletStore?: WalletS
    */
   router.post('/indexer/resume', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdminAuth(req)
+      requireAdminSecret(req)
 
       if (!indexer) {
         throw new AppError(
