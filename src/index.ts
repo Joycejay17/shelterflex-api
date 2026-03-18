@@ -2,17 +2,15 @@ import "dotenv/config"
 import { createApp } from "./app.js"
 import { maybeStartOutboxWorker } from "./outbox/workerEntry.js"
 import { env } from "./schemas/env.js"
-import { errorHandler } from "./middleware/index.js"
-import { AppError } from "./errors/index.js"
-import { ErrorCode } from "./errors/index.js"
-import { createRequire } from "module"
+import { createRequire } from "node:module"
 import { getUsdcTokenAddress } from "./utils/token.js"
+import { runMigrationsIfNeeded } from "./migrations/runMigrations.js"
 
 const require = createRequire(import.meta.url)
 const { version } = require("../package.json") as { version: string }
 
 // Validate environment before starting the server
-if (env.NODE_ENV !== 'development') {
+if (env.NODE_ENV === 'production') {
   try {
     getUsdcTokenAddress()
     console.log(`[backend] Environment validation passed for ${env.SOROBAN_NETWORK} network`)
@@ -23,9 +21,18 @@ if (env.NODE_ENV !== 'development') {
   }
 }
 
-const app = createApp()
+async function main() {
+  try {
+    await runMigrationsIfNeeded()
+    const app = createApp()
+    maybeStartOutboxWorker()
+    app.listen(env.PORT, () => {
+      console.log(`[backend] listening on http://localhost:${env.PORT}`)
+    })
+  } catch (error) {
+    console.error(`[backend] Fatal startup error: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+    process.exit(1)
+  }
+}
 
-maybeStartOutboxWorker()
-app.listen(env.PORT, () => {
-  console.log(`[backend] listening on http://localhost:${env.PORT}`)
-})
+void main()

@@ -55,7 +55,7 @@ export const envSchema = z.object({
   path: ['SOROBAN_USDC_TOKEN_ID'],
 })
   .refine((data) => {
-    if (data.NODE_ENV === 'development' || data.NODE_ENV === 'test') {
+    if (data.NODE_ENV !== 'production') {
       return true
     }
     if (!data.CUSTODIAL_WALLET_MASTER_KEY_V1) {
