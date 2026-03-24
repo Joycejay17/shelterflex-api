@@ -5,6 +5,7 @@ import request from 'supertest'
 import express from 'express'
 import { sessionStore, userStore } from '../models/authStore.js'
 import { ngnDepositStore } from '../models/ngnDepositStore.js'
+import { ngnWalletStore } from '../models/ngnWalletStore.js'
 
 describe('NGN Wallet Routes', () => {
   let ngnWalletService: NgnWalletService
@@ -12,28 +13,29 @@ describe('NGN Wallet Routes', () => {
   let token: string
   let userId: string
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ngnWalletService = new NgnWalletService()
-    
+
     // Seed an authenticated user session for tests
-    const user = userStore.getOrCreateByEmail('test-user@example.com')
+    const user = await userStore.getOrCreateByEmail('test-user@example.com')
     userId = user.id
     token = 'test-session-token'
-    sessionStore.create(user.email, token)
+    await sessionStore.create(user.email, token)
 
     app = express()
     app.use(express.json())
-    
+
     // Mock authentication middleware - this needs to be set up before the routes
     const mockAuth = (req: any, res: any, next: any) => {
       req.user = { id: userId }
       next()
     }
-    
+
     // Apply auth middleware before routes
     app.use('/api/wallet/ngn', mockAuth)
     app.use('/api/wallet/ngn', createNgnWalletRouter(ngnWalletService))
 
+    await ngnWalletStore.clear()
     return ngnDepositStore.clear()
   })
 
@@ -42,7 +44,12 @@ describe('NGN Wallet Routes', () => {
       const response = await request(app)
         .get('/api/wallet/ngn/balance')
         .set('Authorization', `Bearer ${token}`)
-        .expect(200)
+
+      if (response.status !== 200) {
+        console.log('Balance status:', response.status)
+        console.log('Balance body:', JSON.stringify(response.body, null, 2))
+      }
+      expect(response.status).toBe(200)
 
       expect(response.body.success).toBe(true)
       expect(response.body.availableNgn).toBe(50000)

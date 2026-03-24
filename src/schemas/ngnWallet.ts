@@ -45,13 +45,27 @@ export const ngnBalanceResponseSchema = z.object({
   totalNgn: z.number(),
 })
 
+export const ledgerEntryTypeSchema = z.enum([
+  'TOPUP_PENDING',
+  'TOPUP_CONFIRMED',
+  'TOPUP_REVERSED',
+  'STAKE_RESERVE',
+  'STAKE_RELEASE',
+  'CONVERSION_DEBIT',
+  'WITHDRAWAL_PENDING',
+  'WITHDRAWAL_CONFIRMED',
+  'WITHDRAWAL_FAILED',
+  'ADJUSTMENT'
+])
+
 export const ngnLedgerEntrySchema = z.object({
-  id: z.string(),
-  type: z.enum(['top_up', 'topup_pending', 'topup_confirmed', 'top_up_reversed', 'topup_reversed', 'withdrawal', 'stake', 'stake_reserve', 'stake_release', 'unstake', 'reward', 'conversion_debit']),
-  amountNgn: z.number(),
-  status: z.enum(['pending', 'approved', 'rejected', 'confirmed', 'failed', 'reversed']),
-  timestamp: z.string(),
-  reference: z.string().nullable(),
+  entryId: z.string(),
+  walletId: z.string(),
+  type: ledgerEntryTypeSchema,
+  amountNgn: z.number(), // signed
+  referenceType: z.string(),
+  referenceId: z.string(),
+  createdAt: z.string(),
 })
 
 export const ngnLedgerResponseSchema = z.object({
