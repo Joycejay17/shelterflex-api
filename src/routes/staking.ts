@@ -215,6 +215,14 @@ export function createStakingRouter(
 
         const result = await stakingService.finalizeStaking(conversionId)
 
+        logger.info('Staking finalized', {
+          conversionId,
+          outboxId: result.outboxId,
+          txId: result.txId,
+          status: result.status,
+          requestId: req.requestId,
+        })
+
         res.status(result.sent ? 200 : 202).json({
           success: true,
           outboxId: result.outboxId,

@@ -124,7 +124,8 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
                 logger.info('Deposit confirmed and wallet credited, triggering conversion', {
                   depositId,
                   userId,
-                  amountNgn
+                  amountNgn,
+                  requestId: req.requestId,
                 })
 
                 // Auto-convert to USDC (idempotent)
@@ -156,11 +157,13 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
                     depositId,
                     conversionId: synthesis.conversionId,
                     outboxId: outboxItem.id,
+                    requestId: req.requestId,
                   })
                 } catch (convError) {
                   logger.error('Auto-conversion failed in webhook context', {
                     depositId,
                     error: convError instanceof Error ? convError.message : String(convError),
+                    requestId: req.requestId,
                   })
                 }
               }
@@ -169,6 +172,7 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
                 depositId,
                 userId,
                 credited: creditResult.credited,
+                requestId: req.requestId,
               })
             }
           } else {
