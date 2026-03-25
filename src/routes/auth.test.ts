@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createTestAgent, expectErrorShape } from '../test-helpers.js'
 import { otpChallengeStore, sessionStore, userStore, walletChallengeStore } from '../models/authStore.js'
-import { _testOnly_clearAuthRateLimits } from '../middleware/authRateLimit.js'
+import { _testOnly_clearAuthRateLimits, _testOnly_prefillEmailOtpCounter } from '../middleware/authRateLimit.js'
 
 vi.mock('../utils/wallet.js', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../utils/wallet.js')>()
@@ -86,12 +86,44 @@ describe('Auth Routes (OTP)', () => {
     expectErrorShape(res, 'UNAUTHORIZED', 401)
   })
 
-  it.skip('request-otp should rate limit by email', async () => {
-    // TODO: Re-enable when test agent supports custom middleware
+  it('request-otp should rate limit by email', async () => {
+    // Use a fresh agent so the global express-rate-limit counter is reset
+    const agent = createTestAgent()
+    const email = 'ratelimit@example.com'
+
+    // Pre-fill the per-email counter to the default limit (100)
+    _testOnly_prefillEmailOtpCounter(email, 100)
+
+    // The next request should be rejected with 429 by the per-email rate limiter
+    const res = await agent.post('/api/auth/request-otp').send({ email })
+    expect(res.status).toBe(429)
+    expect(res.body.error.code).toBe('TOO_MANY_REQUESTS')
   })
 
-  it.skip('GET /api/auth/me should require auth and return user when authenticated', async () => {
-    // TODO: Fix rate limiting test interference
+  it('GET /api/auth/me should require auth and return user when authenticated', async () => {
+    // Use a fresh agent so the global express-rate-limit counter is reset
+    const agent = createTestAgent()
+
+    // Unauthenticated request should fail
+    const unauthed = await agent.get('/api/auth/me')
+    expect(unauthed.status).toBe(401)
+
+    // Create a session via OTP flow
+    const email = 'me@example.com'
+    await agent.post('/api/auth/request-otp').send({ email }).expect(200)
+    const verifyRes = await agent
+      .post('/api/auth/verify-otp')
+      .send({ email, otp: '123456' })
+      .expect(200)
+
+    const token = verifyRes.body.token
+
+    // Authenticated request should return user
+    const authed = await agent
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${token}`)
+    expect(authed.status).toBe(200)
+    expect(authed.body.user).toHaveProperty('email', email)
   })
 })
 
