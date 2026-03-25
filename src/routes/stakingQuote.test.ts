@@ -16,10 +16,10 @@ describe('Staking Quote API', () => {
     await quoteStore.clear()
     await depositStore.clear()
     const email = 'quote-test@example.com'
-    const user = userStore.getOrCreateByEmail(email)
+    const user = await userStore.getOrCreateByEmail(email)
     userId = user.id
     authToken = 'test-token-quote'
-    sessionStore.create(email, authToken)
+    await sessionStore.create(email, authToken)
   })
 
   it('returns a quote and rejects reuse', async () => {
@@ -60,5 +60,40 @@ describe('Staking Quote API', () => {
       .set('x-amount-ngn', '160000')
       .send({ quoteId, paymentRail: 'manual_admin' })
       .expect(409)
+  })
+
+  it('rejects missing x-user-id header for deposit initiation', async () => {
+    const q = await request(app)
+      .post('/api/staking/quote')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({ amountNgn: 160000, paymentRail: 'manual_admin' })
+      .expect(201)
+
+    const response = await request(app)
+      .post('/api/staking/deposit/initiate')
+      .set('x-amount-ngn', '160000')
+      .send({ quoteId: q.body.quoteId, paymentRail: 'manual_admin' })
+      .expect(400)
+
+    expect(response.body.error?.message).toBe('Missing x-user-id header')
+  })
+
+  it('rejects invalid x-user-id header for deposit initiation', async () => {
+    const q = await request(app)
+      .post('/api/staking/quote')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({ amountNgn: 160000, paymentRail: 'manual_admin' })
+      .expect(201)
+
+    const response = await request(app)
+      .post('/api/staking/deposit/initiate')
+      .set('x-user-id', 'bad user id!')
+      .set('x-amount-ngn', '160000')
+      .send({ quoteId: q.body.quoteId, paymentRail: 'manual_admin' })
+      .expect(400)
+
+    expect(response.body.error?.message).toBe(
+      'Invalid x-user-id header: expected 3-128 chars of letters, numbers, underscore, or hyphen'
+    )
   })
 })
