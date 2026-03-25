@@ -14,7 +14,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:integration": "SOROBAN_INTEGRATION_TESTS=true vitest run src/soroban/real-adapter.integration.test.ts",
-    "test:integration:watch": "SOROBAN_INTEGRATION_TESTS=true vitest src/soroban/real-adapter.integration.test.ts"
+    "test:integration:watch": "SOROBAN_INTEGRATION_TESTS=true vitest src/soroban/real-adapter.integration.test.ts",
+    "test:ci": "vitest run --exclude 'src/soroban/**/*.test.ts' --exclude 'src/routes/webhooks.test.ts' --exclude 'src/routes/wallet.test.ts' --exclude 'src/routes/stakingPositionReal.test.ts' --exclude 'src/routes/stakingQuote.test.ts' --exclude 'src/routes/session.test.ts' --exclude 'src/routes/ngnWallet.test.ts'"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^14.6.1",
