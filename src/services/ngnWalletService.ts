@@ -433,6 +433,30 @@ export class NgnWalletService {
     }
   }
 
+  async listNegativeBalances(options: {
+    limit: number
+    cursor?: string
+    includeNonNegative?: boolean
+  }): Promise<{
+    items: { userId: string; balance: NgnBalanceResponse }[]
+    nextCursor: string | null
+  }> {
+    const { items: wallets, nextCursor } = await ngnWalletStore.listWallets({
+      limit: options.limit,
+      cursor: options.cursor,
+    })
+
+    const results = []
+    for (const wallet of wallets) {
+      const balance = await this.getBalance(wallet.userId)
+      if (options.includeNonNegative || balance.totalNgn < 0) {
+        results.push({ userId: wallet.userId, balance })
+      }
+    }
+
+    return { items: results, nextCursor }
+  }
+
   async approveWithdrawal(withdrawalId: string): Promise<WithdrawalResponse> {
     const withdrawal = this.withdrawals.find(w => w.id === withdrawalId)
     if (!withdrawal) throw new AppError(ErrorCode.NOT_FOUND, 404, 'Withdrawal not found')

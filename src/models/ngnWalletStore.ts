@@ -44,9 +44,20 @@ export class InMemoryNgnWalletStore implements NgnWalletStore {
     }
 
     async getLedgerEntriesByWalletId(walletId: string): Promise<LedgerEntry[]> {
-        return this.ledger
-            .filter(e => e.walletId === walletId)
-            .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        return this.ledger.filter((e) => e.walletId === walletId)
+    }
+
+    async listWallets(options?: { limit?: number; cursor?: string }): Promise<{ items: NgnWallet[]; nextCursor: string | null }> {
+        const limit = options?.limit ?? 50
+        const cursor = options?.cursor
+        let wallets = Array.from(this.wallets.values())
+        wallets.sort((a, b) => a.userId.localeCompare(b.userId))
+        if (cursor) {
+            wallets = wallets.filter((w) => w.userId > cursor)
+        }
+        const result = wallets.slice(0, limit)
+        const nextCursor = result.length === limit ? result[result.length - 1].userId : null
+        return { items: result, nextCursor }
     }
 
     async acquireLock(walletId: string): Promise<() => Promise<void>> {
@@ -118,11 +129,30 @@ export class PostgresNgnWalletStore implements NgnWalletStore {
     async getLedgerEntriesByWalletId(walletId: string): Promise<LedgerEntry[]> {
         const pool = await getPool()
         if (!pool) return []
-        const { rows } = await pool.query(
-            `SELECT * FROM ngn_ledger_entries WHERE wallet_id = $1 ORDER BY created_at ASC`,
-            [walletId]
-        )
+        const { rows } = await pool.query(`SELECT * FROM ngn_ledger_entries WHERE wallet_id=$1 ORDER BY created_at DESC`, [walletId])
         return rows.map(this.mapLedgerEntry)
+    }
+
+    async listWallets(options?: { limit?: number; cursor?: string }): Promise<{ items: NgnWallet[]; nextCursor: string | null }> {
+        const pool = await getPool()
+        if (!pool) return { items: [], nextCursor: null } // We don't list from fallback cache in listWallets for simplicity or return some dummy
+
+        const limit = options?.limit ?? 50
+        const cursor = options?.cursor
+        const params: any[] = [limit]
+        let where = ''
+        if (cursor) {
+            params.push(cursor)
+            where = 'WHERE user_id > $2'
+        }
+
+        const { rows } = await pool.query(
+            `SELECT * FROM ngn_wallets ${where} ORDER BY user_id ASC LIMIT $1`,
+            params
+        )
+        const items = rows.map(this.mapWallet)
+        const nextCursor = items.length === limit ? items[items.length - 1].userId : null
+        return { items, nextCursor }
     }
 
     async acquireLock(walletId: string): Promise<() => Promise<void>> {
