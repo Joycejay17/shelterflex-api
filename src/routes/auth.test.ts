@@ -240,3 +240,68 @@ describe('Auth Routes (Wallet)', () => {
     expect(challengeAfter).toBeUndefined()
   })
 })
+
+/**
+ * Issue #279 – validate() middleware: invalid payloads must return the
+ * canonical VALIDATION_ERROR shape (HTTP 400 + structured field errors).
+ *
+ * Endpoint under test: POST /api/auth/request-otp
+ * Schema:  requestOtpSchema  →  z.object({ email: z.string().email() })
+ *
+ * Error shape (from errorCodes.ts / validate.ts + formatZodIssues):
+ * {
+ *   "error": {
+ *     "code": "VALIDATION_ERROR",
+ *     "message": "Invalid request data",
+ *     "details": {
+ *       "<field_path>": "<zod message>"   // flat Record<string, string>
+ *     }
+ *   }
+ * }
+ */
+describe('validate() middleware – request validation error shape', () => {
+  const request = createTestAgent()
+
+  beforeEach(() => {
+    _testOnly_clearAuthRateLimits()
+    vi.stubEnv('STELLAR_SERVER_SECRET_KEY', 'SBQWY3DNPFWGSQZ7BHHCQLZNX35O6W23DMU4Y3FJ3A6BKGWXOQ5F3Z2O')
+  })
+
+  it('returns HTTP 400 with VALIDATION_ERROR code when email is missing', async () => {
+    const res = await request.post('/api/auth/request-otp').send({})
+
+    expect(res.status).toBe(400)
+    expect(res.body).toHaveProperty('error')
+    expect(res.body.error).toHaveProperty('code', 'VALIDATION_ERROR')
+    expect(res.body.error).toHaveProperty('message', 'Invalid request data')
+    expect(res.body.error).toHaveProperty('details')
+    // details is a flat Record<string, string> produced by formatZodIssues
+    expect(typeof res.body.error.details).toBe('object')
+    expect(res.body.error.details).not.toBeNull()
+  })
+
+  it('returns HTTP 400 with VALIDATION_ERROR code when email has wrong type', async () => {
+    const res = await request.post('/api/auth/request-otp').send({ email: 12345 })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toHaveProperty('code', 'VALIDATION_ERROR')
+    expect(res.body.error).toHaveProperty('details')
+    expect(typeof res.body.error.details).toBe('object')
+  })
+
+  it('returns HTTP 400 with VALIDATION_ERROR code when email format is invalid', async () => {
+    const res = await request.post('/api/auth/request-otp').send({ email: 'not-an-email' })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toHaveProperty('code', 'VALIDATION_ERROR')
+    expect(res.body.error).toHaveProperty('message', 'Invalid request data')
+
+    // formatZodIssues returns a flat Record<string, string>:
+    // { "email": "<zod validation message>" }
+    const details = res.body.error.details as Record<string, string>
+    expect(typeof details).toBe('object')
+    // The "email" key must be present with a non-empty string message
+    expect(typeof details['email']).toBe('string')
+    expect(details['email'].length).toBeGreaterThan(0)
+  })
+})
