@@ -42,6 +42,15 @@ export class OutboxWorker {
   async process() {
     const failed = await outboxStore.listByStatus(OutboxStatus.FAILED)
     for (const item of failed) {
+      if (item.retryCount >= MAX_RETRY_COUNT) {
+        await outboxStore.markDead(item.id, 'Max retry count reached')
+        logger.warn('Outbox item moved to dead letter state', {
+          outboxId: item.id,
+          txId: item.txId,
+          retryCount: item.retryCount,
+        })
+        continue
+      }
       if (!shouldRetry(item)) continue
       logger.info('Retrying outbox item', {
         outboxId: item.id,
