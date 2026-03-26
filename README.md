@@ -255,6 +255,15 @@ SOROBAN_STAKING_POOL_ID=
 SOROBAN_STAKING_REWARDS_ID=
 ```
 
+### Indexer Configuration
+```bash
+# How often the indexer polls for new ledgers (in milliseconds). Default is 5000.
+INDEXER_POLL_MS=5000
+
+# The ledger sequence number to start indexing from. If omitted, the indexer starts from the current network ledger.
+INDEXER_START_LEDGER=
+```
+
 **Important Notes:**
 - `USDC_TOKEN_ADDRESS` is **required** in `production` and `test` environments
 - In `development`, the address can be omitted (uses mock address for testing)
