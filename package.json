@@ -14,6 +14,7 @@
     "test:ci": "vitest run --exclude 'src/soroban/**/*.test.ts' --exclude 'src/routes/webhooks.test.ts' --exclude 'src/routes/wallet.test.ts' --exclude 'src/routes/stakingPositionReal.test.ts' --exclude 'src/routes/stakingQuote.test.ts' --exclude 'src/routes/session.test.ts' --exclude 'src/routes/ngnWallet.test.ts'",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "vitest run src/routes/criticalFlows.e2e.test.ts",
     "test:integration": "SOROBAN_INTEGRATION_TESTS=true vitest run src/soroban/real-adapter.integration.test.ts",
     "test:integration:watch": "SOROBAN_INTEGRATION_TESTS=true vitest src/soroban/real-adapter.integration.test.ts"
   },
