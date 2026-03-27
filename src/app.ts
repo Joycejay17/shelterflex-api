@@ -4,6 +4,7 @@ import { env } from "./schemas/env.js"
 import { requestIdMiddleware } from "./middleware/requestId.js"
 import { errorHandler } from "./middleware/errorHandler.js"
 import { createLogger } from "./middleware/logger.js"
+import { apiVersioning } from "./middleware/apiVersioning.js"
 import healthRouter from "./routes/health.js"
 import { createPublicRateLimiter, createAuthRateLimiter, createWalletRateLimiter } from "./middleware/rateLimit.js"
 import publicRouter from "./routes/publicRoutes.js"
@@ -181,6 +182,10 @@ export function createApp() {
   app.use("/health", healthRouter)
   app.use("/api/auth", createAuthRateLimiter(env), authRouter)
   app.use(createPublicRateLimiter(env))
+
+  // API versioning — applied to all /api routes after rate limiting
+  app.use('/api', apiVersioning)
+
   app.use("/", publicRouter)
   app.use('/api', createBalanceRouter(sorobanAdapter))
   app.use('/api', createReceiptsRouter(receiptRepo))
