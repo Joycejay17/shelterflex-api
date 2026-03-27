@@ -127,9 +127,13 @@ export function createApp() {
   app.set('conversionService', conversionService)
   const stakingService = new StakingService(sorobanAdapter)
 
+  // Workers collection for graceful shutdown
+  const workers: { stop: () => Promise<void> }[] = []
+
   // Staking Finalizer Job
   const stakingFinalizer = new StakingFinalizer(stakingService)
   stakingFinalizer.start()
+  workers.push(stakingFinalizer)
 
   // Outbox store — swap to Postgres when DATABASE_URL is set
   if (process.env.DATABASE_URL) {
@@ -142,11 +146,7 @@ export function createApp() {
     const outboxWorker = new OutboxWorker(outboxSender)
     const intervalMs = parseInt(process.env.OUTBOX_WORKER_INTERVAL_MS ?? '60000', 10)
     outboxWorker.start(intervalMs)
-
-    // Graceful shutdown
-    const stopWorker = () => outboxWorker.stop()
-    process.once('SIGTERM', stopWorker)
-    process.once('SIGINT', stopWorker)
+    workers.push(outboxWorker)
   }
 
   // Indexer
@@ -158,6 +158,33 @@ export function createApp() {
     startLedger: process.env.INDEXER_START_LEDGER ? parseInt(process.env.INDEXER_START_LEDGER) : undefined,
   })
   indexer.start()
+  workers.push(indexer)
+
+  // Graceful shutdown orchestration
+  if (env.NODE_ENV !== 'test') {
+    const shutdown = async (signal: string) => {
+      createLogger().info(`Received ${signal}, starting graceful shutdown...`)
+      
+      const timeoutMs = 30000
+      const timeout = setTimeout(() => {
+        createLogger().error(`Graceful shutdown timed out after ${timeoutMs}ms, forcing exit`)
+        process.exit(1)
+      }, timeoutMs)
+
+      try {
+        await Promise.all(workers.map(w => w.stop()))
+        clearTimeout(timeout)
+        createLogger().info('Graceful shutdown completed successfully')
+        process.exit(0)
+      } catch (err) {
+        createLogger().error('Error during graceful shutdown', { error: err instanceof Error ? err.message : String(err) })
+        process.exit(1)
+      }
+    }
+
+    process.once('SIGTERM', () => void shutdown('SIGTERM'))
+    process.once('SIGINT', () => void shutdown('SIGINT'))
+  }
 
   // Core middleware
   app.use(requestIdMiddleware)
