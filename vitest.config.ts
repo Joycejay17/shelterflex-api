@@ -6,7 +6,7 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.ts'],
     env: {
-      NODE_ENV: 'development',
+      NODE_ENV: 'test',
       ENCRYPTION_KEY: 'test-encryption-key-32-chars-long-123456',
     },
     coverage: {
