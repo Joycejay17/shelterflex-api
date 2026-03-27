@@ -89,6 +89,7 @@ describe("Critical user journey e2e", () => {
     const providerRef = "e2e-provider-ref-001";
     const confirmRes = await request(app)
       .post("/api/deposits/confirm")
+      .set("x-idempotency-key", "e2e-test-key-001")
       .send({
         depositId,
         userId: verifyRes.body.user.id,
