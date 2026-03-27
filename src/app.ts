@@ -46,10 +46,17 @@ import { StakingFinalizer } from "./jobs/stakingFinalizer.js"
 import { initOutboxStore, PostgresOutboxStore } from "./outbox/store.js"
 import { OutboxSender } from "./outbox/sender.js"
 import { OutboxWorker } from "./outbox/worker.js"
+import { initializeAppSecretRotation, secretRotationMiddleware, createSecretRotationRouter } from "./middleware/secretRotation.js"
+import { getSecretRotationService } from "./services/secretRotationService.js"
 
 
 export function createApp() {
   const app = express()
+
+  // Initialize secret rotation service
+  if (env.NODE_ENV !== 'test') {
+    initializeAppSecretRotation();
+  }
 
   // Test database
   async function testDb() {
@@ -173,6 +180,11 @@ export function createApp() {
       }, timeoutMs)
 
       try {
+        // Stop secret rotation watcher
+        const secretRotationService = getSecretRotationService();
+        secretRotationService.stopWatching();
+
+        // Stop all workers
         await Promise.all(workers.map(w => w.stop()))
         clearTimeout(timeout)
         createLogger().info('Graceful shutdown completed successfully')
@@ -189,6 +201,9 @@ export function createApp() {
 
   // Core middleware
   app.use(requestIdMiddleware)
+
+  // Secret rotation middleware
+  app.use(secretRotationMiddleware)
 
   //  Logger
   app.use(requestLogger);
@@ -224,6 +239,7 @@ export function createApp() {
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter, walletStore as any, encryptionService as any, indexer))
   app.use('/api/admin/reconciliation', createAdminReconciliationRouter(ngnWalletService))
+  app.use('/api/admin/secrets', createSecretRotationRouter())
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
   app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
