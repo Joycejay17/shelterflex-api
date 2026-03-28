@@ -55,7 +55,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
       const result = await this.invokeReadOnly(
         this.config.usdcTokenId,
         'balance',
-        [nativeToScVal(new Address(account))]
+        [nativeToScVal(Address.fromString(account))]
       )
       return BigInt(scValToNative(result))
     } catch (err) {
@@ -86,7 +86,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
       const result = await this.invokeReadOnly(
         this.config.stakingPoolId,
         'staked_balance',
-        [nativeToScVal(new Address(account))]
+        [nativeToScVal(Address.fromString(account))]
       )
       return BigInt(scValToNative(result))
     } catch (err) {
@@ -109,7 +109,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
       const result = await this.invokeReadOnly(
         this.config.stakingRewardsId,
         'get_claimable',
-        [nativeToScVal(new Address(account))]
+        [nativeToScVal(Address.fromString(account))]
       )
       return BigInt(scValToNative(result))
     } catch (err) {
@@ -519,7 +519,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
       span.setAttribute('soroban.rpc_url', this.config.rpcUrl)
 
       try {
-        const sourceAccount = new Address(this.config.rpcUrl.includes('testnet')
+        const sourceAccount = Address.fromString(this.config.rpcUrl.includes('testnet')
           ? 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'
           : 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF')
 
