@@ -1,6 +1,6 @@
 /**
  * Secret Rotation Service
- * 
+ *
  * Provides zero-downtime secret rotation with:
  * - Hot-reloading from environment or secret store
  * - Graceful transition between old and new secrets
@@ -8,12 +8,10 @@
  * - Automatic fallback on failure
  */
 
-import { EventEmitter } from 'events';
-import { createLogger } from '../middleware/logger.js';
-import fs from 'fs';
-import path from 'path';
-
-const logger = createLogger();
+import { EventEmitter } from "events";
+import { logger } from "../utils/logger.js";
+import fs from "fs";
+import path from "path";
 
 export interface SecretVersion {
   value: string;
@@ -61,16 +59,18 @@ export class SecretRotationService extends EventEmitter {
    */
   registerSecret(config: SecretConfig): void {
     this.secretConfigs.set(config.name, config);
-    
+
     // Initialize with current environment value
     const currentValue = process.env[config.envVar];
     if (currentValue) {
-      this.secrets.set(config.name, [{
-        value: currentValue,
-        version: 'v1',
-        activatedAt: new Date(),
-      }]);
-      this.activeVersions.set(config.name, 'v1');
+      this.secrets.set(config.name, [
+        {
+          value: currentValue,
+          version: "v1",
+          activatedAt: new Date(),
+        },
+      ]);
+      this.activeVersions.set(config.name, "v1");
       logger.info(`Registered secret: ${config.name}`);
     } else if (config.required) {
       logger.warn(`Required secret ${config.name} not found in environment`);
@@ -87,7 +87,7 @@ export class SecretRotationService extends EventEmitter {
     const versions = this.secrets.get(name);
     if (!versions) return undefined;
 
-    const active = versions.find(v => v.version === activeVersion);
+    const active = versions.find((v) => v.version === activeVersion);
     return active?.value;
   }
 
@@ -100,8 +100,8 @@ export class SecretRotationService extends EventEmitter {
 
     const now = new Date();
     return versions
-      .filter(v => !v.expiresAt || v.expiresAt > now)
-      .map(v => v.value);
+      .filter((v) => !v.expiresAt || v.expiresAt > now)
+      .map((v) => v.value);
   }
 
   /**
@@ -110,7 +110,7 @@ export class SecretRotationService extends EventEmitter {
   async rotateSecret(
     name: string,
     newValue: string,
-    options: { gracePeriodMs?: number; version?: string } = {}
+    options: { gracePeriodMs?: number; version?: string } = {},
   ): Promise<boolean> {
     const config = this.secretConfigs.get(name);
     if (!config) {
@@ -122,22 +122,23 @@ export class SecretRotationService extends EventEmitter {
     if (config.validator && !config.validator(newValue)) {
       const error = `New secret value for ${name} failed validation`;
       logger.error(error);
-      this.logRotationEvent(name, 'unknown', 'unknown', false, error);
+      this.logRotationEvent(name, "unknown", "unknown", false, error);
       return false;
     }
 
-    const oldVersion = this.activeVersions.get(name) || 'none';
+    const oldVersion = this.activeVersions.get(name) || "none";
     const newVersion = options.version || `v${Date.now()}`;
-    const gracePeriodMs = options.gracePeriodMs ?? config.gracePeriodMs ?? 300000; // 5 min default
+    const gracePeriodMs =
+      options.gracePeriodMs ?? config.gracePeriodMs ?? 300000; // 5 min default
 
     try {
       // Get existing versions
       const versions = this.secrets.get(name) || [];
-      
+
       // Mark old versions for expiration
       const now = new Date();
       const expiresAt = new Date(now.getTime() + gracePeriodMs);
-      versions.forEach(v => {
+      versions.forEach((v) => {
         if (!v.expiresAt) {
           v.expiresAt = expiresAt;
         }
@@ -155,14 +156,16 @@ export class SecretRotationService extends EventEmitter {
       this.activeVersions.set(name, newVersion);
 
       // Emit rotation event
-      this.emit('secretRotated', {
+      this.emit("secretRotated", {
         secretName: name,
         oldVersion,
         newVersion,
         gracePeriodMs,
       });
 
-      logger.info(`Secret rotated successfully: ${name} (${oldVersion} → ${newVersion})`);
+      logger.info(
+        `Secret rotated successfully: ${name} (${oldVersion} → ${newVersion})`,
+      );
       this.logRotationEvent(name, oldVersion, newVersion, true);
 
       // Schedule cleanup of expired versions
@@ -171,7 +174,7 @@ export class SecretRotationService extends EventEmitter {
       return true;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error(`Failed to rotate secret ${name}:`, errorMsg);
+      logger.error(`Failed to rotate secret ${name}:`, { error: errorMsg });
       this.logRotationEvent(name, oldVersion, newVersion, false, errorMsg);
       return false;
     }
@@ -182,10 +185,10 @@ export class SecretRotationService extends EventEmitter {
    */
   async tryWithSecret<T>(
     name: string,
-    operation: (secret: string) => Promise<T>
+    operation: (secret: string) => Promise<T>,
   ): Promise<T> {
     const validVersions = this.getValidSecretVersions(name);
-    
+
     if (validVersions.length === 0) {
       throw new Error(`No valid versions available for secret: ${name}`);
     }
@@ -196,7 +199,9 @@ export class SecretRotationService extends EventEmitter {
       try {
         return await operation(activeSecret);
       } catch (error) {
-        logger.warn(`Operation failed with active secret ${name}, trying fallback versions`);
+        logger.warn(
+          `Operation failed with active secret ${name}, trying fallback versions`,
+        );
       }
     }
 
@@ -222,12 +227,14 @@ export class SecretRotationService extends EventEmitter {
    */
   startWatching(): void {
     if (this.watchInterval) {
-      logger.warn('Secret watcher already running');
+      logger.warn("Secret watcher already running");
       return;
     }
 
-    logger.info(`Starting secret watcher (interval: ${this.watchIntervalMs}ms)`);
-    
+    logger.info(
+      `Starting secret watcher (interval: ${this.watchIntervalMs}ms)`,
+    );
+
     this.watchInterval = setInterval(() => {
       this.checkForSecretChanges();
     }, this.watchIntervalMs);
@@ -243,7 +250,7 @@ export class SecretRotationService extends EventEmitter {
     if (this.watchInterval) {
       clearInterval(this.watchInterval);
       this.watchInterval = undefined;
-      logger.info('Secret watcher stopped');
+      logger.info("Secret watcher stopped");
     }
   }
 
@@ -270,11 +277,15 @@ export class SecretRotationService extends EventEmitter {
     if (!versions) return;
 
     const now = new Date();
-    const validVersions = versions.filter(v => !v.expiresAt || v.expiresAt > now);
+    const validVersions = versions.filter(
+      (v) => !v.expiresAt || v.expiresAt > now,
+    );
 
     if (validVersions.length < versions.length) {
       this.secrets.set(name, validVersions);
-      logger.info(`Cleaned up ${versions.length - validVersions.length} expired versions of ${name}`);
+      logger.info(
+        `Cleaned up ${versions.length - validVersions.length} expired versions of ${name}`,
+      );
     }
   }
 
@@ -286,7 +297,7 @@ export class SecretRotationService extends EventEmitter {
     oldVersion: string,
     newVersion: string,
     success: boolean,
-    error?: string
+    error?: string,
   ): void {
     const event: SecretRotationEvent = {
       secretName,
@@ -313,18 +324,18 @@ export class SecretRotationService extends EventEmitter {
    */
   private persistAuditLog(event: SecretRotationEvent): void {
     try {
-      const logDir = process.env.AUDIT_LOG_DIR || './logs';
-      const logFile = path.join(logDir, 'secret-rotation-audit.log');
+      const logDir = process.env.AUDIT_LOG_DIR || "./logs";
+      const logFile = path.join(logDir, "secret-rotation-audit.log");
 
       // Ensure directory exists
       if (!fs.existsSync(logDir)) {
         fs.mkdirSync(logDir, { recursive: true });
       }
 
-      const logEntry = JSON.stringify(event) + '\n';
+      const logEntry = JSON.stringify(event) + "\n";
       fs.appendFileSync(logFile, logEntry);
     } catch (error) {
-      logger.error('Failed to persist audit log:', error);
+      logger.error("Failed to persist audit log:", {}, error);
     }
   }
 
@@ -338,20 +349,24 @@ export class SecretRotationService extends EventEmitter {
   /**
    * Get status of all managed secrets
    */
-  getStatus(): Record<string, {
-    activeVersion: string;
-    validVersionCount: number;
-    lastRotation?: Date;
-  }> {
+  getStatus(): Record<
+    string,
+    {
+      activeVersion: string;
+      validVersionCount: number;
+      lastRotation?: Date;
+    }
+  > {
     const status: Record<string, any> = {};
 
     for (const [name, config] of this.secretConfigs.entries()) {
-      const activeVersion = this.activeVersions.get(name) || 'none';
+      const activeVersion = this.activeVersions.get(name) || "none";
       const validVersions = this.getValidSecretVersions(name);
       const versions = this.secrets.get(name) || [];
-      const lastRotation = versions.length > 0 
-        ? versions[versions.length - 1].activatedAt 
-        : undefined;
+      const lastRotation =
+        versions.length > 0
+          ? versions[versions.length - 1].activatedAt
+          : undefined;
 
       status[name] = {
         activeVersion,
@@ -367,7 +382,7 @@ export class SecretRotationService extends EventEmitter {
    * Force immediate reload from environment
    */
   async reloadFromEnvironment(): Promise<void> {
-    logger.info('Force reloading secrets from environment');
+    logger.info("Force reloading secrets from environment");
     this.checkForSecretChanges();
   }
 }
@@ -382,10 +397,12 @@ export function getSecretRotationService(): SecretRotationService {
   return instance;
 }
 
-export function initializeSecretRotation(configs: SecretConfig[]): SecretRotationService {
+export function initializeSecretRotation(
+  configs: SecretConfig[],
+): SecretRotationService {
   const service = getSecretRotationService();
-  
-  configs.forEach(config => service.registerSecret(config));
+
+  configs.forEach((config) => service.registerSecret(config));
   service.startWatching();
 
   return service;
