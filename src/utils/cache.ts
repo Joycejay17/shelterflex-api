@@ -104,14 +104,18 @@ export class MultiLayerCache<T extends {}> {
             return l1Value
         }
 
-        // 2. Try L2
-        const l2Value = await this.l2.get(key)
-        if (l2Value !== null) {
-            this.metrics.hits++
-            this.metrics.l2Hits++
-            // Backfill L1
-            await this.l1.set(key, l2Value, this.defaultTtlMs)
-            return l2Value
+        // 2. Try L2 with fallback
+        try {
+            const l2Value = await this.l2.get(key)
+            if (l2Value !== null) {
+                this.metrics.hits++
+                this.metrics.l2Hits++
+                // Backfill L1
+                await this.l1.set(key, l2Value, this.defaultTtlMs)
+                return l2Value
+            }
+        } catch (err) {
+            logger.warn('L2 cache get error (falling back to miss)', { key, error: err instanceof Error ? err.message : String(err) })
         }
 
         this.metrics.misses++
@@ -120,10 +124,16 @@ export class MultiLayerCache<T extends {}> {
 
     async set(key: string, value: T, ttlMs?: number): Promise<void> {
         const ttl = ttlMs ?? this.defaultTtlMs
-        await Promise.all([
-            this.l1.set(key, value, ttl),
-            this.l2.set(key, value, ttl)
-        ])
+        const promises: Promise<any>[] = [this.l1.set(key, value, ttl)]
+
+        // Attempt L2 set but don't fail if it crashes
+        promises.push(
+            this.l2.set(key, value, ttl).catch(err => {
+                logger.warn('L2 cache set error', { key, error: err instanceof Error ? err.message : String(err) })
+            })
+        )
+
+        await Promise.all(promises)
     }
 
     async warm(items: { key: string; value: T }[]): Promise<void> {
