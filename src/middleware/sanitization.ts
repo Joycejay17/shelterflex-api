@@ -37,7 +37,7 @@ const DEFAULT_SANITIZATION_OPTIONS: SanitizationOptions = {
 const DANGEROUS_PATTERNS = {
   sqlInjection: /(\b(UNION|SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|SCRIPT)\b)/gi,
   xssAttempt: /(<script|<iframe|<img|javascript:|onerror=|onload=)/gi,
-  pathTraversal: /(\.\.[\/\\])+/g,
+  pathTraversal: /(\.\.[/\\])+/g,
   nullByte: /\0/g,
 }
 

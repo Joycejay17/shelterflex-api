@@ -277,6 +277,24 @@ export function getRateLimitStats(): {
 }
 
 /**
+ * Reset the rate limit store (for testing purposes only).
+ */
+export function resetRateLimitStore(): void {
+  rateLimitStore.clear()
+  endpointLimits.clear()
+  // Re-initialize default endpoint limits
+  endpointLimits.set('POST /api/auth/request-otp', { windowMs: 15 * 60 * 1000, limit: 5 })
+  endpointLimits.set('POST /api/auth/verify-otp', { windowMs: 15 * 60 * 1000, limit: 10 })
+  endpointLimits.set('POST /api/auth/wallet-challenge', { windowMs: 60 * 1000, limit: 20 })
+  endpointLimits.set('POST /api/auth/wallet-verify', { windowMs: 60 * 1000, limit: 20 })
+  endpointLimits.set('GET /api', { windowMs: 60 * 1000, limit: 100 })
+  endpointLimits.set('POST /api', { windowMs: 60 * 1000, limit: 50 })
+  endpointLimits.set('PUT /api', { windowMs: 60 * 1000, limit: 50 })
+  endpointLimits.set('DELETE /api', { windowMs: 60 * 1000, limit: 30 })
+  endpointLimits.set('PATCH /api', { windowMs: 60 * 1000, limit: 50 })
+}
+
+/**
  * Global type augmentation for rate limit tracking state.
  */
 declare global {
