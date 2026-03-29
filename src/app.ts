@@ -7,7 +7,7 @@ import { traceResponseMiddleware } from "./middleware/traceResponse.js"
 import { createLogger } from "./middleware/logger.js"
 import { logger } from "./utils/logger.js"
 import { apiVersioning } from "./middleware/apiVersioning.js"
-import healthRouter from "./routes/health.js"
+import { createHealthRouter } from "./routes/health.js"
 import { createPublicRateLimiter, createAuthRateLimiter, createWalletRateLimiter } from "./middleware/rateLimit.js"
 import publicRouter from "./routes/publicRoutes.js"
 import { AppError } from "./errors/AppError.js"
@@ -225,7 +225,7 @@ export function createApp() {
   )
 
   // Routes
-  app.use("/health", healthRouter)
+  app.use("/health", createHealthRouter(sorobanAdapter))
   app.use("/api/auth", createAuthRateLimiter(env), authRouter)
   app.use(createPublicRateLimiter(env))
 
