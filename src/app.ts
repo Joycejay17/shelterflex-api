@@ -53,6 +53,8 @@ import { getSecretRotationService } from "./services/secretRotationService.js"
 import migrationGuideRouter from "./routes/migrationGuide.js"
 
 
+import { sanitizeRequest, detectMaliciousPatterns } from "./middleware/sanitization.js"
+import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js"
 export function createApp() {
   const app = express()
 
