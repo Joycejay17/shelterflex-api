@@ -35,6 +35,7 @@ import { WalletServiceImpl, EnvironmentEncryptionService, KeyringEncryptionServi
 import { CustodialWalletServiceImpl } from "./services/CustodialWalletServiceImpl.js"
 import { NgnWalletService } from "./services/ngnWalletService.js"
 import { createAdminReconciliationRouter } from "./routes/adminReconciliation.js"
+import { createGasMetricsRouter } from "./routes/gas-metrics.js"
 import { InMemoryWalletStore, PostgresWalletStore } from "./models/walletStore.js"
 import { InMemoryLinkedAddressStore, PostgresLinkedAddressStore } from "./models/linkedAddressStore.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
@@ -269,6 +270,7 @@ export function createApp() {
   app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
   app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
   app.use('/api/deposits', createDepositsRouter(conversionService))
+  app.use('/api/gas-metrics', createGasMetricsRouter())
   app.use('/api', migrationGuideRouter)
 
 
