@@ -162,6 +162,33 @@ export class CircuitBreakerAdapter implements SorobanAdapter {
   }
 
   /**
+   * Get timelock events
+   */
+  async getTimelockEvents(fromLedger: number | null): Promise<any[]> {
+    return this.executeWithCircuitBreaker('getTimelockEvents', () =>
+      this.wrappedAdapter.getTimelockEvents(fromLedger),
+    )
+  }
+
+  /**
+   * Execute timelock transaction (admin operation)
+   */
+  async executeTimelock(txHash: string, target: string, functionName: string, args: any[], eta: number): Promise<string> {
+    return this.executeWithCircuitBreaker('executeTimelock', () =>
+      this.wrappedAdapter.executeTimelock(txHash, target, functionName, args, eta),
+    )
+  }
+
+  /**
+   * Cancel timelock transaction (admin operation)
+   */
+  async cancelTimelock(txHash: string): Promise<string> {
+    return this.executeWithCircuitBreaker('cancelTimelock', () =>
+      this.wrappedAdapter.cancelTimelock(txHash),
+    )
+  }
+
+  /**
    * Pause contract (admin operation)
    */
   async pause?(contractId: string): Promise<string> {
