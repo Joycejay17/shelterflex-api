@@ -59,6 +59,8 @@ export type AuditEventType =
   // Risk
   | 'RISK_ACCOUNT_FROZEN'
   | 'RISK_TIER_CHANGED'
+  | 'ADMIN_RISK_FREEZE'
+  | 'ADMIN_RISK_UNFREEZE'
 
 /**
  * Valid actor types
@@ -352,4 +354,12 @@ export function auditAdminOutboxRetry(
   metadata: { outboxId?: string } = {},
 ): void {
   auditLog('ADMIN_OUTBOX_RETRY', extractAuditContext(req, 'admin'), metadata)
+}
+
+export function auditAdminRiskOperation(
+  req: Request,
+  eventType: 'ADMIN_RISK_FREEZE' | 'ADMIN_RISK_UNFREEZE',
+  metadata: Record<string, unknown> = {},
+): void {
+  auditLog(eventType, extractAuditContext(req, 'admin'), metadata)
 }
