@@ -217,8 +217,6 @@ describe('tryParseReceiptEvent', () => {
 // ── Timelock Events ──────────────────────────────────────────────────────────
 
 describe('parseTimelockEvent', () => {
-    const { parseTimelockEvent } = await import('./event-parser.js');
-
     it('parses a queued event correctly', () => {
         const raw = {
             ledger: 2000,
