@@ -213,3 +213,74 @@ describe('tryParseReceiptEvent', () => {
     expect(result!.txId).toBe('tx_001')
   })
 })
+
+// ── Timelock Events ──────────────────────────────────────────────────────────
+
+describe('parseTimelockEvent', () => {
+    const { parseTimelockEvent } = await import('./event-parser.js');
+
+    it('parses a queued event correctly', () => {
+        const raw = {
+            ledger: 2000,
+            topic: ['governance', 'queued'],
+            data: [
+                'hash_123',
+                'StakingContract',
+                'pause',
+                ['arg1'],
+                1700000000
+            ]
+        };
+        const result = parseTimelockEvent(raw);
+        expect(result).not.toBeNull();
+        expect(result!.type).toBe('queued');
+        expect(result!.txHash).toBe('hash_123');
+        expect(result!.target).toBe('StakingContract');
+        expect(result!.functionName).toBe('pause');
+        expect(result!.args).toEqual(['arg1']);
+        expect(result!.delay).toBe(1700000000);
+        expect(result!.ledger).toBe(2000);
+    });
+
+    it('parses an executed event correctly', () => {
+        const raw = {
+            ledger: 2005,
+            topic: ['governance', 'executed'],
+            data: 'hash_123'
+        };
+        const result = parseTimelockEvent(raw);
+        expect(result).not.toBeNull();
+        expect(result!.type).toBe('executed');
+        expect(result!.txHash).toBe('hash_123');
+        expect(result!.ledger).toBe(2005);
+    });
+
+    it('parses a cancelled event correctly', () => {
+        const raw = {
+            ledger: 2010,
+            topic: ['governance', 'cancelled'],
+            data: 'hash_123'
+        };
+        const result = parseTimelockEvent(raw);
+        expect(result).not.toBeNull();
+        expect(result!.type).toBe('cancelled');
+        expect(result!.txHash).toBe('hash_123');
+        expect(result!.ledger).toBe(2010);
+    });
+
+    it('returns null for non-governance events', () => {
+        const raw = {
+            topic: ['other_topic', 'some_event'],
+            data: []
+        };
+        expect(parseTimelockEvent(raw)).toBeNull();
+    });
+
+    it('handles malformed data gracefully', () => {
+        const raw = {
+            topic: ['governance', 'queued'],
+            data: 'not_an_array'
+        };
+        expect(parseTimelockEvent(raw)).toBeNull();
+    });
+});
