@@ -12,14 +12,14 @@ describe('NGN Wallet Routes', () => {
   let token: string
   let userId: string
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ngnWalletService = new NgnWalletService()
     
     // Seed an authenticated user session for tests
-    const user = userStore.getOrCreateByEmail('test-user@example.com')
+    const user = await userStore.getOrCreateByEmail('test-user@example.com')
     userId = user.id
     token = 'test-session-token'
-    sessionStore.create(user.email, token)
+    await sessionStore.create(user.email, token)
 
     app = express()
     app.use(express.json())
