@@ -56,7 +56,7 @@ export function parseTimelockEvent(raw: any): TimelockEvent | null {
         const type = topics[1]; // e.g., "queued", "executed", "cancelled"
         const d = raw.data;
 
-        if (type === 'queued') {
+        if (type === 'queued' && Array.isArray(d) && d.length >= 5) {
             return {
                 type: 'queued',
                 txHash: d[0], // Internal hash
@@ -66,7 +66,7 @@ export function parseTimelockEvent(raw: any): TimelockEvent | null {
                 delay: d[4], // This is eta
                 ledger: raw.ledger,
             };
-        } else if (type === 'executed' || type === 'cancelled') {
+        } else if ((type === 'executed' || type === 'cancelled') && typeof d === 'string') {
             return {
                 type: type,
                 txHash: d, // Single value
