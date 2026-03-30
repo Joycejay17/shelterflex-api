@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseReceiptEvent, tryParseReceiptEvent, RawReceiptEvent } from './event-parser.js'
+import { parseReceiptEvent, tryParseReceiptEvent, parseTimelockEvent, RawReceiptEvent } from './event-parser.js'
 
 // ── Valid baseline event ─────────────────────────────────────────────────────
 
