@@ -51,7 +51,10 @@ import { OutboxWorker } from "./outbox/worker.js"
 import { initializeAppSecretRotation, secretRotationMiddleware, createSecretRotationRouter } from "./middleware/secretRotation.js"
 import { getSecretRotationService } from "./services/secretRotationService.js"
 import migrationGuideRouter from "./routes/migrationGuide.js"
-
+import adminTimelockRouter from './routes/admin-timelock.js';
+import { TimelockIndexer } from './indexer/timelock-worker.js';
+import { PostgresTimelockRepository, StubTimelockRepository } from './indexer/timelock-repository.js';
+import { TimelockProcessor } from './indexer/timelock-processor.js';
 
 import { sanitizeRequest, detectMaliciousPatterns } from "./middleware/sanitization.js"
 import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js"
@@ -173,6 +176,18 @@ export function createApp() {
   indexer.start()
   workers.push(indexer)
 
+  // Timelock Indexer
+  const timelockRepo = process.env.DATABASE_URL
+    ? new PostgresTimelockRepository()
+    : new StubTimelockRepository()
+  const timelockProcessor = new TimelockProcessor(timelockRepo)
+  const timelockIndexer = new TimelockIndexer(sorobanAdapter as any, timelockProcessor, {
+    pollIntervalMs: parseInt(process.env.INDEXER_POLL_MS ?? '5000'),
+    startLedger: process.env.INDEXER_START_LEDGER ? parseInt(process.env.INDEXER_START_LEDGER) : undefined,
+  })
+  timelockIndexer.start()
+  workers.push(timelockIndexer)
+
   // Graceful shutdown orchestration
   if (env.NODE_ENV !== 'test') {
     const shutdown = async (signal: string) => {
@@ -219,6 +234,9 @@ export function createApp() {
   }
 
   app.use(express.json())
+
+  // Core administrative routes
+  app.use('/api/admin/timelock', adminTimelockRouter(sorobanAdapter as any, timelockRepo));
 
   app.use(
     cors({
