@@ -47,26 +47,41 @@ export class RealSorobanAdapter implements SorobanAdapter {
   }
 
   async getBalance(account: string): Promise<bigint> {
-    if (!this.config.usdcTokenId) {
-      throw new ConfigurationError('SOROBAN_USDC_TOKEN_ID not configured for getBalance')
-    }
+    return tracer.startActiveSpan('RealSorobanAdapter.getBalance', async (span) => {
+      span.setAttribute('soroban.account', account)
+      
+      if (!this.config.usdcTokenId) {
+        const err = new ConfigurationError('SOROBAN_USDC_TOKEN_ID not configured for getBalance')
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
+        span.recordException(err)
+        span.end()
+        throw err
+      }
 
-    try {
-      const result = await this.invokeReadOnly(
-        this.config.usdcTokenId,
-        'balance',
-        [nativeToScVal(Address.fromString(account))]
-      )
-      return BigInt(scValToNative(result))
-    } catch (err) {
-      if (err instanceof SorobanError) throw err
-      throw new ContractError(
-        `Failed to get USDC balance for ${account}`,
-        this.config.usdcTokenId,
-        'balance',
-        err
-      )
-    }
+      try {
+        const result = await this.invokeReadOnly(
+          this.config.usdcTokenId,
+          'balance',
+          [nativeToScVal(Address.fromString(account))]
+        )
+        const balance = BigInt(scValToNative(result))
+        span.setAttribute('soroban.balance', balance.toString())
+        span.setStatus({ code: SpanStatusCode.OK })
+        return balance
+      } catch (err: any) {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message || String(err) })
+        if (err instanceof Error) span.recordException(err)
+        if (err instanceof SorobanError) throw err
+        throw new ContractError(
+          `Failed to get USDC balance for ${account}`,
+          this.config.usdcTokenId,
+          'balance',
+          err
+        )
+      } finally {
+        span.end()
+      }
+    })
   }
 
   async credit(account: string, amount: bigint): Promise<void> {
@@ -78,49 +93,79 @@ export class RealSorobanAdapter implements SorobanAdapter {
   }
 
   async getStakedBalance(account: string): Promise<bigint> {
-    if (!this.config.stakingPoolId) {
-      throw new ConfigurationError('SOROBAN_STAKING_POOL_ID not configured')
-    }
+    return tracer.startActiveSpan('RealSorobanAdapter.getStakedBalance', async (span) => {
+      span.setAttribute('soroban.account', account)
+      
+      if (!this.config.stakingPoolId) {
+        const err = new ConfigurationError('SOROBAN_STAKING_POOL_ID not configured')
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
+        span.recordException(err)
+        span.end()
+        throw err
+      }
 
-    try {
-      const result = await this.invokeReadOnly(
-        this.config.stakingPoolId,
-        'staked_balance',
-        [nativeToScVal(Address.fromString(account))]
-      )
-      return BigInt(scValToNative(result))
-    } catch (err) {
-      if (err instanceof SorobanError) throw err
-      throw new ContractError(
-        `Failed to get staked balance for ${account}`,
-        this.config.stakingPoolId,
-        'staked_balance',
-        err
-      )
-    }
+      try {
+        const result = await this.invokeReadOnly(
+          this.config.stakingPoolId,
+          'staked_balance',
+          [nativeToScVal(Address.fromString(account))]
+        )
+        const balance = BigInt(scValToNative(result))
+        span.setAttribute('soroban.staked_balance', balance.toString())
+        span.setStatus({ code: SpanStatusCode.OK })
+        return balance
+      } catch (err: any) {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message || String(err) })
+        if (err instanceof Error) span.recordException(err)
+        if (err instanceof SorobanError) throw err
+        throw new ContractError(
+          `Failed to get staked balance for ${account}`,
+          this.config.stakingPoolId,
+          'staked_balance',
+          err
+        )
+      } finally {
+        span.end()
+      }
+    })
   }
 
   async getClaimableRewards(account: string): Promise<bigint> {
-    if (!this.config.stakingRewardsId) {
-      throw new ConfigurationError('SOROBAN_STAKING_REWARDS_ID not configured')
-    }
+    return tracer.startActiveSpan('RealSorobanAdapter.getClaimableRewards', async (span) => {
+      span.setAttribute('soroban.account', account)
+      
+      if (!this.config.stakingRewardsId) {
+        const err = new ConfigurationError('SOROBAN_STAKING_REWARDS_ID not configured')
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
+        span.recordException(err)
+        span.end()
+        throw err
+      }
 
-    try {
-      const result = await this.invokeReadOnly(
-        this.config.stakingRewardsId,
-        'get_claimable',
-        [nativeToScVal(Address.fromString(account))]
-      )
-      return BigInt(scValToNative(result))
-    } catch (err) {
-      if (err instanceof SorobanError) throw err
-      throw new ContractError(
-        `Failed to get claimable rewards for ${account}`,
-        this.config.stakingRewardsId,
-        'get_claimable',
-        err
-      )
-    }
+      try {
+        const result = await this.invokeReadOnly(
+          this.config.stakingRewardsId,
+          'get_claimable',
+          [nativeToScVal(Address.fromString(account))]
+        )
+        const rewards = BigInt(scValToNative(result))
+        span.setAttribute('soroban.claimable_rewards', rewards.toString())
+        span.setStatus({ code: SpanStatusCode.OK })
+        return rewards
+      } catch (err: any) {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message || String(err) })
+        if (err instanceof Error) span.recordException(err)
+        if (err instanceof SorobanError) throw err
+        throw new ContractError(
+          `Failed to get claimable rewards for ${account}`,
+          this.config.stakingRewardsId,
+          'get_claimable',
+          err
+        )
+      } finally {
+        span.end()
+      }
+    })
   }
 
   /**
@@ -282,100 +327,117 @@ export class RealSorobanAdapter implements SorobanAdapter {
   }
 
   async getReceiptEvents(fromLedger: number | null): Promise<RawReceiptEvent[]> {
-    if (!this.config.contractId) {
-      throw new ConfigurationError('SOROBAN_CONTRACT_ID not configured for getReceiptEvents')
-    }
-
-    try {
-      const latest = await this.withBackoff(
-        () => this.server.getLatestLedger(),
-        { op: 'getLatestLedger' }
-      )
-
-      const startLedger = fromLedger == null ? latest.sequence : fromLedger + 1
-      if (startLedger > latest.sequence) return []
-
-      const topic0 = this.scValTopicBase64(xdr.ScVal.scvSymbol('transaction_receipt'))
-      const topic1 = this.scValTopicBase64(xdr.ScVal.scvSymbol('receipt_recorded'))
-
-      const limit = 200
-      let cursor: string | undefined
-      const out: RawReceiptEvent[] = []
-
-      for (; ;) {
-        const params: any = cursor
-          ? {
-            cursor,
-            limit,
-            filters: [
-              {
-                type: 'contract',
-                contractIds: [this.config.contractId],
-                topics: [[topic0, topic1, '*']],
-              },
-            ],
-          }
-          : {
-            startLedger,
-            limit,
-            filters: [
-              {
-                type: 'contract',
-                contractIds: [this.config.contractId],
-                topics: [[topic0, topic1, '*']],
-              },
-            ],
-          }
-
-        const res = await this.withBackoff(
-          () => this.server.getEvents(params),
-          { op: 'getEvents' }
-        )
-
-        const resAny = res as any
-
-        const events = resAny?.events ?? []
-        for (const ev of events) {
-          const evAny = ev as any
-          if (!evAny?.inSuccessfulContractCall) continue
-          if (evAny.type !== 'contract') continue
-
-          const contractId =
-            typeof evAny.contractId === 'string'
-              ? evAny.contractId
-              : typeof evAny.contractId?.toString === 'function'
-                ? evAny.contractId.toString()
-                : undefined
-          if (!contractId || contractId !== this.config.contractId) continue
-
-          if (typeof evAny.value !== 'string') continue
-          if (typeof evAny.txHash !== 'string') continue
-          if (typeof evAny.ledger !== 'number') continue
-
-          const receipt = this.decodeReceiptValue(evAny.value)
-          if (!receipt) continue
-
-          const normalized = this.normalizeReceipt(receipt)
-          out.push({
-            ledger: evAny.ledger,
-            txHash: evAny.txHash,
-            contractId,
-            data: normalized,
-          })
-        }
-
-        const nextCursor: string | undefined = resAny?.cursor
-        if (!nextCursor || nextCursor === cursor) break
-        cursor = nextCursor
-
-        if (events.length < limit) break
+    return tracer.startActiveSpan('RealSorobanAdapter.getReceiptEvents', async (span) => {
+      span.setAttribute('soroban.from_ledger', fromLedger ?? 'latest')
+      
+      if (!this.config.contractId) {
+        const err = new ConfigurationError('SOROBAN_CONTRACT_ID not configured for getReceiptEvents')
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message })
+        span.recordException(err)
+        span.end()
+        throw err
       }
 
-      return out
-    } catch (err) {
-      if (err instanceof SorobanError) throw err
-      throw new RpcError('Failed to get receipt events', undefined, err)
-    }
+      try {
+        const latest = await this.withBackoff(
+          () => this.server.getLatestLedger(),
+          { op: 'getLatestLedger' }
+        )
+
+        const startLedger = fromLedger == null ? latest.sequence : fromLedger + 1
+        if (startLedger > latest.sequence) {
+          span.setStatus({ code: SpanStatusCode.OK })
+          return []
+        }
+
+        const topic0 = this.scValTopicBase64(xdr.ScVal.scvSymbol('transaction_receipt'))
+        const topic1 = this.scValTopicBase64(xdr.ScVal.scvSymbol('receipt_recorded'))
+
+        const limit = 200
+        let cursor: string | undefined
+        const out: RawReceiptEvent[] = []
+
+        for (; ;) {
+          const params: any = cursor
+            ? {
+              cursor,
+              limit,
+              filters: [
+                {
+                  type: 'contract',
+                  contractIds: [this.config.contractId],
+                  topics: [[topic0, topic1, '*']],
+                },
+              ],
+            }
+            : {
+              startLedger,
+              limit,
+              filters: [
+                {
+                  type: 'contract',
+                  contractIds: [this.config.contractId],
+                  topics: [[topic0, topic1, '*']],
+                },
+              ],
+            }
+
+          const res = await this.withBackoff(
+            () => this.server.getEvents(params),
+            { op: 'getEvents' }
+          )
+
+          const resAny = res as any
+
+          const events = resAny?.events ?? []
+          for (const ev of events) {
+            const evAny = ev as any
+            if (!evAny?.inSuccessfulContractCall) continue
+            if (evAny.type !== 'contract') continue
+
+            const contractId =
+              typeof evAny.contractId === 'string'
+                ? evAny.contractId
+                : typeof evAny.contractId?.toString === 'function'
+                  ? evAny.contractId.toString()
+                  : undefined
+            if (!contractId || contractId !== this.config.contractId) continue
+
+            if (typeof evAny.value !== 'string') continue
+            if (typeof evAny.txHash !== 'string') continue
+            if (typeof evAny.ledger !== 'number') continue
+
+            const receipt = this.decodeReceiptValue(evAny.value)
+            if (!receipt) continue
+
+            const normalized = this.normalizeReceipt(receipt)
+            out.push({
+              ledger: evAny.ledger,
+              txHash: evAny.txHash,
+              contractId,
+              data: normalized,
+            })
+          }
+
+          const nextCursor: string | undefined = resAny?.cursor
+          if (!nextCursor || nextCursor === cursor) break
+          cursor = nextCursor
+
+          if (events.length < limit) break
+        }
+
+        span.setAttribute('soroban.events_count', out.length)
+        span.setStatus({ code: SpanStatusCode.OK })
+        return out
+      } catch (err: any) {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message || String(err) })
+        if (err instanceof Error) span.recordException(err)
+        if (err instanceof SorobanError) throw err
+        throw new RpcError('Failed to get receipt events', undefined, err)
+      } finally {
+        span.end()
+      }
+    })
   }
 
   private scValTopicBase64(v: xdr.ScVal): string {
