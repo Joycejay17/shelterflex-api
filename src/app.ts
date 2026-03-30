@@ -60,6 +60,8 @@ import { MetricsSorobanAdapter } from './soroban/metrics-adapter.js';
 import { CircuitBreakerAdapter } from './soroban/circuit-breaker-adapter.js';
 import { setDbPoolMetricsCallback, setSorobanCircuitBreakerCallback, shutdownMetrics } from './utils/metrics.js';
 import { metricsMiddleware } from './middleware/metricsMiddleware.js';
+import { JobScheduler, initJobStore, PostgresJobStore } from "./jobs/scheduler/index.js"
+import { createAdminJobsRouter } from "./routes/adminJobs.js"
 
 import { sanitizeRequest, detectMaliciousPatterns } from "./middleware/sanitization.js"
 import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js"
@@ -186,6 +188,18 @@ export function createApp() {
     workers.push(outboxWorker)
   }
 
+  // Job Scheduler — swap to Postgres store when DATABASE_URL is set
+  if (process.env.DATABASE_URL) {
+    initJobStore(new PostgresJobStore())
+  }
+  const jobScheduler = new JobScheduler(
+    parseInt(process.env.JOB_SCHEDULER_POLL_MS ?? '5000', 10),
+  )
+  if (env.NODE_ENV !== 'test') {
+    jobScheduler.start()
+    workers.push(jobScheduler)
+  }
+
   // Indexer
   const receiptRepo = process.env.DATABASE_URL
     ? new PostgresReceiptRepository()
@@ -294,6 +308,7 @@ export function createApp() {
   app.use('/api/admin', createAdminRouter(sorobanAdapter, walletStore as any, encryptionService as any, indexer))
   app.use('/api/admin/reconciliation', createAdminReconciliationRouter(ngnWalletService))
   app.use('/api/admin/secrets', createSecretRotationRouter())
+  app.use('/api/admin/jobs', createAdminJobsRouter())
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
   app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
