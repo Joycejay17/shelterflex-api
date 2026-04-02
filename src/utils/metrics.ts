@@ -18,6 +18,8 @@ import {
   SEMRESATTRS_SERVICE_VERSION,
 } from '@opentelemetry/semantic-conventions';
 import { metrics } from '@opentelemetry/api';
+import { createRequire } from 'node:module';
+import { resourceFromAttributes } from '@opentelemetry/resources';
 
 // Skip metrics in test environment
 const isTestEnv = process.env.NODE_ENV === 'test';
@@ -26,8 +28,8 @@ const isTestEnv = process.env.NODE_ENV === 'test';
 
 if (!isTestEnv) {
   try {
+    const require = createRequire(import.meta.url);
     const { env } = require('../schemas/env.js');
-    const { Resource } = require('@opentelemetry/resources');
     
     const prometheusPort = parseInt(process.env.PROMETHEUS_PORT ?? '9464', 10);
     const prometheusExporter = new PrometheusExporter(
@@ -40,7 +42,7 @@ if (!isTestEnv) {
       }
     );
 
-    const resource = new Resource({
+    const resource = resourceFromAttributes({
       [SEMRESATTRS_SERVICE_NAME]: env.OTEL_SERVICE_NAME || 'shelterflex-backend',
       [SEMRESATTRS_SERVICE_VERSION]: env.VERSION || '0.1.0',
     });
