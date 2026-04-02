@@ -1012,7 +1012,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
 
     const scArgs: xdr.ScVal[] = [
       nativeToScVal(this.config.adminSecret ? Keypair.fromSecret(this.config.adminSecret).publicKey() : '', { type: 'address' }),
-      xdr.ScVal.scvBytes(hashBytes)
+      xdr.ScVal.scvBytes(Buffer.from(hashBytes))
     ]
 
     return this.adminSigningService.executeAdminOperation({

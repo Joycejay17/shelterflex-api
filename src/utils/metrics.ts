@@ -11,11 +11,11 @@
  * Note: Metrics are disabled in test environment (NODE_ENV=test)
  */
 
-import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+import { MeterProvider } from '@opentelemetry/sdk-metrics';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import {
-  SEMRESATTRS_SERVICE_NAME,
-  SEMRESATTRS_SERVICE_VERSION,
+  ATTR_SERVICE_NAME,
+  ATTR_SERVICE_VERSION,
 } from '@opentelemetry/semantic-conventions';
 import { metrics } from '@opentelemetry/api';
 import { createRequire } from 'node:module';
@@ -31,7 +31,7 @@ if (!isTestEnv) {
     const require = createRequire(import.meta.url);
     const { env } = require('../schemas/env.js');
     
-    const prometheusPort = parseInt(process.env.PROMETHEUS_PORT ?? '9464', 10);
+    const prometheusPort = Number.parseInt(process.env.PROMETHEUS_PORT ?? '9464', 10);
     const prometheusExporter = new PrometheusExporter(
       {
         port: prometheusPort,
@@ -43,8 +43,8 @@ if (!isTestEnv) {
     );
 
     const resource = resourceFromAttributes({
-      [SEMRESATTRS_SERVICE_NAME]: env.OTEL_SERVICE_NAME || 'shelterflex-backend',
-      [SEMRESATTRS_SERVICE_VERSION]: env.VERSION || '0.1.0',
+      [ATTR_SERVICE_NAME]: env.OTEL_SERVICE_NAME || 'shelterflex-backend',
+      [ATTR_SERVICE_VERSION]: env.VERSION || '0.1.0',
     });
 
     const meterProvider = new MeterProvider({
@@ -357,7 +357,14 @@ if (!isTestEnv) {
   meter.createObservableGauge('soroban_circuit_breaker_state').addCallback((result) => {
     if (sorobanCircuitBreakerStateCallback) {
       const state = sorobanCircuitBreakerStateCallback();
-      const stateValue = state === 'CLOSED' ? 0 : state === 'HALF_OPEN' ? 1 : 2;
+      let stateValue: number;
+      if (state === 'CLOSED') {
+        stateValue = 0;
+      } else if (state === 'HALF_OPEN') {
+        stateValue = 1;
+      } else {
+        stateValue = 2;
+      }
       result.observe(stateValue);
     }
   });
