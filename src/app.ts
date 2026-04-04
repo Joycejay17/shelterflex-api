@@ -36,6 +36,7 @@ import { CustodialWalletServiceImpl } from "./services/CustodialWalletServiceImp
 import { NgnWalletService } from "./services/ngnWalletService.js"
 import { createAdminReconciliationRouter } from "./routes/adminReconciliation.js"
 import { createGasMetricsRouter } from "./routes/gas-metrics.js"
+import { createAdminAuditRouter } from "./routes/adminAudit.js"
 import { InMemoryWalletStore, PostgresWalletStore } from "./models/walletStore.js"
 import { InMemoryLinkedAddressStore, PostgresLinkedAddressStore } from "./models/linkedAddressStore.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
@@ -309,6 +310,7 @@ export function createApp() {
   app.use('/api/admin/reconciliation', createAdminReconciliationRouter(ngnWalletService))
   app.use('/api/admin/secrets', createSecretRotationRouter())
   app.use('/api/admin/jobs', createAdminJobsRouter())
+  app.use('/api/admin', createAdminAuditRouter())
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
   app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
