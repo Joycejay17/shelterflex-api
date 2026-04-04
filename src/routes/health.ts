@@ -17,18 +17,11 @@ export function createHealthRouter(adapter: SorobanAdapter): Router {
   })
 
   router.get("/details", (req: Request, res: Response) => {
-    const sorobanAdapterMode = (process.env.SOROBAN_ADAPTER_MODE ?? 'stub') === 'real'
-      ? 'real'
-      : 'stub'
-
-    const poolMetrics = getPoolMetrics()
-
     res.json({
       version: env.VERSION,
       nodeEnv: env.NODE_ENV,
-      sorobanAdapterMode,
-      databaseEnabled: !!process.env.DATABASE_URL,
-      ...(poolMetrics ? { databasePool: poolMetrics } : {}),
+      uptimeSeconds: Math.floor(process.uptime()),
+      dbConnected: getPoolMetrics() !== null,
       requestId: req.requestId,
     })
   })
