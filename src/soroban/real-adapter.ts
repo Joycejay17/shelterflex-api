@@ -543,16 +543,35 @@ export class RealSorobanAdapter implements SorobanAdapter {
     fn: () => Promise<T>,
     ctx: { op: string },
   ): Promise<T> {
-    const maxAttempts = 5
-    let attempt = 0
-    for (; ;) {
-      attempt += 1
+    const maxAttempts = 4
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        return await fn()
+        return await tracer.startActiveSpan(`Soroban.rpc:${ctx.op}`, async (span) => {
+          span.setAttribute('soroban.rpc.op', ctx.op)
+          span.setAttribute('soroban.rpc.attempt', attempt)
+          span.setAttribute('soroban.rpc.max_attempts', maxAttempts)
+
+          try {
+            const result = await fn()
+            span.setStatus({ code: SpanStatusCode.OK })
+            return result
+          } catch (err: any) {
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: err instanceof Error ? err.message : String(err),
+            })
+            if (err instanceof Error) span.recordException(err)
+            throw err
+          } finally {
+            span.end()
+          }
+        })
       } catch (err: any) {
-        const msg = err instanceof Error ? err.message : String(err)
+        if (!isTransientRpcError(err) || attempt === maxAttempts) {
+          throw err
+        }
         const status = typeof err?.response?.status === 'number' ? err.response.status : undefined
-        const retryable = status === 429 || status === 503 || status === 504 || /timeout|ECONNRESET|ENOTFOUND|EAI_AGAIN/i.test(msg)
+        const retryable = status === 429 || status === 503 || status === 504 || /timeout|ECONNRESET|ENOTFOUND|EAI_AGAIN/i.test(err.message)
 
         if (!retryable || attempt >= maxAttempts) {
           logger.error(`Soroban RPC ${ctx.op} failed`, { attempt, status }, err)
@@ -564,10 +583,21 @@ export class RealSorobanAdapter implements SorobanAdapter {
         const jitterMs = Math.floor(Math.random() * 250)
         const waitMs = backoffMs + jitterMs
 
+        const activeSpan = trace.getActiveSpan()
+        if (activeSpan) {
+          activeSpan.addEvent('soroban.rpc.backoff', {
+            op: ctx.op,
+            attempt,
+            waitMs,
+          })
+        }
+
         logger.warn(`Soroban RPC ${ctx.op} transient failure; backing off`, { attempt, status, waitMs })
         await new Promise(r => setTimeout(r, waitMs))
       }
     }
+
+    throw new Error(`Soroban RPC ${ctx.op} failed after ${maxAttempts} attempts`)
   }
 
   private async invokeReadOnly(
@@ -791,50 +821,76 @@ export class RealSorobanAdapter implements SorobanAdapter {
     maxAttempts: number = 30,
     pollIntervalMs: number = 1000
   ): Promise<{ status: string; result?: xdr.ScVal } | null> {
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise(r => setTimeout(r, pollIntervalMs))
+    return tracer.startActiveSpan('Soroban.waitForTransaction', async (span: Span) => {
+      span.setAttribute('soroban.tx_hash', txHash)
+      span.setAttribute('soroban.poll.max_attempts', maxAttempts)
+      span.setAttribute('soroban.poll.interval_ms', pollIntervalMs)
 
       try {
-        const result = await this.server.getTransaction(txHash)
+        for (let i = 0; i < maxAttempts; i++) {
+          span.setAttribute('soroban.poll.attempt', i + 1)
+          await new Promise(r => setTimeout(r, pollIntervalMs))
 
-        if (result.status === 'SUCCESS') {
-          // Parse return value from meta if available
-          let returnValue: xdr.ScVal | undefined
-          if (result.resultMetaXdr) {
-            try {
-              // resultMetaXdr can be either a string or already parsed
-              let meta: xdr.TransactionMeta
-              if (typeof result.resultMetaXdr === 'string') {
-                meta = xdr.TransactionMeta.fromXDR(result.resultMetaXdr, 'base64')
-              } else {
-                meta = result.resultMetaXdr as xdr.TransactionMeta
+          try {
+            const result = await this.withBackoff(
+              () => this.server.getTransaction(txHash),
+              { op: 'getTransaction' }
+            )
+
+            span.setAttribute('soroban.tx_status', result.status)
+
+            if (result.status === 'SUCCESS') {
+              // Parse return value from meta if available
+              let returnValue: xdr.ScVal | undefined
+              if (result.resultMetaXdr) {
+                try {
+                  // resultMetaXdr can be either a string or already parsed
+                  let meta: xdr.TransactionMeta
+                  if (typeof result.resultMetaXdr === 'string') {
+                    meta = xdr.TransactionMeta.fromXDR(result.resultMetaXdr, 'base64')
+                  } else {
+                    meta = result.resultMetaXdr as xdr.TransactionMeta
+                  }
+                  const sorobanMeta = meta.v3()?.sorobanMeta()
+                  if (sorobanMeta) {
+                    returnValue = sorobanMeta.returnValue()
+                  }
+                } catch {
+                  // Ignore parsing errors
+                }
               }
-              const sorobanMeta = meta.v3()?.sorobanMeta()
-              if (sorobanMeta) {
-                returnValue = sorobanMeta.returnValue()
+              span.setStatus({ code: SpanStatusCode.OK })
+              return {
+                status: result.status,
+                result: returnValue,
               }
-            } catch {
-              // Ignore parsing errors
+            } else if (result.status === 'FAILED') {
+              span.setStatus({ code: SpanStatusCode.ERROR, message: 'Transaction FAILED' })
+              return { status: result.status }
             }
+            // Status is still PENDING, continue polling
+          } catch (err) {
+            // If transient error, continue polling
+            if (isTransientRpcError(err)) {
+              continue
+            }
+            throw err
           }
-          return {
-            status: result.status,
-            result: returnValue,
-          }
-        } else if (result.status === 'FAILED') {
-          return { status: result.status }
         }
-        // Status is still PENDING, continue polling
-      } catch (err) {
-        // If transient error, continue polling
-        if (isTransientRpcError(err)) {
-          continue
-        }
-        throw err
-      }
-    }
 
-    return null // Timeout
+        span.setStatus({ code: SpanStatusCode.ERROR, message: 'Transaction confirmation timed out' })
+        return null // Timeout
+      } catch (err) {
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: err instanceof Error ? err.message : String(err),
+        })
+        if (err instanceof Error) span.recordException(err)
+        throw err
+      } finally {
+        span.end()
+      }
+    })
   }
 
   /**
@@ -1071,10 +1127,11 @@ export class RealSorobanAdapter implements SorobanAdapter {
 
     // Convert hex txHash (string) to Uint8Array for BytesN<32>
     const hashBytes = new Uint8Array(txHash.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const hashBuffer = Buffer.from(hashBytes)
 
     const scArgs: xdr.ScVal[] = [
       nativeToScVal(this.config.adminSecret ? Keypair.fromSecret(this.config.adminSecret).publicKey() : '', { type: 'address' }),
-      xdr.ScVal.scvBytes(hashBytes)
+      xdr.ScVal.scvBytes(hashBuffer)
     ]
 
     return this.adminSigningService.executeAdminOperation({
