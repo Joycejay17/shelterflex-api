@@ -63,6 +63,8 @@ import { setDbPoolMetricsCallback, setSorobanCircuitBreakerCallback, shutdownMet
 import { metricsMiddleware } from './middleware/metricsMiddleware.js';
 import { JobScheduler, initJobStore, PostgresJobStore } from "./jobs/scheduler/index.js"
 import { createAdminJobsRouter } from "./routes/adminJobs.js"
+import { createLandlordRouter } from "./routes/landlord.js"
+import { authenticateToken } from "./middleware/auth.js"
 
 import { sanitizeRequest, detectMaliciousPatterns } from "./middleware/sanitization.js"
 import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js"
@@ -319,6 +321,7 @@ export function createApp() {
   app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
   app.use('/api/deposits', createDepositsRouter(conversionService))
   app.use('/api/gas-metrics', createGasMetricsRouter())
+  app.use('/api/landlord', authenticateToken, createLandlordRouter())
   app.use('/api', migrationGuideRouter)
 
   // Interactive API documentation
