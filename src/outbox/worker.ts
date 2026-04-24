@@ -21,6 +21,7 @@ export class OutboxWorker {
   private intervalId: NodeJS.Timeout | null = null
   private running = false
   private sender: OutboxSender
+  private processingPromise: Promise<void> | null = null
 
   constructor(sender: OutboxSender) {
     this.sender = sender
@@ -29,21 +30,54 @@ export class OutboxWorker {
   start(intervalMs = 60000) {
     if (this.running) return
     this.running = true
-    this.intervalId = setInterval(() => this.process(), intervalMs)
+    this.intervalId = setInterval(() => {
+      this.processingPromise = this.process().finally(() => {
+        this.processingPromise = null
+      })
+    }, intervalMs)
     logger.info('OutboxWorker started', { intervalMs })
   }
 
-  stop() {
-    if (this.intervalId) clearInterval(this.intervalId)
+  async stop() {
     this.running = false
+    if (this.intervalId) {
+      clearInterval(this.intervalId)
+      this.intervalId = null
+    }
+    if (this.processingPromise) {
+      logger.info('OutboxWorker waiting for in-progress task to complete...')
+      await this.processingPromise
+    }
     logger.info('OutboxWorker stopped')
   }
 
   async process() {
+    // 1) Process new pending items — first delivery attempt
+    const pending = await outboxStore.listByStatus(OutboxStatus.PENDING)
+    for (const item of pending) {
+      logger.info('Processing pending outbox item', {
+        outboxId: item.id,
+        txType: item.txType,
+        txId: item.txId,
+      })
+      // sender.send marks the item SENT on success, FAILED on error
+      await this.sender.send(item)
+    }
+
+    // 2) Retry failed items with exponential backoff / dead-letter
     const failed = await outboxStore.listByStatus(OutboxStatus.FAILED)
     for (const item of failed) {
+      if (item.retryCount >= MAX_RETRY_COUNT) {
+        await outboxStore.markDead(item.id, 'Max retry count reached')
+        logger.warn('Outbox item moved to dead letter queue', {
+          outboxId: item.id,
+          txId: item.txId,
+          retryCount: item.retryCount,
+        })
+        continue
+      }
       if (!shouldRetry(item)) continue
-      logger.info('Retrying outbox item', {
+      logger.info('Retrying failed outbox item', {
         outboxId: item.id,
         txId: item.txId,
         retryCount: item.retryCount,

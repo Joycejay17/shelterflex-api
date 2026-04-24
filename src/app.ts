@@ -3,8 +3,11 @@ import cors from "cors"
 import { env } from "./schemas/env.js"
 import { requestIdMiddleware } from "./middleware/requestId.js"
 import { errorHandler } from "./middleware/errorHandler.js"
+import { traceResponseMiddleware } from "./middleware/traceResponse.js"
 import { createLogger } from "./middleware/logger.js"
-import healthRouter from "./routes/health.js"
+import { logger } from "./utils/logger.js"
+import { apiVersioning } from "./middleware/apiVersioning.js"
+import { createHealthRouter } from "./routes/health.js"
 import { createPublicRateLimiter, createAuthRateLimiter, createWalletRateLimiter } from "./middleware/rateLimit.js"
 import publicRouter from "./routes/publicRoutes.js"
 import { AppError } from "./errors/AppError.js"
@@ -32,6 +35,8 @@ import { WalletServiceImpl, EnvironmentEncryptionService, KeyringEncryptionServi
 import { CustodialWalletServiceImpl } from "./services/CustodialWalletServiceImpl.js"
 import { NgnWalletService } from "./services/ngnWalletService.js"
 import { createAdminReconciliationRouter } from "./routes/adminReconciliation.js"
+import { createGasMetricsRouter } from "./routes/gas-metrics.js"
+import { createAdminAuditRouter } from "./routes/adminAudit.js"
 import { InMemoryWalletStore, PostgresWalletStore } from "./models/walletStore.js"
 import { InMemoryLinkedAddressStore, PostgresLinkedAddressStore } from "./models/linkedAddressStore.js"
 import { StubRewardsDataLayer } from "./services/stub-rewards-data-layer.js"
@@ -39,16 +44,39 @@ import authRouter from "./routes/auth.js"
 import { StubReceiptRepository, PostgresReceiptRepository } from "./indexer/receipt-repository.js"
 import { ReceiptIndexer } from "./indexer/worker.js"
 import { createReceiptsRouter } from "./routes/receiptsRoute.js"
-import { getPool } from "./db.js"
+import { getPool, getPoolMetricsForOtel } from "./db.js"
 import { StakingService } from "./services/stakingService.js"
 import { StakingFinalizer } from "./jobs/stakingFinalizer.js"
 import { initOutboxStore, PostgresOutboxStore } from "./outbox/store.js"
 import { OutboxSender } from "./outbox/sender.js"
 import { OutboxWorker } from "./outbox/worker.js"
+import { initializeAppSecretRotation, secretRotationMiddleware, createSecretRotationRouter } from "./middleware/secretRotation.js"
+import { getSecretRotationService } from "./services/secretRotationService.js"
+import migrationGuideRouter from "./routes/migrationGuide.js"
+import adminTimelockRouter from './routes/admin-timelock.js';
+import { TimelockIndexer } from './indexer/timelock-worker.js';
+import { PostgresTimelockRepository, StubTimelockRepository } from './indexer/timelock-repository.js';
+import { TimelockProcessor } from './indexer/timelock-processor.js';
+import { MetricsSorobanAdapter } from './soroban/metrics-adapter.js';
+import { CircuitBreakerAdapter } from './soroban/circuit-breaker-adapter.js';
+import { setDbPoolMetricsCallback, setSorobanCircuitBreakerCallback, shutdownMetrics } from './utils/metrics.js';
+import { metricsMiddleware } from './middleware/metricsMiddleware.js';
+import { JobScheduler, initJobStore, PostgresJobStore } from "./jobs/scheduler/index.js"
+import { createAdminJobsRouter } from "./routes/adminJobs.js"
+import { createLandlordRouter } from "./routes/landlord.js"
+import { authenticateToken } from "./middleware/auth.js"
 
+import { sanitizeRequest, detectMaliciousPatterns } from "./middleware/sanitization.js"
+import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js"
+import { createDocsRouter } from "./routes/docs.js"
 
 export function createApp() {
   const app = express()
+
+  // Initialize secret rotation service
+  if (env.NODE_ENV !== 'test') {
+    initializeAppSecretRotation();
+  }
 
   // Test database
   async function testDb() {
@@ -64,7 +92,23 @@ export function createApp() {
 
   // Initialize Soroban adapter using your existing config function
   const sorobanConfig = getSorobanConfigFromEnv(process.env)
-  const sorobanAdapter = createSorobanAdapter(sorobanConfig)
+  const baseSorobanAdapter = createSorobanAdapter(sorobanConfig)
+  
+  // Wrap with metrics tracking
+  const sorobanAdapter = new MetricsSorobanAdapter(baseSorobanAdapter)
+  
+  // Set up circuit breaker metrics callback if using circuit breaker
+  if (baseSorobanAdapter instanceof CircuitBreakerAdapter) {
+    setSorobanCircuitBreakerCallback(() => {
+      const status = baseSorobanAdapter.getHealthStatus()
+      return status.state
+    })
+  }
+  
+  // Set up database pool metrics callback
+  if (env.NODE_ENV !== 'test') {
+    setDbPoolMetricsCallback(getPoolMetricsForOtel)
+  }
 
   // Initialize earnings service with stub data layer
   // Initialize wallet service and store
@@ -127,9 +171,13 @@ export function createApp() {
   app.set('conversionService', conversionService)
   const stakingService = new StakingService(sorobanAdapter)
 
+  // Workers collection for graceful shutdown
+  const workers: { stop: () => Promise<void> }[] = []
+
   // Staking Finalizer Job
   const stakingFinalizer = new StakingFinalizer(stakingService)
   stakingFinalizer.start()
+  workers.push(stakingFinalizer)
 
   // Outbox store — swap to Postgres when DATABASE_URL is set
   if (process.env.DATABASE_URL) {
@@ -142,11 +190,19 @@ export function createApp() {
     const outboxWorker = new OutboxWorker(outboxSender)
     const intervalMs = parseInt(process.env.OUTBOX_WORKER_INTERVAL_MS ?? '60000', 10)
     outboxWorker.start(intervalMs)
+    workers.push(outboxWorker)
+  }
 
-    // Graceful shutdown
-    const stopWorker = () => outboxWorker.stop()
-    process.once('SIGTERM', stopWorker)
-    process.once('SIGINT', stopWorker)
+  // Job Scheduler — swap to Postgres store when DATABASE_URL is set
+  if (process.env.DATABASE_URL) {
+    initJobStore(new PostgresJobStore())
+  }
+  const jobScheduler = new JobScheduler(
+    parseInt(process.env.JOB_SCHEDULER_POLL_MS ?? '5000', 10),
+  )
+  if (env.NODE_ENV !== 'test') {
+    jobScheduler.start()
+    workers.push(jobScheduler)
   }
 
   // Indexer
@@ -158,9 +214,66 @@ export function createApp() {
     startLedger: process.env.INDEXER_START_LEDGER ? parseInt(process.env.INDEXER_START_LEDGER) : undefined,
   })
   indexer.start()
+  workers.push(indexer)
+
+  // Timelock Indexer
+  const timelockRepo = process.env.DATABASE_URL
+    ? new PostgresTimelockRepository()
+    : new StubTimelockRepository()
+  const timelockProcessor = new TimelockProcessor(timelockRepo)
+  const timelockIndexer = new TimelockIndexer(sorobanAdapter as any, timelockProcessor, {
+    pollIntervalMs: parseInt(process.env.INDEXER_POLL_MS ?? '5000'),
+    startLedger: process.env.INDEXER_START_LEDGER ? parseInt(process.env.INDEXER_START_LEDGER) : undefined,
+  })
+  timelockIndexer.start()
+  workers.push(timelockIndexer)
+
+  // Graceful shutdown orchestration
+  if (env.NODE_ENV !== 'test') {
+    const shutdown = async (signal: string) => {
+      logger.info(`Received ${signal}, starting graceful shutdown...`)
+
+      const timeoutMs = 30000
+      const timeout = setTimeout(() => {
+        logger.error(`Graceful shutdown timed out after ${timeoutMs}ms, forcing exit`)
+        process.exit(1)
+      }, timeoutMs)
+
+      try {
+        // Stop secret rotation watcher
+        const secretRotationService = getSecretRotationService();
+        secretRotationService.stopWatching();
+
+        // Stop all workers
+        await Promise.all(workers.map(w => w.stop()))
+        
+        // Shutdown metrics
+        await shutdownMetrics()
+        
+        clearTimeout(timeout)
+        logger.info('Graceful shutdown completed successfully')
+        process.exit(0)
+      } catch (err) {
+        logger.error('Error during graceful shutdown', { error: err instanceof Error ? err.message : String(err) })
+        process.exit(1)
+      }
+    }
+
+    process.once('SIGTERM', () => void shutdown('SIGTERM'))
+    process.once('SIGINT', () => void shutdown('SIGINT'))
+  }
 
   // Core middleware
   app.use(requestIdMiddleware)
+  app.use(traceResponseMiddleware)
+
+  // Metrics middleware - track all HTTP requests
+  if (env.NODE_ENV !== 'test') {
+    app.use(metricsMiddleware)
+  }
+
+  // Secret rotation middleware
+  app.use(secretRotationMiddleware)
 
   //  Logger
   app.use(requestLogger);
@@ -171,6 +284,9 @@ export function createApp() {
 
   app.use(express.json())
 
+  // Core administrative routes
+  app.use('/api/admin/timelock', adminTimelockRouter(sorobanAdapter as any, timelockRepo));
+
   app.use(
     cors({
       origin: env.CORS_ORIGINS.split(",").map((s: string) => s.trim()),
@@ -178,9 +294,13 @@ export function createApp() {
   )
 
   // Routes
-  app.use("/health", healthRouter)
+  app.use("/health", createHealthRouter(sorobanAdapter))
   app.use("/api/auth", createAuthRateLimiter(env), authRouter)
   app.use(createPublicRateLimiter(env))
+
+  // API versioning — applied to all /api routes after rate limiting
+  app.use('/api', apiVersioning)
+
   app.use("/", publicRouter)
   app.use('/api', createBalanceRouter(sorobanAdapter))
   app.use('/api', createReceiptsRouter(receiptRepo))
@@ -192,13 +312,20 @@ export function createApp() {
   app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
   app.use('/api/admin', createAdminRouter(sorobanAdapter, walletStore as any, encryptionService as any, indexer))
   app.use('/api/admin/reconciliation', createAdminReconciliationRouter(ngnWalletService))
+  app.use('/api/admin/secrets', createSecretRotationRouter())
+  app.use('/api/admin/jobs', createAdminJobsRouter())
+  app.use('/api/admin', createAdminAuditRouter())
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
   app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
   app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
   app.use('/api/deposits', createDepositsRouter(conversionService))
+  app.use('/api/gas-metrics', createGasMetricsRouter())
+  app.use('/api/landlord', authenticateToken, createLandlordRouter())
+  app.use('/api', migrationGuideRouter)
 
-
+  // Interactive API documentation
+  app.use('/docs', createDocsRouter())
 
   // 404 catch-all — must be after all routes, before errorHandler
   app.use('*', (_req, _res, next) => {

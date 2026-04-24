@@ -1,17 +1,18 @@
 import { randomUUID } from 'node:crypto'
-import { 
-  PostgresUserRepository, 
-  PostgresSessionRepository, 
-  PostgresOtpChallengeRepository, 
+import {
+  PostgresUserRepository,
+  PostgresSessionRepository,
+  PostgresOtpChallengeRepository,
   PostgresWalletChallengeRepository,
   type User,
   type OtpChallenge,
   type Session,
   type WalletChallenge,
-  type UserRole
+  type UserRole,
+  type LandlordProfile
 } from '../repositories/AuthRepository.js'
 
-export type { UserRole, User, OtpChallenge, Session, WalletChallenge }
+export type { UserRole, User, OtpChallenge, Session, WalletChallenge, LandlordProfile }
 
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
@@ -37,7 +38,7 @@ class UserStore {
       return user
     } catch (error) {
       console.warn('Postgres user creation failed, using fallback cache:', error)
-      
+
       const existing = this.fallbackCache.get(email)
       if (existing) return existing
 
@@ -48,6 +49,8 @@ class UserStore {
         createdAt: now,
         name: email.split('@')[0] ?? email,
         role: 'tenant',
+        tier: 'free',
+        planQuota: 100
       }
 
       this.fallbackCache.set(email, user)
@@ -85,6 +88,33 @@ class UserStore {
         return user
       }
       throw new Error('User not found for wallet linking')
+    }
+  }
+
+  async getLandlordProfile(userId: string): Promise<LandlordProfile | null> {
+    try {
+      return await this.postgresRepo.getLandlordProfile(userId)
+    } catch (error) {
+      console.warn('Postgres landlord profile lookup failed:', error)
+      return null
+    }
+  }
+
+  async updateLandlordProfile(userId: string, profile: Partial<LandlordProfile>): Promise<void> {
+    try {
+      await this.postgresRepo.updateLandlordProfile(userId, profile)
+    } catch (error) {
+      console.warn('Postgres landlord profile update failed:', error)
+      throw error
+    }
+  }
+
+  async updateName(userId: string, name: string): Promise<void> {
+    try {
+      await this.postgresRepo.updateName(userId, name)
+    } catch (error) {
+      console.warn('Postgres user name update failed:', error)
+      throw error
     }
   }
 

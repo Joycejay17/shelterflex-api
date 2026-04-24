@@ -161,8 +161,37 @@ describe('Auth Routes (Wallet)', () => {
     expect(challenge!.attempts).toBe(0)
   })
 
-  it.skip('POST /api/auth/wallet/verify should return session token on success', async () => {
-    // TODO: Implement with proper mocking of Stellar SDK
+  it('POST /api/auth/wallet/verify should return session token on success', async () => {
+    const address = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'
+
+    const walletUtils = await getWalletUtils()
+    vi.mocked(walletUtils.verifySignedChallenge).mockReturnValue(true)
+
+    const challengeRes = await request.post('/api/auth/wallet/challenge').send({ address })
+    expect(challengeRes.status).toBe(200)
+
+    const challengeBefore = await walletChallengeStore.getByAddress(address.toLowerCase())
+    expect(challengeBefore).toBeDefined()
+
+    const verifyRes = await request.post('/api/auth/wallet/verify').send({
+      address,
+      signedChallengeXdr: 'valid-mock-xdr',
+    })
+
+    expect(verifyRes.status).toBe(200)
+
+    // Session token response presence/shape
+    expect(verifyRes.body).toHaveProperty('token')
+    expect(typeof verifyRes.body.token).toBe('string')
+    expect(verifyRes.body.token).toBe('session-token-abc')
+
+    expect(verifyRes.body).toHaveProperty('user')
+    expect(typeof verifyRes.body.user).toBe('object')
+    expect(verifyRes.body.user).not.toBeNull()
+
+    // Success should clear the one-time challenge
+    const challengeAfter = await walletChallengeStore.getByAddress(address.toLowerCase())
+    expect(challengeAfter).toBeUndefined()
   })
 
   it('POST /api/auth/wallet/verify should fail with expired challenge', async () => {
@@ -244,31 +273,69 @@ describe('Auth Routes (Wallet)', () => {
     const clearedChallenge = await walletChallengeStore.getByAddress(address.toLowerCase())
     expect(clearedChallenge).toBeUndefined()
   })
+})
 
-  it('POST /api/auth/wallet/verify should return session token and clear challenge on success', async () => {
-    const address = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'
+/**
+ * Issue #279 – validate() middleware: invalid payloads must return the
+ * canonical VALIDATION_ERROR shape (HTTP 400 + structured field errors).
+ *
+ * Endpoint under test: POST /api/auth/request-otp
+ * Schema:  requestOtpSchema  →  z.object({ email: z.string().email() })
+ *
+ * Error shape (from errorCodes.ts / validate.ts + formatZodIssues):
+ * {
+ *   "error": {
+ *     "code": "VALIDATION_ERROR",
+ *     "message": "Invalid request data",
+ *     "details": {
+ *       "<field_path>": "<zod message>"   // flat Record<string, string>
+ *     }
+ *   }
+ * }
+ */
+describe('validate() middleware – request validation error shape', () => {
+  const request = createTestAgent()
 
-    const walletUtils = await getWalletUtils()
-    vi.mocked(walletUtils.verifySignedChallenge).mockReturnValue(true)
+  beforeEach(() => {
+    _testOnly_clearAuthRateLimits()
+    vi.stubEnv('STELLAR_SERVER_SECRET_KEY', 'SBQWY3DNPFWGSQZ7BHHCQLZNX35O6W23DMU4Y3FJ3A6BKGWXOQ5F3Z2O')
+  })
 
-    // Create a challenge
-    const res = await request.post('/api/auth/wallet/challenge').send({ address })
-    expect(res.status).toBe(200)
+  it('returns HTTP 400 with VALIDATION_ERROR code when email is missing', async () => {
+    const res = await request.post('/api/auth/request-otp').send({})
 
-    const challengeBefore = await walletChallengeStore.getByAddress(address.toLowerCase())
-    expect(challengeBefore).toBeDefined()
+    expect(res.status).toBe(400)
+    expect(res.body).toHaveProperty('error')
+    expect(res.body.error).toHaveProperty('code', 'VALIDATION_ERROR')
+    expect(res.body.error).toHaveProperty('message', 'Invalid request data')
+    expect(res.body.error).toHaveProperty('details')
+    // details is a flat Record<string, string> produced by formatZodIssues
+    expect(typeof res.body.error.details).toBe('object')
+    expect(res.body.error.details).not.toBeNull()
+  })
 
-    const verifyRes = await request.post('/api/auth/wallet/verify').send({
-      address,
-      signedChallengeXdr: 'valid-mock-xdr',
-    })
+  it('returns HTTP 400 with VALIDATION_ERROR code when email has wrong type', async () => {
+    const res = await request.post('/api/auth/request-otp').send({ email: 12345 })
 
-    expect(verifyRes.status).toBe(200)
-    expect(verifyRes.body).toHaveProperty('token', 'session-token-abc')
-    expect(verifyRes.body).toHaveProperty('user')
-    expect(verifyRes.body.user).toHaveProperty('email')
+    expect(res.status).toBe(400)
+    expect(res.body.error).toHaveProperty('code', 'VALIDATION_ERROR')
+    expect(res.body.error).toHaveProperty('details')
+    expect(typeof res.body.error.details).toBe('object')
+  })
 
-    const challengeAfter = await walletChallengeStore.getByAddress(address.toLowerCase())
-    expect(challengeAfter).toBeUndefined()
+  it('returns HTTP 400 with VALIDATION_ERROR code when email format is invalid', async () => {
+    const res = await request.post('/api/auth/request-otp').send({ email: 'not-an-email' })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toHaveProperty('code', 'VALIDATION_ERROR')
+    expect(res.body.error).toHaveProperty('message', 'Invalid request data')
+
+    // formatZodIssues returns a flat Record<string, string>:
+    // { "email": "<zod validation message>" }
+    const details = res.body.error.details as Record<string, string>
+    expect(typeof details).toBe('object')
+    // The "email" key must be present with a non-empty string message
+    expect(typeof details['email']).toBe('string')
+    expect(details['email'].length).toBeGreaterThan(0)
   })
 })
