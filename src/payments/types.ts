@@ -10,6 +10,7 @@ export interface InitiatePaymentInput {
   customerMeta?: {
     name?: string
     phone?: string
+    email?: string
   }
 }
 

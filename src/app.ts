@@ -45,6 +45,7 @@ import { StakingFinalizer } from "./jobs/stakingFinalizer.js"
 import { initOutboxStore, PostgresOutboxStore } from "./outbox/store.js"
 import { OutboxSender } from "./outbox/sender.js"
 import { OutboxWorker } from "./outbox/worker.js"
+import { createLandlordPropertiesRouter } from "./routes/landlordProperties.js"
 
 
 export function createApp() {
@@ -197,6 +198,7 @@ export function createApp() {
   app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
   app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
   app.use('/api/deposits', createDepositsRouter(conversionService))
+  app.use('/api/landlord/properties', createLandlordPropertiesRouter())
 
 
 
