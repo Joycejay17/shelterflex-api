@@ -21,8 +21,8 @@ import { createStakingRouter } from "./routes/staking.js"
 import { createWebhooksRouter } from "./routes/webhooks.js"
 import { createDepositsRouter } from "./routes/deposits.js"
 import { EarningsServiceImpl } from "./services/earnings.js"
-import { StubConversionProvider } from "./services/conversionProvider.js"
 import { ConversionService } from "./services/conversionService.js"
+import { createConversionProviderFromEnv } from "./services/conversionProviderFactory.js"
 import { createWalletRouter } from "./routes/wallet.js"
 import { createNgnWalletRouter } from "./routes/ngnWallet.js"
 import { createAdminRiskRouter } from "./routes/adminRisk.js"
@@ -122,7 +122,7 @@ export function createApp() {
     usdcToNgnRate: 1600, // Example exchange rate: 1 USDC = 1600 NGN
   })
 
-  const conversionProvider = new StubConversionProvider(env.FX_RATE_NGN_PER_USDC)
+  const conversionProvider = createConversionProviderFromEnv(env)
   const conversionService = new ConversionService(conversionProvider, 'onramp')
   app.set('conversionService', conversionService)
   const stakingService = new StakingService(sorobanAdapter)

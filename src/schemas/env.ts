@@ -30,6 +30,18 @@ export const envSchema = z.object({
   FLUTTERWAVE_SECRET: z.string().optional(),
   MANUAL_ADMIN_SECRET: z.string().optional(),
   FX_RATE_NGN_PER_USDC: z.coerce.number().positive().default(1600),
+  /** NGN/USDC conversion: `stub` (FX_RATE only), `http` (CONVERSION_RATE_URL required), `fallback` (HTTP then stub). */
+  CONVERSION_PROVIDER: z.enum(['stub', 'http', 'fallback']).default('stub'),
+  /** JSON endpoint returning { "fxRateNgnPerUsdc": number } (or `rate` / `ngnPerUsdc`). Required when CONVERSION_PROVIDER=http. */
+  CONVERSION_RATE_URL: z.preprocess(
+    (v) => (v === '' || v === undefined ? undefined : v),
+    z.string().url().optional(),
+  ),
+  /** Optional Bearer token for CONVERSION_RATE_URL. */
+  CONVERSION_RATE_API_KEY: z.string().optional(),
+  CONVERSION_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  CONVERSION_RATE_MIN: z.coerce.number().positive().default(1),
+  CONVERSION_RATE_MAX: z.coerce.number().positive().default(50_000),
   QUOTE_MAX_AMOUNT_NGN: z.coerce.number().positive().default(5_000_000),
   QUOTE_EXPIRY_MS: z.coerce.number().positive().default(5 * 60_000),
   QUOTE_FEE_PERCENT: z.coerce.number().min(0).max(1).default(0.015),
@@ -107,6 +119,17 @@ export const envSchema = z.object({
   }, {
     message: 'MANUAL_ADMIN_SECRET is required in production for webhook signature validation',
     path: ['MANUAL_ADMIN_SECRET'],
+  })
+  .refine((data) => {
+    if (data.CONVERSION_PROVIDER !== 'http') return true
+    return !!data.CONVERSION_RATE_URL
+  }, {
+    message: 'CONVERSION_RATE_URL is required when CONVERSION_PROVIDER is "http"',
+    path: ['CONVERSION_RATE_URL'],
+  })
+  .refine((data) => data.CONVERSION_RATE_MIN < data.CONVERSION_RATE_MAX, {
+    message: 'CONVERSION_RATE_MIN must be less than CONVERSION_RATE_MAX',
+    path: ['CONVERSION_RATE_MAX'],
   })
 
 export type Env = z.infer<typeof envSchema>
