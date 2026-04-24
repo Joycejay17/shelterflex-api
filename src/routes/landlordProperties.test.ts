@@ -3,11 +3,10 @@ import { createTestAgent, expectErrorShape } from '../test-helpers.js'
 import { landlordPropertyStore } from '../models/landlordPropertyStore.js'
 import { userStore, sessionStore } from '../models/authStore.js'
 import { PropertyStatus } from '../models/landlordProperty.js'
-import { randomUUID } from 'node:crypto'
 
 describe('Landlord Properties API', () => {
   const request = createTestAgent()
-  const landlordId = randomUUID()
+  const landlordId = 'test-landlord-id'
   const landlordEmail = 'landlord@test.com'
   const token = 'test-landlord-token'
 
@@ -82,7 +81,7 @@ describe('Landlord Properties API', () => {
       
       // @ts-ignore
       userStore.fallbackCache.set(tenantEmail, {
-        id: randomUUID(),
+        id: 'test-tenant-id',
         email: tenantEmail,
         name: 'Test Tenant',
         role: 'tenant',
