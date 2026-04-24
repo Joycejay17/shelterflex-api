@@ -96,6 +96,7 @@ import {
   PostgresJobStore,
 } from "./jobs/scheduler/index.js";
 import { createAdminJobsRouter } from "./routes/adminJobs.js";
+import { createLandlordPropertiesRouter } from "./routes/landlordProperties.js";
 import { createLandlordRouter } from "./routes/landlord.js";
 import { authenticateToken } from "./middleware/auth.js";
 import { createTenantApplicationsRouter } from "./routes/tenantApplications.js";
@@ -419,6 +420,7 @@ export function createApp() {
   app.use("/api/webhooks", createWebhooksRouter(ngnWalletService));
   app.use("/api/deposits", createDepositsRouter(conversionService));
   app.use("/api/gas-metrics", createGasMetricsRouter());
+  app.use("/api/landlord/properties", createLandlordPropertiesRouter());
   app.use("/api/landlord", authenticateToken, createLandlordRouter());
   app.use("/api/tenant/applications", createTenantApplicationsRouter());
   app.use("/api/tenant/payments", createTenantPaymentsRouter());
