@@ -24,6 +24,8 @@ import { createPaymentsRouter } from "./routes/payments.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createDealsRouter } from "./routes/deals.js";
 import { createWhistleblowerRouter } from "./routes/whistleblower.js";
+import { createWhistleblowerApplicationsRouter } from "./routes/whistleblowerApplications.js";
+import { createAdminWhistleblowerApplicationsRouter } from "./routes/adminWhistleblowerApplications.js";
 import { createStakingRouter } from "./routes/staking.js";
 import { createWebhooksRouter } from "./routes/webhooks.js";
 import { createDepositsRouter } from "./routes/deposits.js";
@@ -101,6 +103,8 @@ import { createNotificationsRouter } from "./routes/notifications.js";
 import { createSettlementAdminRouter } from "./routes/settlementAdmin.js";
 import { SettlementOutboxWorker } from "./settlement/worker.js";
 import { durableIdempotencyService } from "./services/durableIdempotencyService.js";
+import { createSupportRouter } from "./routes/support.js";
+import { createPropertyIssueReportsRouter } from "./routes/propertyIssueReports.js";
 import {
   PostgresTenantApplicationStore,
   initTenantApplicationStore,
@@ -114,7 +118,6 @@ import {
   initWhistleblowerSignupApplicationStore,
 } from "./models/whistleblowerSignupApplicationStore.js";
 import { createPartnerLandlordApplicationsRouter } from "./routes/partnerLandlordApplications.js";
-import { createWhistleblowerApplicationsRouter } from "./routes/whistleblowerApplications.js";
 
 import {
   sanitizeRequest,
@@ -421,6 +424,8 @@ export function createApp() {
   app.use("/", publicRouter);
   app.use("/api", createBalanceRouter(sorobanAdapter));
   app.use("/api", createReceiptsRouter(receiptRepo));
+  app.use("/api/support", createSupportRouter());
+  app.use("/api/property-issue-reports", createPropertyIssueReportsRouter());
   app.use(
     "/api/wallet",
     createWalletRateLimiter(env),
@@ -449,6 +454,8 @@ export function createApp() {
   app.use("/api/admin", createAdminAuditRouter());
   app.use("/api/deals", createDealsRouter());
   app.use("/api/whistleblower", createWhistleblowerRouter(earningsService));
+  app.use("/api/whistleblower-applications", createWhistleblowerApplicationsRouter());
+  app.use("/api/admin/whistleblower-applications", createAdminWhistleblowerApplicationsRouter());
   app.use(
     "/api/staking",
     createStakingRouter(
