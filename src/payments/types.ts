@@ -26,6 +26,11 @@ export interface ParseWebhookResult {
   externalRef: string
   rawStatus: string
   providerStatus?: string
+  /**
+   * Stable per-delivery id from the PSP (or a deterministic hash when the PSP omits one).
+   * Used for deduping replays in addition to business-reference idempotency.
+   */
+  providerEventId: string
 }
 
 export interface MapStatusInput {
