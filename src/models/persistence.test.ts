@@ -19,6 +19,7 @@ const migrationPaths = [
   path.resolve(__dirname, '../../migrations/006_deal_listing_reward_store.sql'),
   path.resolve(__dirname, '../../migrations/014_settlement_outbox.sql'),
   path.resolve(__dirname, '../../migrations/016_support_messages.sql'),
+  path.resolve(__dirname, '../../migrations/017_whistleblower_ratings.sql'),
 ]
 
 function loadMigrations(sql: string) {

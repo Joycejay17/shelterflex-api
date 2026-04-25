@@ -337,6 +337,106 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /api/whistleblower/ratings:
+    post:
+      summary: Submit a whistleblower rating (tenant)
+      description: Authenticated tenant submits a rating (1-5) and optional review text.
+      operationId: createWhistleblowerRating
+      tags:
+        - Whistleblower
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWhistleblowerRatingRequest"
+      responses:
+        "201":
+          description: Rating created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateWhistleblowerRatingResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "409":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/whistleblower/{id}/ratings:
+    get:
+      summary: List whistleblower ratings
+      description: Public list of ratings for profile/dashboard display.
+      operationId: listWhistleblowerRatings
+      tags:
+        - Whistleblower
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: Ratings list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, ratings]
+                properties:
+                  success:
+                    type: boolean
+                  ratings:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WhistleblowerRating"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /api/whistleblower/{id}/ratings/aggregate:
+    get:
+      summary: Get whistleblower rating aggregate
+      description: Public aggregate trust metrics (count, average, breakdown).
+      operationId: getWhistleblowerRatingAggregate
+      tags:
+        - Whistleblower
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Aggregate metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, aggregate]
+                properties:
+                  success:
+                    type: boolean
+                  aggregate:
+                    $ref: "#/components/schemas/WhistleblowerRatingAggregate"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        default:
+          $ref: "#/components/responses/Error"
+
   /soroban/config:
     get:
       summary: Get Soroban configuration
@@ -2266,6 +2366,79 @@ components:
         messageId:
           type: string
           format: uuid
+
+    CreateWhistleblowerRatingRequest:
+      type: object
+      required: [whistleblowerId, dealId, rating]
+      properties:
+        whistleblowerId:
+          type: string
+          minLength: 1
+        dealId:
+          type: string
+          minLength: 1
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        reviewText:
+          type: string
+          nullable: true
+          maxLength: 2000
+
+    WhistleblowerRating:
+      type: object
+      required:
+        - ratingId
+        - whistleblowerId
+        - tenantId
+        - dealId
+        - rating
+        - createdAt
+      properties:
+        ratingId:
+          type: string
+          format: uuid
+        whistleblowerId:
+          type: string
+        tenantId:
+          type: string
+        dealId:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        reviewText:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateWhistleblowerRatingResponse:
+      type: object
+      required: [success, rating]
+      properties:
+        success:
+          type: boolean
+        rating:
+          $ref: "#/components/schemas/WhistleblowerRating"
+
+    WhistleblowerRatingAggregate:
+      type: object
+      required: [whistleblowerId, count, average, breakdown]
+      properties:
+        whistleblowerId:
+          type: string
+        count:
+          type: integer
+        average:
+          type: number
+        breakdown:
+          type: object
+          additionalProperties:
+            type: integer
 
     BankAccountDetails:
       type: object
