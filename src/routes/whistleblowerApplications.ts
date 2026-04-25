@@ -1,6 +1,6 @@
 /**
  * Public Routes for Whistleblower Applications
- * 
+ *
  * Provides endpoints for:
  * - Submitting new whistleblower signup applications
  * - Checking application status
@@ -105,6 +105,11 @@ export function createWhistleblowerApplicationsRouter(): Router {
             status: application.status,
             createdAt: application.createdAt.toISOString(),
             updatedAt: application.updatedAt.toISOString(),
+          },
+          data: {
+            applicationId: application.applicationId,
+            status: application.status,
+            createdAt: application.createdAt.toISOString(),
           },
           message: 'Application submitted successfully. You will be notified via email once reviewed.',
         })
