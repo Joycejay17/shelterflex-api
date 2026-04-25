@@ -26,6 +26,7 @@ export interface WhistleblowerApplicationStore {
     reviewedBy: string,
     rejectionReason?: string
   ): Promise<WhistleblowerApplication | null>;
+  clear(): Promise<void>;
 }
 
 export class InMemoryWhistleblowerApplicationStore implements WhistleblowerApplicationStore {
@@ -121,6 +122,10 @@ export class InMemoryWhistleblowerApplicationStore implements WhistleblowerAppli
 
     inMemoryApplications.set(applicationId, updatedApplication);
     return updatedApplication;
+  }
+
+  async clear(): Promise<void> {
+    inMemoryApplications.clear();
   }
 }
 
