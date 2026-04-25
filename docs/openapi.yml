@@ -312,6 +312,31 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /api/support/messages:
+    post:
+      summary: Submit a public support inquiry
+      description: Accepts and stores a public contact/support message for later handling.
+      operationId: createSupportMessage
+      tags:
+        - Support
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSupportMessageRequest"
+      responses:
+        "201":
+          description: Message accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateSupportMessageResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        default:
+          $ref: "#/components/responses/Error"
+
   /soroban/config:
     get:
       summary: Get Soroban configuration
@@ -2200,6 +2225,48 @@ components:
         total:
           type: integer
 
+    CreateSupportMessageRequest:
+      type: object
+      required:
+        - name
+        - email
+        - subject
+        - message
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        phone:
+          type: string
+          nullable: true
+          maxLength: 32
+        subject:
+          type: string
+          minLength: 1
+          maxLength: 200
+        message:
+          type: string
+          minLength: 1
+          maxLength: 5000
+
+    CreateSupportMessageResponse:
+      type: object
+      required:
+        - success
+        - messageId
+      properties:
+        success:
+          type: boolean
+          example: true
+        messageId:
+          type: string
+          format: uuid
+
     BankAccountDetails:
       type: object
       required:
@@ -3258,3 +3325,5 @@ tags:
     description: Administrative operations including reward payouts
   - name: Staking
     description: Staking operations (stake, unstake, claim rewards)
+  - name: Support
+    description: Public support/contact message intake
