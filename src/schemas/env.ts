@@ -60,6 +60,11 @@ export const envSchema = z.object({
   // Metrics (Prometheus)
   PROMETHEUS_PORT: z.coerce.number().default(9464),
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
+
+  // Full-payment incentive payout split (NGN)
+  FULL_PAYMENT_SPLIT_VERSION: z.string().default('v1'),
+  FULL_PAYMENT_PLATFORM_SHARE: z.coerce.number().min(0).max(1).default(0),
+  FULL_PAYMENT_REPORTER_SHARE: z.coerce.number().min(0).max(1).default(0),
 }).refine((data) => {
   // Accept either field name; prefer SOROBAN_USDC_TOKEN_ID if provided
   const tokenId = data.SOROBAN_USDC_TOKEN_ID || data.USDC_TOKEN_ADDRESS
@@ -149,6 +154,14 @@ export const envSchema = z.object({
   .refine((data) => data.CONVERSION_RATE_MIN < data.CONVERSION_RATE_MAX, {
     message: 'CONVERSION_RATE_MIN must be less than CONVERSION_RATE_MAX',
     path: ['CONVERSION_RATE_MAX'],
+  })
+  .refine((data) => {
+    const platform = data.FULL_PAYMENT_PLATFORM_SHARE
+    const reporter = data.FULL_PAYMENT_REPORTER_SHARE
+    return platform + reporter <= 1
+  }, {
+    message: 'FULL_PAYMENT_PLATFORM_SHARE + FULL_PAYMENT_REPORTER_SHARE must be <= 1',
+    path: ['FULL_PAYMENT_REPORTER_SHARE'],
   })
 
 export type Env = z.infer<typeof envSchema>
