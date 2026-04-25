@@ -437,6 +437,31 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /api/property-issue-reports:
+    post:
+      summary: Submit a property issue report
+      description: Accepts and stores an issue report from the property detail report dialog.
+      operationId: createPropertyIssueReport
+      tags:
+        - Risk
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePropertyIssueReportRequest"
+      responses:
+        "201":
+          description: Report accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatePropertyIssueReportResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        default:
+          $ref: "#/components/responses/Error"
+
   /soroban/config:
     get:
       summary: Get Soroban configuration
@@ -2439,6 +2464,38 @@ components:
           type: object
           additionalProperties:
             type: integer
+
+    CreatePropertyIssueReportRequest:
+      type: object
+      required:
+        - propertyId
+        - reportCategory
+        - reportDetails
+      properties:
+        propertyId:
+          type: string
+          minLength: 1
+        reportCategory:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Category selected in the dialog (frontend field name).
+        reportDetails:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Free-text details entered in the dialog (frontend field name).
+
+    CreatePropertyIssueReportResponse:
+      type: object
+      required: [success, reportId]
+      properties:
+        success:
+          type: boolean
+          example: true
+        reportId:
+          type: string
+          format: uuid
 
     BankAccountDetails:
       type: object

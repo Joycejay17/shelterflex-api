@@ -106,6 +106,7 @@ import { createSettlementAdminRouter } from "./routes/settlementAdmin.js";
 import { SettlementOutboxWorker } from "./settlement/worker.js";
 import { durableIdempotencyService } from "./services/durableIdempotencyService.js";
 import { createSupportRouter } from "./routes/support.js";
+import { createPropertyIssueReportsRouter } from "./routes/propertyIssueReports.js";
 import {
   PostgresTenantApplicationStore,
   initTenantApplicationStore,
@@ -409,6 +410,7 @@ export function createApp() {
   app.use("/api", createBalanceRouter(sorobanAdapter));
   app.use("/api", createReceiptsRouter(receiptRepo));
   app.use("/api/support", createSupportRouter());
+  app.use("/api/property-issue-reports", createPropertyIssueReportsRouter());
   app.use(
     "/api/wallet",
     createWalletRateLimiter(env),
