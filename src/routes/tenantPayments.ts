@@ -1,39 +1,33 @@
 /**
  * Tenant Payments Routes
- * Handles tenant payment schedules, history, and wallet operations
+ * Uses durable idempotency for quick-pay and wallet top-up initiation.
  */
 
-import { Router, Request, Response } from "express";
-import { authenticateToken } from "../middleware/auth.js";
+import { Router, type Response } from "express";
+import { z } from "zod";
+import { authenticateToken, type AuthenticatedRequest } from "../middleware/auth.js";
 import { AppError } from "../errors/AppError.js";
 import { ErrorCode } from "../errors/errorCodes.js";
 import { NgnWalletService } from "../services/ngnWalletService.js";
-import { z } from "zod";
+import { durableIdempotency } from "../middleware/durableIdempotency.js";
+import { validate } from "../middleware/validate.js";
+import { ngnTopupInitiateSchema, ngnTopupInitiateResponseSchema } from "../schemas/ngnTopup.js";
+import type { NgnTopupInitiateRequest } from "../schemas/ngnTopup.js";
+import { initiateNgnTopup } from "../services/ngnTopupInitiateService.js";
+import { generateId } from "../utils/tokens.js";
 
 const router = Router();
 const ngnWalletService = new NgnWalletService();
 
-/**
- * GET /api/tenant/payments/schedule
- * Get payment schedule for authenticated tenant
- *
- * @authenticated
- */
 router.get(
   "/schedule",
   authenticateToken,
-  async (req: Request, res: Response, next) => {
+  async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = req.user?.id;
       if (!userId) {
-        throw new AppError(
-          ErrorCode.UNAUTHORIZED,
-          401,
-          "User not authenticated",
-        );
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, "User not authenticated");
       }
-
-      // Return empty schedule for now - to be implemented with real deal data
       res.json({
         success: true,
         data: {
@@ -47,27 +41,14 @@ router.get(
   },
 );
 
-/**
- * GET /api/tenant/payments/history
- * Get payment history for authenticated tenant
- *
- * @authenticated
- */
 router.get(
   "/history",
   authenticateToken,
-  async (req: Request, res: Response, next) => {
+  async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      const userId = (req as any).user?.userId;
-      if (!userId) {
-        throw new AppError(
-          ErrorCode.UNAUTHORIZED,
-          401,
-          "User not authenticated",
-        );
+      if (!req.user?.id) {
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, "User not authenticated");
       }
-
-      // Return empty history for now
       res.json({
         success: true,
         data: {
@@ -80,28 +61,16 @@ router.get(
   },
 );
 
-/**
- * GET /api/tenant/payments/wallet
- * Get wallet balance for authenticated tenant
- *
- * @authenticated
- */
 router.get(
   "/wallet",
   authenticateToken,
-  async (req: Request, res: Response, next) => {
+  async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = req.user?.id;
       if (!userId) {
-        throw new AppError(
-          ErrorCode.UNAUTHORIZED,
-          401,
-          "User not authenticated",
-        );
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, "User not authenticated");
       }
-
       const balance = await ngnWalletService.getBalance(userId);
-
       res.json({
         success: true,
         data: {
@@ -119,12 +88,6 @@ router.get(
   },
 );
 
-/**
- * POST /api/tenant/payments/quick-pay
- * Initiate a quick payment from wallet or card
- *
- * @authenticated
- */
 const quickPaySchema = z.object({
   dealId: z.string().describe("Deal ID to pay for"),
   amount: z.number().positive().describe("Amount to pay in NGN"),
@@ -134,89 +97,82 @@ const quickPaySchema = z.object({
 router.post(
   "/quick-pay",
   authenticateToken,
-  async (req: Request, res: Response, next) => {
+  durableIdempotency((req) => `tenant:${(req as AuthenticatedRequest).user!.id}:quick-pay`),
+  async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = req.user?.id;
       if (!userId) {
-        throw new AppError(
-          ErrorCode.UNAUTHORIZED,
-          401,
-          "User not authenticated",
-        );
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, "User not authenticated");
       }
-
-      const validatedData = quickPaySchema.parse(req.body);
-
-      // Return pending status for now
+      const validated = quickPaySchema.parse(req.body);
+      const paymentId = generateId();
       res.json({
         success: true,
         data: {
-          paymentId: `PAY-${Date.now()}`,
-          status: "pending",
-          amount: validatedData.amount,
-          method: validatedData.paymentMethod,
+          paymentId,
+          status: "pending" as const,
+          amount: validated.amount,
+          method: validated.paymentMethod,
+          dealId: validated.dealId,
           message: "Payment initiated",
         },
       });
     } catch (error) {
       if (error instanceof Error && error.name === "ZodError") {
-        return next(
-          new AppError(ErrorCode.VALIDATION_ERROR, 400, error.message),
-        );
+        return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, error.message));
       }
       next(error);
     }
   },
 );
 
-/**
- * POST /api/tenant/payments/wallet/topup
- * Initiate wallet top-up
- *
- * @authenticated
- */
-const topUpSchema = z.object({
-  amount: z.number().positive().min(1000).describe("Amount to top up in NGN"),
-  paymentMethod: z
-    .enum(["card", "bank_transfer"])
-    .default("card")
-    .describe("Top-up method"),
-});
+const topUpBodySchema = z
+  .object({
+    amount: z.number().positive().min(1000).describe("Amount to top up in NGN"),
+    paymentMethod: z.enum(["card", "bank_transfer"]).default("card").describe("Top-up method"),
+  })
+  .transform(
+    (v): NgnTopupInitiateRequest => ({
+      amountNgn: v.amount,
+      rail: v.paymentMethod === "bank_transfer" ? "bank_transfer" : "paystack",
+    }),
+  );
 
 router.post(
   "/wallet/topup",
   authenticateToken,
-  async (req: Request, res: Response, next) => {
+  validate(topUpBodySchema, "body"),
+  durableIdempotency((req) => `tenant:${(req as AuthenticatedRequest).user!.id}:wallet-topup`),
+  async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = req.user?.id;
       if (!userId) {
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, "User not authenticated");
+      }
+      const body = req.body as NgnTopupInitiateRequest;
+      const idempotencyKeyRaw = req.header("x-idempotency-key");
+      const idempotencyKey =
+        typeof idempotencyKeyRaw === "string" && idempotencyKeyRaw.trim() !== ""
+          ? idempotencyKeyRaw.trim()
+          : null;
+      if (!idempotencyKey) {
         throw new AppError(
-          ErrorCode.UNAUTHORIZED,
-          401,
-          "User not authenticated",
+          ErrorCode.VALIDATION_ERROR,
+          400,
+          "Missing x-idempotency-key for top-up (required with durable idempotency)",
         );
       }
-
-      const validatedData = topUpSchema.parse(req.body);
-
-      // Return mock response for now - to be implemented with real NGN wallet integration
-      res.json({
-        success: true,
-        data: {
-          topUpId: `TOPUP-${Date.now()}`,
-          amount: validatedData.amount,
-          status: "pending",
-          reference: `REF-${Date.now()}`,
-          redirectUrl: null,
-          bankTransfer: null,
-          expiresAt: null,
-        },
+      const ngnBody = ngnTopupInitiateSchema.parse(body);
+      const { status, body: out } = await initiateNgnTopup({
+        userId,
+        body: ngnBody,
+        idempotencyKey,
+        requestId: req.requestId,
       });
+      res.status(status).json(ngnTopupInitiateResponseSchema.parse(out));
     } catch (error) {
-      if (error instanceof Error && error.name === "ZodError") {
-        return next(
-          new AppError(ErrorCode.VALIDATION_ERROR, 400, error.message),
-        );
+      if (error instanceof AppError) {
+        return res.status(error.status).json({ error: { code: error.code, message: error.message } });
       }
       next(error);
     }

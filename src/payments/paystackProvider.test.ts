@@ -258,6 +258,20 @@ describe('PaystackProvider', () => {
       expect(result.externalRef).toBe('ref-pay-001')
       expect(result.rawStatus).toBe('charge.success')
       expect(result.providerStatus).toBe('success')
+      expect(result.providerEventId).toMatch(/^[a-f0-9]{64}$/) // hash when root id omitted
+    })
+
+    it('uses root id as providerEventId when present', async () => {
+      const body = {
+        id: 99_000_000,
+        event: 'charge.success',
+        data: { reference: 'ref-pay-ida', status: 'success' },
+      }
+      const rawBody = JSON.stringify(body)
+      const sig = paystackHmac('webhook_secret', rawBody)
+      const req = makeReq({ 'x-paystack-signature': sig }, body, rawBody)
+      const result = await provider.parseAndValidateWebhook(req)
+      expect(result.providerEventId).toBe('99000000')
     })
 
     it('parses a valid charge.failed webhook', async () => {

@@ -12,6 +12,7 @@
  *   FLUTTERWAVE_SECRET      — shared with the signature validator in webhookSignature.ts
  */
 
+import { createHash } from 'node:crypto'
 import type { Request } from 'express'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
@@ -195,8 +196,10 @@ export class FlutterwaveProvider implements PaymentProvider {
     requireValidWebhookSignature(req, 'flutterwave')
 
     const body = req.body as {
+      id?: string | number
       event?: string
       data?: {
+        id?: string | number
         tx_ref?: string
         reference?: string
         status?: string
@@ -214,11 +217,19 @@ export class FlutterwaveProvider implements PaymentProvider {
       )
     }
 
+    const providerEventId =
+      body.data?.id != null
+        ? String(body.data.id)
+        : body.id != null
+          ? String(body.id)
+          : createHash('sha256').update(`${event}:${txRef}`).digest('hex')
+
     return {
       externalRefSource: 'flutterwave',
       externalRef: txRef,
       rawStatus: event,
       providerStatus: body.data?.status,
+      providerEventId,
     }
   }
 

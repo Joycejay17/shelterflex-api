@@ -11,6 +11,7 @@
  *   PAYSTACK_SECRET      — shared with the signature validator in webhookSignature.ts
  */
 
+import { createHash } from 'node:crypto'
 import type { Request } from 'express'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
@@ -188,6 +189,7 @@ export class PaystackProvider implements PaymentProvider {
     requireValidWebhookSignature(req, 'paystack')
 
     const body = req.body as {
+      id?: string | number
       event?: string
       data?: {
         reference?: string
@@ -207,12 +209,19 @@ export class PaystackProvider implements PaymentProvider {
       )
     }
 
+    // Paystack may include a root `id` for the webhook; otherwise hash event + reference
+    const providerEventId =
+      body.id != null
+        ? String(body.id)
+        : createHash('sha256').update(`${event}:${reference}`).digest('hex')
+
     // rawStatus is the event name; providerStatus carries the transaction status
     return {
       externalRefSource: 'paystack',
       externalRef: reference,
       rawStatus: event,
       providerStatus: body.data?.status,
+      providerEventId,
     }
   }
 

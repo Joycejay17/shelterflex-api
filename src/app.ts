@@ -101,6 +101,10 @@ import { createLandlordRouter } from "./routes/landlord.js";
 import { authenticateToken } from "./middleware/auth.js";
 import { createTenantApplicationsRouter } from "./routes/tenantApplications.js";
 import { createTenantPaymentsRouter } from "./routes/tenantPayments.js";
+import { createNotificationsRouter } from "./routes/notifications.js";
+import { createSettlementAdminRouter } from "./routes/settlementAdmin.js";
+import { SettlementOutboxWorker } from "./settlement/worker.js";
+import { durableIdempotencyService } from "./services/durableIdempotencyService.js";
 import {
   PostgresTenantApplicationStore,
   initTenantApplicationStore,
@@ -257,6 +261,31 @@ export function createApp() {
   if (env.NODE_ENV !== "test") {
     jobScheduler.start();
     workers.push(jobScheduler);
+  }
+
+  const settlementOutboxWorker = new SettlementOutboxWorker();
+  if (env.NODE_ENV !== "test") {
+    settlementOutboxWorker.start(
+      parseInt(process.env.SETTLEMENT_OUTBOX_POLL_MS ?? "4000", 10),
+    );
+    workers.push({ stop: () => settlementOutboxWorker.stop() });
+  }
+
+  let idemReaper: ReturnType<typeof setInterval> | null = null;
+  if (env.NODE_ENV !== "test") {
+    const ms = parseInt(process.env.IDEMPOTENCY_RECONCILE_MS ?? "300000", 10);
+    idemReaper = setInterval(() => {
+      void durableIdempotencyService.reconcileStale();
+    }, ms);
+    if (idemReaper.unref) idemReaper.unref();
+    workers.push({
+      stop: async () => {
+        if (idemReaper) {
+          clearInterval(idemReaper);
+          idemReaper = null;
+        }
+      },
+    });
   }
 
   // Tenant Application Store — swap to Postgres when DATABASE_URL is set
@@ -424,6 +453,8 @@ export function createApp() {
   app.use("/api/landlord", authenticateToken, createLandlordRouter());
   app.use("/api/tenant/applications", createTenantApplicationsRouter());
   app.use("/api/tenant/payments", createTenantPaymentsRouter());
+  app.use("/api/notifications", createNotificationsRouter());
+  app.use("/api/admin", createSettlementAdminRouter());
   app.use("/api", migrationGuideRouter);
 
   // Interactive API documentation

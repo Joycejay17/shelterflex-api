@@ -15,7 +15,10 @@ import { RewardStatus } from './reward.js'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const migrationPath = path.resolve(__dirname, '../../migrations/006_deal_listing_reward_store.sql')
+const migrationPaths = [
+  path.resolve(__dirname, '../../migrations/006_deal_listing_reward_store.sql'),
+  path.resolve(__dirname, '../../migrations/014_settlement_outbox.sql'),
+]
 
 function loadMigrations(sql: string) {
   const db = newDb({ autoCreateForeignKeyIndices: true })
@@ -91,7 +94,7 @@ describe('Postgres-backed stores', () => {
     process.env.NODE_ENV = 'test'
     process.env.DATABASE_URL = 'pg-mem://test'
 
-    const sql = readFileSync(migrationPath, 'utf8')
+    const sql = migrationPaths.map((p) => readFileSync(p, 'utf8')).join('\n')
     const db = loadMigrations(sql)
     const { Pool } = db.adapters.createPg()
     pool = new Pool()
