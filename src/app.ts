@@ -24,6 +24,8 @@ import { createPaymentsRouter } from "./routes/payments.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createDealsRouter } from "./routes/deals.js";
 import { createWhistleblowerRouter } from "./routes/whistleblower.js";
+import { createWhistleblowerApplicationsRouter } from "./routes/whistleblowerApplications.js";
+import { createAdminWhistleblowerApplicationsRouter } from "./routes/adminWhistleblowerApplications.js";
 import { createStakingRouter } from "./routes/staking.js";
 import { createWebhooksRouter } from "./routes/webhooks.js";
 import { createDepositsRouter } from "./routes/deposits.js";
@@ -439,6 +441,8 @@ export function createApp() {
   app.use("/api/admin", createAdminAuditRouter());
   app.use("/api/deals", createDealsRouter());
   app.use("/api/whistleblower", createWhistleblowerRouter(earningsService));
+  app.use("/api/whistleblower-applications", createWhistleblowerApplicationsRouter());
+  app.use("/api/admin/whistleblower-applications", createAdminWhistleblowerApplicationsRouter());
   app.use(
     "/api/staking",
     createStakingRouter(
