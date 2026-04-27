@@ -61,6 +61,18 @@ export type AuditEventType =
   | 'RISK_TIER_CHANGED'
   | 'ADMIN_RISK_FREEZE'
   | 'ADMIN_RISK_UNFREEZE'
+  // KYC
+  | 'KYC_SUBMITTED'
+  | 'KYC_APPROVED'
+  | 'KYC_REJECTED'
+  // Disputes
+  | 'DISPUTE_CREATED'
+  | 'DISPUTE_RESOLVED'
+  // State-changing operations (auto-generated)
+  | 'STATE_CHANGED'
+  | 'STATE_DELETED'
+  // Admin operations (auto-generated)
+  | 'ADMIN_OPERATION'
 
 /**
  * Valid actor types
