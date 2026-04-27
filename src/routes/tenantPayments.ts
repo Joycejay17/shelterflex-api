@@ -139,45 +139,97 @@ const topUpBodySchema = z
   );
 
 router.post(
-  "/wallet/topup",
+  '/wallet/topup',
   authenticateToken,
-  validate(topUpBodySchema, "body"),
+  validate(topUpBodySchema, 'body'),
   durableIdempotency((req) => `tenant:${(req as AuthenticatedRequest).user!.id}:wallet-topup`),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.id
       if (!userId) {
-        throw new AppError(ErrorCode.UNAUTHORIZED, 401, "User not authenticated");
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'User not authenticated')
       }
-      const body = req.body as NgnTopupInitiateRequest;
-      const idempotencyKeyRaw = req.header("x-idempotency-key");
+      const body = req.body as NgnTopupInitiateRequest
+      const idempotencyKeyRaw = req.header('x-idempotency-key')
       const idempotencyKey =
-        typeof idempotencyKeyRaw === "string" && idempotencyKeyRaw.trim() !== ""
+        typeof idempotencyKeyRaw === 'string' && idempotencyKeyRaw.trim() !== ''
           ? idempotencyKeyRaw.trim()
-          : null;
+          : null
       if (!idempotencyKey) {
         throw new AppError(
           ErrorCode.VALIDATION_ERROR,
           400,
-          "Missing x-idempotency-key for top-up (required with durable idempotency)",
-        );
+          'Missing x-idempotency-key for top-up (required with durable idempotency)',
+        )
       }
-      const ngnBody = ngnTopupInitiateSchema.parse(body);
+      const ngnBody = ngnTopupInitiateSchema.parse(body)
       const { status, body: out } = await initiateNgnTopup({
         userId,
         body: ngnBody,
         idempotencyKey,
         requestId: req.requestId,
-      });
-      res.status(status).json(ngnTopupInitiateResponseSchema.parse(out));
+      })
+      res.status(status).json(ngnTopupInitiateResponseSchema.parse(out))
     } catch (error) {
       if (error instanceof AppError) {
-        return res.status(error.status).json({ error: { code: error.code, message: error.message } });
+        return res.status(error.status).json({ error: { code: error.code, message: error.message } })
       }
-      next(error);
+      next(error)
     }
   },
-);
+)
+
+router.get(
+  '/disputes',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response, next) => {
+    try {
+      const userId = req.user?.id
+      if (!userId) {
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'User not authenticated')
+      }
+
+      const { paymentDisputeRepository } = await import('../repositories/PaymentDisputeRepository.js')
+      const disputes = await paymentDisputeRepository.findByUserId(userId)
+
+      res.json({
+        success: true,
+        data: { disputes },
+      })
+    } catch (error) {
+      next(error)
+    }
+  },
+)
+
+router.post(
+  '/disputes',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response, next) => {
+    try {
+      const userId = req.user?.id
+      if (!userId) {
+        throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'User not authenticated')
+      }
+
+      const { paymentDisputeCreateSchema } = await import('../schemas/paymentDispute.js')
+      const parsed = paymentDisputeCreateSchema.safeParse(req.body)
+      if (!parsed.success) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Invalid dispute data')
+      }
+
+      const { paymentDisputeRepository } = await import('../repositories/PaymentDisputeRepository.js')
+      const dispute = await paymentDisputeRepository.create(userId, parsed.data)
+
+      res.status(201).json({
+        success: true,
+        data: { dispute },
+      })
+    } catch (error) {
+      next(error)
+    }
+  },
+)
 
 export function createTenantPaymentsRouter(): Router {
   return router;
