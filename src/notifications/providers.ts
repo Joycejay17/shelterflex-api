@@ -9,17 +9,26 @@ import { NotificationChannel } from './types.js'
  */
 export class EmailNotificationProvider implements NotificationProvider {
   channel = NotificationChannel.EMAIL
-  private resend: Resend
+  private resend: Resend | null = null
   private readonly providerName = 'resend'
 
   constructor() {
-    if (!env.RESEND_API_KEY) {
-      throw new Error('RESEND_API_KEY is not configured')
+    if (env.RESEND_API_KEY) {
+      this.resend = new Resend(env.RESEND_API_KEY)
+    } else {
+      logger.warn('[Notification] RESEND_API_KEY not configured, email provider disabled')
     }
-    this.resend = new Resend(env.RESEND_API_KEY)
   }
 
   async send(payload: NotificationJobPayload): Promise<void> {
+    if (!this.resend) {
+      logger.warn('[Notification] Email provider not configured, skipping send', {
+        recipient: payload.recipient,
+        subject: payload.subject,
+      })
+      return
+    }
+
     const fromEmail = env.RESEND_FROM_EMAIL
     if (!fromEmail) {
       throw new Error('RESEND_FROM_EMAIL is not configured')
