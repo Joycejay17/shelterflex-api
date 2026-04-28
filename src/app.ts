@@ -8,11 +8,7 @@ import { createLogger } from "./middleware/logger.js";
 import { logger } from "./utils/logger.js";
 import { apiVersioning } from "./middleware/apiVersioning.js";
 import { createHealthRouter } from "./routes/health.js";
-import {
-  createPublicRateLimiter,
-  createAuthRateLimiter,
-  createWalletRateLimiter,
-} from "./middleware/rateLimit.js";
+import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js";
 import publicRouter from "./routes/publicRoutes.js";
 import { AppError } from "./errors/AppError.js";
 import { ErrorCode } from "./errors/errorCodes.js";
@@ -133,7 +129,6 @@ import {
   sanitizeRequest,
   detectMaliciousPatterns,
 } from "./middleware/sanitization.js";
-import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js";
 import { createDocsRouter } from "./routes/docs.js";
 
 export function createApp() {
@@ -431,8 +426,11 @@ export function createApp() {
 
   // Routes
   app.use("/health", createHealthRouter(sorobanAdapter));
-  app.use("/api/auth", createAuthRateLimiter(env), authRouter);
-  app.use(createPublicRateLimiter(env));
+
+  // Global API Rate Limiting
+  app.use("/api", createComprehensiveRateLimiter());
+
+  app.use("/api/auth", authRouter);
 
   // API versioning — applied to all /api routes after rate limiting
   app.use("/api", apiVersioning);
@@ -444,7 +442,6 @@ export function createApp() {
   app.use("/api/property-issue-reports", createPropertyIssueReportsRouter());
   app.use(
     "/api/wallet",
-    createWalletRateLimiter(env),
     createWalletRouter(walletService),
   );
   app.use("/api/wallet/ngn", createNgnWalletRouter(ngnWalletService));
