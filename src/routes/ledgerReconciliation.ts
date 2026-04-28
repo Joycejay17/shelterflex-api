@@ -65,7 +65,7 @@ export function createLedgerReconciliationRouter() {
     validate(mismatchQuerySchema, 'query'),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        const q = req.query as z.infer<typeof mismatchQuerySchema>
+        const q = req.query as unknown as z.infer<typeof mismatchQuerySchema>
         const mismatches = await listMismatches({
           status: q.status as MismatchStatus | undefined,
           mismatchClass: q.mismatch_class as MismatchClass | undefined,
