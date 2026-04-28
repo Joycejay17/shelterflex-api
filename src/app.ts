@@ -270,11 +270,6 @@ export function createApp() {
   if (env.NODE_ENV !== 'test') {
     jobScheduler.start()
     workers.push(jobScheduler)
-    parseInt(process.env.JOB_SCHEDULER_POLL_MS ?? "5000", 10),
-  );
-  if (env.NODE_ENV !== "test") {
-    jobScheduler.start();
-    workers.push(jobScheduler);
   }
 
   const settlementOutboxWorker = new SettlementOutboxWorker();
