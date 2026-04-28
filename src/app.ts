@@ -62,6 +62,7 @@ import { setDbPoolMetricsCallback, setSorobanCircuitBreakerCallback, shutdownMet
 import { metricsMiddleware } from './middleware/metricsMiddleware.js';
 import { JobScheduler, initJobStore, PostgresJobStore } from "./jobs/scheduler/index.js"
 import { createAdminJobsRouter } from "./routes/adminJobs.js"
+import { getNotificationService } from "./notifications/index.js"
 
 import { sanitizeRequest, detectMaliciousPatterns } from "./middleware/sanitization.js"
 import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js"
@@ -195,6 +196,13 @@ export function createApp() {
   const jobScheduler = new JobScheduler(
     parseInt(process.env.JOB_SCHEDULER_POLL_MS ?? '5000', 10),
   )
+  
+  // Register notification job handler
+  const notificationService = getNotificationService()
+  jobScheduler.registerHandler('notification.send', async (job) => {
+    await notificationService.send(job.payload as any)
+  })
+  
   if (env.NODE_ENV !== 'test') {
     jobScheduler.start()
     workers.push(jobScheduler)
