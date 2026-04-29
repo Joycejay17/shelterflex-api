@@ -110,6 +110,7 @@ import { createApartmentReviewsRouter } from "./routes/apartmentReviews.js";
 import { createComplianceReportRouter } from "./routes/complianceReport.js";
 import { createTenantCreditScoringRouter } from "./routes/tenantCreditScoring.js";
 import { createTenantDocumentVaultRouter } from "./routes/tenantDocumentVault.js";
+import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSchedule.js";
 import { createDocsRouter } from "./routes/docs.js";
 import { initializeCacheInvalidationWebhooks } from "./services/cacheInvalidation.js";
 
@@ -533,6 +534,7 @@ export function createApp() {
   app.use("/api/compliance/reports", createComplianceReportRouter());
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
+  app.use("/api/landlord/payout-schedule", createLandlordPayoutScheduleRouter());
   app.use("/api", migrationGuideRouter);
 
   // Interactive API documentation

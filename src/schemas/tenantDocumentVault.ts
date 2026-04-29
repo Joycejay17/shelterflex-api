@@ -41,7 +41,7 @@ export const createDocumentSchema = z.object({
 
 export const updateDocumentSchema = z.object({
   category: documentCategorySchema.optional(),
-  tags: z.array(z.string().min(1).max(50)).min(0).max(10)).optional(),
+  tags: z.array(z.string().min(1).max(50)).min(0).max(10).optional(),
   expiresAt: z.string().datetime().nullable().optional(),
   description: z.string().max(500).nullable().optional(),
 })
