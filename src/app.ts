@@ -109,6 +109,8 @@ import { createPartnerLandlordApplicationsRouter } from "./routes/partnerLandlor
 import { createApartmentReviewsRouter } from "./routes/apartmentReviews.js";
 import { createComplianceReportRouter } from "./routes/complianceReport.js";
 import { createTenantCreditScoringRouter } from "./routes/tenantCreditScoring.js";
+import { createTenantDocumentVaultRouter } from "./routes/tenantDocumentVault.js";
+import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSchedule.js";
 import { createDocsRouter } from "./routes/docs.js";
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
 import { createAdminFraudRouter } from "./routes/adminFraud.js";
@@ -539,6 +541,8 @@ export function createApp() {
   app.use("/api/apartment-reviews", createApartmentReviewsRouter());
   app.use("/api/compliance/reports", createComplianceReportRouter());
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
+  app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
+  app.use("/api/landlord/payout-schedule", createLandlordPayoutScheduleRouter());
   app.use("/api", migrationGuideRouter);
 
   // Interactive API documentation
