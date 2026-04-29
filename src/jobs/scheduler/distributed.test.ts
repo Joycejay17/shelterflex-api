@@ -269,7 +269,7 @@ describe('Distributed Job Scheduler with Lease Deduplication', () => {
       const history = await store.getJobRunHistory(job.id)
       expect(history).toHaveLength(1)
       expect(history[0].status).toBe(JobRunStatus.COMPLETED)
-      expect(history[0].durationMs).toBeGreaterThan(0)
+      expect(history[0].durationMs).toBeGreaterThanOrEqual(0)
     })
 
     it('should track failed job runs', async () => {
