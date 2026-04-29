@@ -6,11 +6,21 @@ import { env } from "./schemas/env.js"
 import { createRequire } from "node:module"
 import { getUsdcTokenAddress } from "./utils/token.js"
 import { runMigrationsIfNeeded } from "./migrations/runMigrations.js"
+import { startBackupJob } from "./jobs/backupJob.js"
+import { ReconciliationWorker } from "./reconciliation/index.js"
 
 const require = createRequire(import.meta.url)
 const { version } = require("../package.json") as { version: string }
 
 // Validate environment before starting the server
+if (!process.env.WEBHOOK_KEY) {
+  throw new Error("Missing WEBHOOK_KEY");
+}
+
+if (env.NODE_ENV === "production" && !process.env.SECURE_CONFIG) {
+  process.exit(1);
+}
+
 if (env.NODE_ENV === 'production') {
   try {
     getUsdcTokenAddress()
@@ -25,8 +35,11 @@ if (env.NODE_ENV === 'production') {
 async function main() {
   try {
     await runMigrationsIfNeeded()
+    startBackupJob()
     const app = createApp()
     maybeStartOutboxWorker()
+    const reconciliationWorker = new ReconciliationWorker()
+    reconciliationWorker.start()
     app.listen(env.PORT, () => {
       console.log(`[backend] listening on http://localhost:${env.PORT}`)
     })
@@ -37,3 +50,4 @@ async function main() {
 }
 
 void main()
+

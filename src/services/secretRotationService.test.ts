@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+// Note: '.js' extension is required for ESM resolution in this project (type: "module").
+// This matches the import style used in all other backend test files.
 import { SecretRotationService } from './secretRotationService.js';
 
 // Mock the logger
@@ -220,6 +222,42 @@ describe('SecretRotationService', () => {
       expect(service.getSecret('hot_reload_secret')).toBe('updated-value');
 
       delete process.env.HOT_RELOAD_SECRET;
+    });
+  });
+
+  describe('automated rotation schedule', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should automatically rotate secret after interval', async () => {
+      process.env.AUTO_SECRET = 'initial';
+      let count = 1;
+      service.registerSecret({
+        name: 'auto_secret',
+        envVar: 'AUTO_SECRET',
+        required: true,
+        rotationIntervalMs: 100,
+        generator: () => `auto-value-${count++}`,
+      });
+
+      expect(service.getSecret('auto_secret')).toBe('initial');
+
+      // Advance time
+      await vi.advanceTimersByTimeAsync(150);
+
+      expect(service.getSecret('auto_secret')).toBe('auto-value-1');
+
+      // Advance time again
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(service.getSecret('auto_secret')).toBe('auto-value-2');
+
+      delete process.env.AUTO_SECRET;
     });
   });
 });
