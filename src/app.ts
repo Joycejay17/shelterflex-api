@@ -110,6 +110,8 @@ import { createApartmentReviewsRouter } from "./routes/apartmentReviews.js";
 import { createComplianceReportRouter } from "./routes/complianceReport.js";
 import { createTenantCreditScoringRouter } from "./routes/tenantCreditScoring.js";
 import { createDocsRouter } from "./routes/docs.js";
+import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
+import { createAdminFraudRouter } from "./routes/adminFraud.js";
 
 export function createApp() {
   const app = express();
@@ -255,6 +257,11 @@ export function createApp() {
   const jobScheduler = new JobScheduler(
     parseInt(process.env.JOB_SCHEDULER_POLL_MS ?? '5000', 10),
   )
+
+  // Fraud Detection Store — swap to Postgres when DATABASE_URL is set
+  if (process.env.DATABASE_URL) {
+    initFraudStore(new PostgresFraudStore());
+  }
 
   // Register notification job handler
   const notificationService = getNotificationService()
@@ -487,6 +494,7 @@ export function createApp() {
   app.use("/api/admin/sessions", createAdminSessionsRouter());
   app.use("/api/admin/secrets", createSecretRotationRouter());
   app.use("/api/admin/jobs", createAdminJobsRouter());
+  app.use("/api/admin/fraud", createAdminFraudRouter());
   app.use("/api/admin", createAdminAuditRouter());
   app.use("/api/deals", createDealsRouter());
   app.use("/api/whistleblower", createWhistleblowerRouter(earningsService));
