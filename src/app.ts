@@ -89,6 +89,7 @@ import { createAdminSessionsRouter } from "./routes/adminSessions.js";
 import { durableIdempotencyService } from "./services/durableIdempotencyService.js";
 import { createSupportRouter } from "./routes/support.js";
 import { createPropertyIssueReportsRouter } from "./routes/propertyIssueReports.js";
+import { createPropertyPhotosRouter } from "./routes/propertyPhotos.js";
 import {
   PostgresTenantApplicationStore,
   initTenantApplicationStore,
@@ -524,6 +525,7 @@ export function createApp() {
   app.use("/api/webhooks", createWebhooksRouter(ngnWalletService));
   app.use("/api/deposits", createDepositsRouter(conversionService));
   app.use("/api/gas-metrics", createGasMetricsRouter());
+  app.use("/api", createPropertyPhotosRouter());
   app.use("/api/landlord/properties", createLandlordPropertiesRouter());
   app.use(
     "/api/landlord/partner-applications",
