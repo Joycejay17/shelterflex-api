@@ -83,8 +83,8 @@ export class PostgresUnderwritingDecisionTraceStore implements UnderwritingDecis
     const result = await pool.query(
       `INSERT INTO underwriting_decision_traces (
         application_id, user_id, decision, total_score, max_score,
-        triggered_rules, decision_reason, rule_config_version, evaluated_at, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+        triggered_rules, decision_reason, rule_config_version, ai_risk_score, evaluated_at, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
       RETURNING *`,
       [
         input.applicationId,
@@ -95,6 +95,7 @@ export class PostgresUnderwritingDecisionTraceStore implements UnderwritingDecis
         JSON.stringify(input.triggeredRules),
         input.decisionReason,
         input.ruleConfigVersion,
+        input.aiRiskScore ? JSON.stringify(input.aiRiskScore) : null,
         input.evaluatedAt,
       ],
     )
@@ -183,6 +184,7 @@ export class PostgresUnderwritingDecisionTraceStore implements UnderwritingDecis
       triggeredRules: row.triggered_rules,
       decisionReason: row.decision_reason,
       ruleConfigVersion: row.rule_config_version,
+      aiRiskScore: row.ai_risk_score ?? undefined,
       evaluatedAt: row.evaluated_at.toISOString(),
       createdAt: row.created_at.toISOString(),
     }
