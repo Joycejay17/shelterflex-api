@@ -6,6 +6,7 @@ import { env } from "./schemas/env.js"
 import { createRequire } from "node:module"
 import { getUsdcTokenAddress } from "./utils/token.js"
 import { runMigrationsIfNeeded } from "./migrations/runMigrations.js"
+import { validateCreditScoringConfig } from "./config/creditScoring.js"
 import { startBackupJob } from "./jobs/backupJob.js"
 import { ReconciliationWorker } from "./reconciliation/index.js"
 
@@ -34,6 +35,7 @@ if (env.NODE_ENV === 'production') {
 
 async function main() {
   try {
+    validateCreditScoringConfig()
     await runMigrationsIfNeeded()
     startBackupJob()
     const app = createApp()

@@ -114,6 +114,8 @@ import { createPartnerLandlordApplicationsRouter } from "./routes/partnerLandlor
 import { createApartmentReviewsRouter } from "./routes/apartmentReviews.js";
 import { createComplianceReportRouter } from "./routes/complianceReport.js";
 import { createTenantCreditScoringRouter } from "./routes/tenantCreditScoring.js";
+import { createTenantOnboardingRouter } from "./routes/tenantOnboarding.js";
+import { createAdminTenantCreditScoreRouter } from "./routes/adminTenantCreditScore.js";
 import { createTenantDocumentVaultRouter } from "./routes/tenantDocumentVault.js";
 import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSchedule.js";
 import { createDocsRouter } from "./routes/docs.js";
@@ -514,6 +516,7 @@ export function createApp() {
   app.use("/api/whistleblower-applications", createWhistleblowerApplicationsRouter());
   app.use("/api/admin/whistleblower-applications", createAdminWhistleblowerApplicationsRouter());
   app.use("/api/admin/underwriting", createAdminUnderwritingRouter());
+  app.use("/api/admin", createAdminTenantCreditScoreRouter());
   app.use("/api/admin", createSettlementAdminRouter());
   app.use(
     "/api/staking",
@@ -548,6 +551,7 @@ export function createApp() {
   app.use("/api/apartment-reviews", createApartmentReviewsRouter());
   app.use("/api/compliance/reports", createComplianceReportRouter());
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
+  app.use("/api/tenant/onboarding", createTenantOnboardingRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
   app.use("/api/tenant-rating-card", createTenantRatingCardRouter());
   app.use("/api/quote", createQuoteRouter());
