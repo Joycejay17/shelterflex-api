@@ -14,7 +14,6 @@ import { createOtpDeliveryProvider } from '../services/otpDeliveryFactory.js'
 import { detectCredentialStuffing } from '../services/abuseDetectionService.js'
 import {
   auditAuthOtpRequested,
-
   auditAuthLoginSuccess,
   auditAuthLoginFailed,
   auditAuthLogout,
@@ -23,6 +22,7 @@ import {
   auditAuthWalletLoginSuccess,
   auditAuthWalletLoginFailed,
 } from '../utils/auditLogger.js'
+import { sanitiseForClient } from '../utils/sanitiseForClient.js'
 
 const router = Router()
 
@@ -117,7 +117,7 @@ router.post(
 
       auditAuthLoginSuccess(req, { userId: user.id, email: user.email })
 
-      res.json({ token, user })
+      res.json({ token, user: sanitiseForClient({ ...user }) })
     } catch (error) {
       next(error)
     }
@@ -152,7 +152,7 @@ router.post('/logout-all', authenticateToken, (req: AuthenticatedRequest, res: R
  * GET /api/auth/me
  */
 router.get('/me', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
-  res.json({ user: req.user })
+  res.json({ user: sanitiseForClient({ ...req.user! }) })
 })
 
 /**
@@ -262,7 +262,7 @@ router.post(
 
       auditAuthWalletLoginSuccess(req, { address: normalizedAddress, userId: user.id })
 
-      res.json({ token, user })
+      res.json({ token, user: sanitiseForClient({ ...user }) })
     } catch (error) {
       next(error)
     }

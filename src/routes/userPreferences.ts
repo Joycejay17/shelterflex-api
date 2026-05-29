@@ -5,6 +5,7 @@ import { validate } from '../middleware/validate.js'
 import { userStore } from '../models/authStore.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
+import { sanitiseForClient } from '../utils/sanitiseForClient.js'
 
 const updatePreferencesSchema = z.object({
   displayCurrency: z.enum(['NGN', 'USDC']),
@@ -34,13 +35,13 @@ export function createUserPreferencesRouter(): Router {
 
         res.json({
           displayCurrency: updated.displayCurrency,
-          user: {
+          user: sanitiseForClient({
             id: updated.id,
             email: updated.email,
             name: updated.name,
             role: updated.role,
             displayCurrency: updated.displayCurrency,
-          },
+          }),
         })
       } catch (error) {
         next(error)

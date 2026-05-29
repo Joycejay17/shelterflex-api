@@ -5,6 +5,9 @@ import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { logger } from '../utils/logger.js'
 import {
+  encryptPersonalInfoFields,
+} from '../utils/piiEncryption.js'
+import {
   onboardingDraftSchema,
   ONBOARDING_STEPS,
   type OnboardingStep,
@@ -57,6 +60,9 @@ export function createOnboardingRouter(): Router {
       }
 
       const { personalInfo, employmentInfo, documents, walletInfo } = parsed.data
+      const storedPersonalInfo = personalInfo
+        ? encryptPersonalInfoFields(personalInfo as Record<string, unknown>)
+        : null
 
       const pool = await getPool()
       if (!pool) throw new AppError(ErrorCode.INTERNAL_ERROR, 500, 'Database not available')
@@ -92,7 +98,7 @@ export function createOnboardingRouter(): Router {
          RETURNING *`,
         [
           userId,
-          personalInfo ? JSON.stringify(personalInfo) : null,
+          storedPersonalInfo ? JSON.stringify(storedPersonalInfo) : null,
           employmentInfo ? JSON.stringify(employmentInfo) : null,
           documents ? JSON.stringify(documents) : null,
           walletInfo !== undefined ? JSON.stringify(walletInfo) : null,
