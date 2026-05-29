@@ -97,6 +97,11 @@ export const stakingPositionSchema = z.object({
   warming: z.string().optional(),
   cooling: z.string().optional(),
   lockExpiry: z.string().optional(),
+  stakedAmountNgn: z.string().optional(),
+  stakedAmountUsdc: z.string().optional(),
+  claimableAmountNgn: z.string().optional(),
+  claimableAmountUsdc: z.string().optional(),
+  rateUsed: z.number().optional(),
 })
 
 

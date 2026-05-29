@@ -5,9 +5,11 @@
 
 import { UnderwritingRuleEngine, UnderwritingContext, UnderwritingResult, UnderwritingDecision, DEFAULT_RULE_CONFIG } from './underwritingRuleEngine.js'
 import { tenantApplicationStore } from '../models/tenantApplicationStore.js'
-import { TenantApplication } from '../models/tenantApplication.js'
 import { userRiskStateStore } from '../models/userRiskStateStore.js'
 import { underwritingDecisionTraceStore } from '../models/underwritingDecisionTraceStore.js'
+import { tenantCreditScoringService, TenantCreditScoringService } from './tenantCreditScoringService.js'
+import { decisionFromCreditBand } from '../models/tenantCreditScore.js'
+import type { TenantCreditScore } from '../models/tenantCreditScore.js'
 
 export interface UnderwritingEvaluationInput {
   applicationId: string
@@ -24,6 +26,8 @@ export interface UnderwritingEvaluationOutput {
   userId: string
   decision: UnderwritingDecision
   result: UnderwritingResult
+  creditScore?: TenantCreditScore
+  creditBandDecision?: string
   evaluatedAt: string
 }
 
@@ -31,11 +35,27 @@ export interface UnderwritingEvaluationOutput {
  * Underwriting Service
  * Evaluates tenant applications using the rule engine
  */
+function creditBandToUnderwritingDecision(bandDecision: ReturnType<typeof decisionFromCreditBand>): UnderwritingDecision {
+  if (bandDecision === 'approve') return 'APPROVE'
+  if (bandDecision === 'manual_review') return 'REVIEW'
+  return 'REJECT'
+}
+
+function mergeUnderwritingDecisions(
+  credit: UnderwritingDecision,
+  rules: UnderwritingDecision,
+): UnderwritingDecision {
+  const rank: Record<UnderwritingDecision, number> = { REJECT: 3, REVIEW: 2, APPROVE: 1 }
+  return rank[credit] >= rank[rules] ? credit : rules
+}
+
 export class UnderwritingService {
   private ruleEngine: UnderwritingRuleEngine
+  private creditScoring: TenantCreditScoringService
 
-  constructor(ruleEngine?: UnderwritingRuleEngine) {
+  constructor(ruleEngine?: UnderwritingRuleEngine, creditScoring?: TenantCreditScoringService) {
     this.ruleEngine = ruleEngine || new UnderwritingRuleEngine(DEFAULT_RULE_CONFIG)
+    this.creditScoring = creditScoring || tenantCreditScoringService
   }
 
   /**
@@ -71,18 +91,36 @@ export class UnderwritingService {
       metadata: input.metadata,
     }
 
-    // Evaluate using rule engine
+    // Credit scoring pipeline (onboarding verification data required)
+    let creditScore: TenantCreditScore | undefined
+    let creditDecision: UnderwritingDecision | undefined
+    try {
+      creditScore = this.creditScoring.computeCompositeScore(application.userId)
+      creditDecision = creditBandToUnderwritingDecision(decisionFromCreditBand(creditScore.band))
+    } catch {
+      // No onboarding data yet — rule engine only
+    }
+
     const result = this.ruleEngine.evaluate(context)
 
-    // Store decision trace for audit
+    const finalDecision =
+      creditDecision !== undefined
+        ? mergeUnderwritingDecisions(creditDecision, result.decision)
+        : result.decision
+
+    const decisionReason =
+      creditScore !== undefined
+        ? `${result.decisionReason}; credit band ${creditScore.band} (${creditScore.score}/1000) → ${creditDecision}, final ${finalDecision}`
+        : result.decisionReason
+
     await underwritingDecisionTraceStore.create({
       applicationId: application.applicationId,
       userId: application.userId,
-      decision: result.decision,
+      decision: finalDecision,
       totalScore: result.totalScore,
       maxScore: result.maxScore,
       triggeredRules: result.triggeredRules,
-      decisionReason: result.decisionReason,
+      decisionReason,
       ruleConfigVersion: this.ruleEngine.getConfig().version,
       evaluatedAt: result.evaluatedAt,
     })
@@ -90,8 +128,10 @@ export class UnderwritingService {
     return {
       applicationId: application.applicationId,
       userId: application.userId,
-      decision: result.decision,
-      result,
+      decision: finalDecision,
+      result: { ...result, decision: finalDecision, decisionReason },
+      creditScore,
+      creditBandDecision: creditScore ? decisionFromCreditBand(creditScore.band) : undefined,
       evaluatedAt: result.evaluatedAt,
     }
   }

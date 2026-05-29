@@ -1,5 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { EarningsServiceImpl, RewardRecord, RewardsDataLayer } from "./earnings.js";
+import type { ConversionRateService } from "./conversionRateService.js";
+
+function mockRateService(rate = 1600): ConversionRateService {
+  return {
+    getRate: vi.fn().mockResolvedValue({
+      rate,
+      source: "stub",
+      fetchedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 300_000).toISOString(),
+    }),
+    clearCache: vi.fn(),
+  } as unknown as ConversionRateService;
+}
 
 function createReward(partial: Partial<RewardRecord>): RewardRecord {
   return {
@@ -41,7 +54,7 @@ describe("EarningsServiceImpl", () => {
       whistleblowerExists: vi.fn().mockResolvedValue(true),
       getRewardsByWhistleblower: vi.fn().mockResolvedValue(rewards),
     };
-    const service = new EarningsServiceImpl(dataLayer, { usdcToNgnRate: 1600 });
+    const service = new EarningsServiceImpl(dataLayer, mockRateService(1600));
 
     const result = await service.getEarnings("wb-1");
 
@@ -61,7 +74,7 @@ describe("EarningsServiceImpl", () => {
       whistleblowerExists: vi.fn().mockResolvedValue(true),
       getRewardsByWhistleblower: vi.fn().mockResolvedValue([]),
     };
-    const service = new EarningsServiceImpl(dataLayer, { usdcToNgnRate: 1600 });
+    const service = new EarningsServiceImpl(dataLayer, mockRateService(1600));
 
     const result = await service.getEarnings("wb-empty");
 
@@ -81,7 +94,7 @@ describe("EarningsServiceImpl", () => {
       whistleblowerExists: vi.fn().mockResolvedValue(false),
       getRewardsByWhistleblower: vi.fn(),
     };
-    const service = new EarningsServiceImpl(dataLayer, { usdcToNgnRate: 1600 });
+    const service = new EarningsServiceImpl(dataLayer, mockRateService(1600));
 
     await expect(service.getEarnings("wb-missing")).rejects.toMatchObject({
       name: "AppError",

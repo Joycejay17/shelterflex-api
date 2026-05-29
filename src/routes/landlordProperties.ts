@@ -1,7 +1,6 @@
 import { Router, Response } from 'express'
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth.js'
 import { landlordPropertyStore } from '../models/landlordPropertyStore.js'
-import { validate } from '../middleware/validate.js'
 import {
   createPropertySchema,
   updatePropertySchema,
@@ -10,95 +9,89 @@ import {
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { logger } from '../utils/logger.js'
+import { PropertyStatus } from '../models/landlordProperty.js'
+import { PricingValidationError } from '../services/pricingService.js'
+import { syncLandlordPropertyListing } from '../services/landlordPropertyListingSync.js'
 
 const router = Router()
 
-/**
- * List landlord's properties
- * GET /api/landlord/properties
- */
+function assertLandlord(req: AuthenticatedRequest) {
+  if (req.user?.role !== 'landlord' && req.user?.role !== 'admin') {
+    throw new AppError(ErrorCode.FORBIDDEN, 403, 'Only landlords can access this resource')
+  }
+}
+
+function assertOwner(propertyLandlordId: string, req: AuthenticatedRequest) {
+  if (req.user?.role === 'admin') return
+  if (propertyLandlordId !== req.user?.id) {
+    throw new AppError(ErrorCode.FORBIDDEN, 403, 'You do not have permission to modify this property')
+  }
+}
+
 router.get(
   '/',
   authenticateToken,
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      if (req.user?.role !== 'landlord') {
-        throw new AppError(ErrorCode.FORBIDDEN, 403, 'Only landlords can access this resource')
-      }
-
+      assertLandlord(req)
       const filters = propertyFiltersSchema.parse(req.query)
       const result = await landlordPropertyStore.list({
         ...filters,
-        landlordId: req.user.id,
+        landlordId: req.user!.id,
       })
-
       res.json(result)
     } catch (error) {
       next(error)
     }
-  }
+  },
 )
 
-/**
- * Get a single property
- * GET /api/landlord/properties/:id
- */
 router.get(
   '/:id',
   authenticateToken,
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
-      if (req.user?.role !== 'landlord') {
-        throw new AppError(ErrorCode.FORBIDDEN, 403, 'Only landlords can access this resource')
-      }
-
+      assertLandlord(req)
       const property = await landlordPropertyStore.getById(req.params.id)
       if (!property) {
         throw new AppError(ErrorCode.NOT_FOUND, 404, 'Property not found')
       }
-
-      if (property.landlordId !== req.user.id) {
-        throw new AppError(ErrorCode.FORBIDDEN, 403, 'You do not have permission to view this property')
-      }
-
+      assertOwner(property.landlordId, req)
       res.json(property)
     } catch (error) {
       next(error)
     }
-  }
+  },
 )
 
-/**
- * Create a new property
- * POST /api/landlord/properties
- */
 router.post(
   '/',
   authenticateToken,
-  validate(createPropertySchema, 'body'),
   async (req: AuthenticatedRequest, res: Response, next) => {
     try {
       if (req.user?.role !== 'landlord') {
         throw new AppError(ErrorCode.FORBIDDEN, 403, 'Only landlords can create properties')
       }
 
-      const property = await landlordPropertyStore.create({
-        ...(req.body as any),
+      const input = createPropertySchema.parse(req.body)
+      let property = await landlordPropertyStore.create({
+        ...input,
         landlordId: req.user.id,
       })
+
+      property = await syncLandlordPropertyListing(property)
 
       logger.info('Property created', { propertyId: property.id, landlordId: req.user.id })
       res.status(201).json(property)
     } catch (error) {
+      if (error instanceof PricingValidationError) {
+        return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, error.message))
+      }
       next(error)
     }
-  }
+  },
 )
 
-/**
- * Update a property
- * PATCH /api/landlord/properties/:id
- */
 router.patch(
   '/:id',
   authenticateToken,
@@ -112,26 +105,91 @@ router.patch(
       if (!existing) {
         throw new AppError(ErrorCode.NOT_FOUND, 404, 'Property not found')
       }
-
-      if (existing.landlordId !== req.user.id) {
-        throw new AppError(ErrorCode.FORBIDDEN, 403, 'You do not have permission to update this property')
-      }
+      assertOwner(existing.landlordId, req)
 
       const input = updatePropertySchema.parse(req.body)
-      const updated = await landlordPropertyStore.update(req.params.id, input)
+      let updated = await landlordPropertyStore.update(req.params.id, input)
+      if (!updated) {
+        throw new AppError(ErrorCode.NOT_FOUND, 404, 'Property not found')
+      }
+
+      updated = await syncLandlordPropertyListing(updated)
 
       logger.info('Property updated', { propertyId: req.params.id, landlordId: req.user.id })
       res.json(updated)
     } catch (error) {
+      if (error instanceof PricingValidationError) {
+        return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, error.message))
+      }
       next(error)
     }
-  }
+  },
 )
 
-/**
- * Delete a property
- * DELETE /api/landlord/properties/:id
- */
+router.patch(
+  '/:id/deactivate',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response, next) => {
+    try {
+      const existing = await landlordPropertyStore.getById(req.params.id)
+      if (!existing) {
+        throw new AppError(ErrorCode.NOT_FOUND, 404, 'Property not found')
+      }
+      assertOwner(existing.landlordId, req)
+
+      let updated = await landlordPropertyStore.update(req.params.id, {
+        status: PropertyStatus.DEACTIVATED,
+      })
+      if (!updated) {
+        throw new AppError(ErrorCode.NOT_FOUND, 404, 'Property not found')
+      }
+
+      updated = await syncLandlordPropertyListing(updated)
+
+      logger.info('Property deactivated', { propertyId: req.params.id })
+      res.json(updated)
+    } catch (error) {
+      next(error)
+    }
+  },
+)
+
+router.patch(
+  '/:id/relist',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response, next) => {
+    try {
+      const existing = await landlordPropertyStore.getById(req.params.id)
+      if (!existing) {
+        throw new AppError(ErrorCode.NOT_FOUND, 404, 'Property not found')
+      }
+      assertOwner(existing.landlordId, req)
+
+      if (existing.status !== PropertyStatus.DEACTIVATED) {
+        throw new AppError(
+          ErrorCode.VALIDATION_ERROR,
+          400,
+          'Only deactivated listings can be relisted',
+        )
+      }
+
+      let updated = await landlordPropertyStore.update(req.params.id, {
+        status: PropertyStatus.PENDING_REVIEW,
+      })
+      if (!updated) {
+        throw new AppError(ErrorCode.NOT_FOUND, 404, 'Property not found')
+      }
+
+      updated = await syncLandlordPropertyListing(updated)
+
+      logger.info('Property relisted', { propertyId: req.params.id })
+      res.json(updated)
+    } catch (error) {
+      next(error)
+    }
+  },
+)
+
 router.delete(
   '/:id',
   authenticateToken,
@@ -145,10 +203,7 @@ router.delete(
       if (!existing) {
         throw new AppError(ErrorCode.NOT_FOUND, 404, 'Property not found')
       }
-
-      if (existing.landlordId !== req.user.id) {
-        throw new AppError(ErrorCode.FORBIDDEN, 403, 'You do not have permission to delete this property')
-      }
+      assertOwner(existing.landlordId, req)
 
       await landlordPropertyStore.delete(req.params.id)
       logger.info('Property deleted', { propertyId: req.params.id, landlordId: req.user.id })
@@ -156,7 +211,7 @@ router.delete(
     } catch (error) {
       next(error)
     }
-  }
+  },
 )
 
 export function createLandlordPropertiesRouter(): Router {

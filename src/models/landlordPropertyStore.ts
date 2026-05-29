@@ -7,7 +7,9 @@ import {
   UpdatePropertyInput,
   PropertyFilters,
   PaginatedProperties,
+  normalizePropertyStatus,
 } from './landlordProperty.js'
+import type { PropertyAmenity, PropertyType } from '../schemas/amenities.js'
 
 interface LandlordPropertyStorePort {
   create(input: CreatePropertyInput): Promise<LandlordProperty>
@@ -32,13 +34,20 @@ class InMemoryLandlordPropertyStore implements LandlordPropertyStorePort {
       address: input.address,
       city: input.city,
       area: input.area,
+      propertyType: input.propertyType,
       bedrooms: input.bedrooms,
       bathrooms: input.bathrooms,
       sqm: input.sqm,
       annualRentNgn: input.annualRentNgn,
+      negotiatedLandlordRateNgn: input.negotiatedLandlordRateNgn,
+      outrightPriceNgn: input.outrightPriceNgn,
+      installmentBasePriceNgn: input.installmentBasePriceNgn,
       description: input.description,
+      amenities: input.amenities ?? [],
       photos: input.photos,
-      status: PropertyStatus.PENDING,
+      primaryPhotoIndex: input.primaryPhotoIndex ?? 0,
+      videoUrl: input.videoUrl,
+      status: PropertyStatus.PENDING_REVIEW,
       views: 0,
       inquiries: 0,
       createdAt: now,
@@ -133,6 +142,18 @@ class InMemoryLandlordPropertyStore implements LandlordPropertyStorePort {
   }
 }
 
+const CAMEL_TO_SNAKE: Record<string, string> = {
+  landlordId: 'landlord_id',
+  annualRentNgn: 'annual_rent_ngn',
+  negotiatedLandlordRateNgn: 'negotiated_landlord_rate_ngn',
+  outrightPriceNgn: 'outright_price_ngn',
+  installmentBasePriceNgn: 'installment_base_price_ngn',
+  propertyType: 'property_type',
+  videoUrl: 'video_url',
+  listingId: 'listing_id',
+  primaryPhotoIndex: 'primary_photo_index',
+}
+
 type PropertyRow = {
   id: string
   landlord_id: string
@@ -140,13 +161,21 @@ type PropertyRow = {
   address: string
   city: string | null
   area: string | null
+  property_type: string | null
   bedrooms: number
   bathrooms: number
   sqm: number | null
   annual_rent_ngn: string | number
+  negotiated_landlord_rate_ngn: string | number | null
+  outright_price_ngn: string | number | null
+  installment_base_price_ngn: string | number | null
   description: string | null
+  amenities: unknown
   photos: unknown
-  status: PropertyStatus
+  primary_photo_index: number
+  video_url: string | null
+  listing_id: string | null
+  status: string
   views: number
   inquiries: number
   created_at: Date
@@ -171,9 +200,13 @@ class PostgresLandlordPropertyStore implements LandlordPropertyStorePort {
     const id = randomUUID()
     const { rows } = await pool.query(
       `INSERT INTO landlord_properties (
-        id, landlord_id, title, address, city, area, 
-        bedrooms, bathrooms, sqm, annual_rent_ngn, description, photos
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+        id, landlord_id, title, address, city, area, property_type,
+        bedrooms, bathrooms, sqm, annual_rent_ngn,
+        negotiated_landlord_rate_ngn, outright_price_ngn, installment_base_price_ngn,
+        description, amenities, photos, primary_photo_index, video_url, status
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17::jsonb, $18, $19, $20
+      )
       RETURNING *`,
       [
         id,
@@ -182,12 +215,20 @@ class PostgresLandlordPropertyStore implements LandlordPropertyStorePort {
         input.address,
         input.city ?? null,
         input.area ?? null,
+        input.propertyType ?? null,
         input.bedrooms,
         input.bathrooms,
         input.sqm ?? null,
         input.annualRentNgn,
+        input.negotiatedLandlordRateNgn ?? null,
+        input.outrightPriceNgn ?? null,
+        input.installmentBasePriceNgn ?? null,
         input.description ?? null,
+        JSON.stringify(input.amenities ?? []),
         JSON.stringify(input.photos),
+        input.primaryPhotoIndex ?? 0,
+        input.videoUrl ?? null,
+        PropertyStatus.PENDING_REVIEW,
       ],
     )
 
@@ -270,8 +311,8 @@ class PostgresLandlordPropertyStore implements LandlordPropertyStorePort {
     let paramIdx = 2
     Object.entries(input).forEach(([key, value]) => {
       if (value !== undefined) {
-        const dbKey = key === 'annualRentNgn' ? 'annual_rent_ngn' : key
-        if (key === 'photos') {
+        const dbKey = CAMEL_TO_SNAKE[key] ?? key
+        if (key === 'photos' || key === 'amenities') {
           updates.push(`${dbKey} = $${paramIdx}::jsonb`)
           values.push(JSON.stringify(value))
         } else {
@@ -337,6 +378,16 @@ class PostgresLandlordPropertyStore implements LandlordPropertyStorePort {
         ? (JSON.parse(photosValue) as string[])
         : []
 
+    const amenitiesValue = row.amenities
+    const amenities = Array.isArray(amenitiesValue)
+      ? (amenitiesValue as PropertyAmenity[])
+      : typeof amenitiesValue === 'string'
+        ? (JSON.parse(amenitiesValue) as PropertyAmenity[])
+        : []
+
+    const num = (v: string | number | null | undefined) =>
+      v == null ? undefined : typeof v === 'string' ? Number(v) : v
+
     return {
       id: row.id,
       landlordId: row.landlord_id,
@@ -344,13 +395,21 @@ class PostgresLandlordPropertyStore implements LandlordPropertyStorePort {
       address: row.address,
       city: row.city ?? undefined,
       area: row.area ?? undefined,
+      propertyType: (row.property_type as PropertyType | null) ?? undefined,
       bedrooms: row.bedrooms,
       bathrooms: row.bathrooms,
       sqm: row.sqm ? Number(row.sqm) : undefined,
-      annualRentNgn: typeof row.annual_rent_ngn === 'string' ? Number(row.annual_rent_ngn) : row.annual_rent_ngn,
+      annualRentNgn: num(row.annual_rent_ngn) ?? 0,
+      negotiatedLandlordRateNgn: num(row.negotiated_landlord_rate_ngn),
+      outrightPriceNgn: num(row.outright_price_ngn),
+      installmentBasePriceNgn: num(row.installment_base_price_ngn),
       description: row.description ?? undefined,
+      amenities,
       photos,
-      status: row.status,
+      primaryPhotoIndex: row.primary_photo_index ?? 0,
+      videoUrl: row.video_url ?? undefined,
+      listingId: row.listing_id ?? undefined,
+      status: normalizePropertyStatus(row.status),
       views: row.views,
       inquiries: row.inquiries,
       createdAt: new Date(row.created_at),

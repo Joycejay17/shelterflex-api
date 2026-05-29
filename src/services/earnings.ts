@@ -1,5 +1,6 @@
 import { EarningsResponse, EarningsTotals, EarningsHistoryItem } from '../schemas/whistleblower.js'
 import { notFound, internalError } from '../errors/AppError.js'
+import type { ConversionRateService } from './conversionRateService.js'
 
 /**
  * Internal data model representing a reward record from the data layer.
@@ -34,19 +35,12 @@ export interface EarningsService {
 }
 
 /**
- * Configuration for the earnings service.
- */
-export interface EarningsServiceConfig {
-  usdcToNgnRate: number
-}
-
-/**
  * Implementation of the earnings service with aggregation and currency conversion logic.
  */
 export class EarningsServiceImpl implements EarningsService {
   constructor(
     private readonly dataLayer: RewardsDataLayer,
-    private readonly config: EarningsServiceConfig,
+    private readonly rateService: ConversionRateService,
   ) {}
 
   async getEarnings(whistleblowerId: string): Promise<EarningsResponse> {
@@ -57,14 +51,16 @@ export class EarningsServiceImpl implements EarningsService {
         throw notFound('Whistleblower')
       }
 
+      const { rate } = await this.rateService.getRate()
+
       // Query rewards from data layer
       const rewards = await this.dataLayer.getRewardsByWhistleblower(whistleblowerId)
 
       // Calculate aggregated totals
-      const totals = this.calculateTotals(rewards)
+      const totals = this.calculateTotals(rewards, rate)
 
       // Format and sort history
-      const history = this.formatHistory(rewards)
+      const history = this.formatHistory(rewards, rate)
 
       return {
         totals,
@@ -86,9 +82,9 @@ export class EarningsServiceImpl implements EarningsService {
    * Convert USDC amount (bigint in smallest unit) to NGN decimal.
    * USDC has 6 decimal places, so 1 USDC = 1_000_000 units.
    */
-  private convertUsdcToNgn(usdcAmount: bigint): number {
+  private convertUsdcToNgn(usdcAmount: bigint, rate: number): number {
     const usdcDecimal = Number(usdcAmount) / 1_000_000
-    return usdcDecimal * this.config.usdcToNgnRate
+    return usdcDecimal * rate
   }
 
   /**
@@ -102,7 +98,7 @@ export class EarningsServiceImpl implements EarningsService {
    * Calculate aggregated totals from reward records.
    * Implements requirements 2.2, 2.3, 2.4, 2.5.
    */
-  private calculateTotals(rewards: RewardRecord[]): EarningsTotals {
+  private calculateTotals(rewards: RewardRecord[], rate: number): EarningsTotals {
     // Calculate USDC totals
     const totalUsdc = rewards.reduce((sum, r) => sum + r.amountUsdc, 0n)
     const pendingUsdc = rewards
@@ -113,9 +109,9 @@ export class EarningsServiceImpl implements EarningsService {
       .reduce((sum, r) => sum + r.amountUsdc, 0n)
 
     // Convert to NGN
-    const totalNgn = this.convertUsdcToNgn(totalUsdc)
-    const pendingNgn = this.convertUsdcToNgn(pendingUsdc)
-    const paidNgn = this.convertUsdcToNgn(paidUsdc)
+    const totalNgn = this.convertUsdcToNgn(totalUsdc, rate)
+    const pendingNgn = this.convertUsdcToNgn(pendingUsdc, rate)
+    const paidNgn = this.convertUsdcToNgn(paidUsdc, rate)
 
     return {
       totalNgn,
@@ -131,7 +127,7 @@ export class EarningsServiceImpl implements EarningsService {
    * Format reward records into history items and sort by createdAt descending.
    * Implements requirements 3.1, 3.2, 3.3, 3.4, 3.5.
    */
-  private formatHistory(rewards: RewardRecord[]): EarningsHistoryItem[] {
+  private formatHistory(rewards: RewardRecord[], rate: number): EarningsHistoryItem[] {
     // Sort by createdAt descending (most recent first)
     const sortedRewards = [...rewards].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
 
@@ -140,7 +136,7 @@ export class EarningsServiceImpl implements EarningsService {
         rewardId: reward.id,
         listingId: reward.listingId,
         dealId: reward.dealId,
-        amountNgn: this.convertUsdcToNgn(reward.amountUsdc),
+        amountNgn: this.convertUsdcToNgn(reward.amountUsdc, rate),
         amountUsdc: this.convertUsdcToDecimal(reward.amountUsdc),
         status: reward.status,
         createdAt: reward.createdAt.toISOString(),

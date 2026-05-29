@@ -50,11 +50,29 @@ class UserStore {
         name: email.split('@')[0] ?? email,
         role: 'tenant',
         tier: 'free',
-        planQuota: 100
+        planQuota: 100,
+        displayCurrency: 'NGN',
       }
 
       this.fallbackCache.set(email, user)
       return user
+    }
+  }
+
+  async updateDisplayCurrency(email: string, displayCurrency: 'NGN' | 'USDC'): Promise<User> {
+    try {
+      const user = await this.postgresRepo.updateDisplayCurrency(email, displayCurrency)
+      this.fallbackCache.set(email, user)
+      return user
+    } catch (error) {
+      console.warn('Postgres display currency update failed, using fallback cache:', error)
+      const user = this.fallbackCache.get(email)
+      if (user) {
+        user.displayCurrency = displayCurrency
+        this.fallbackCache.set(email, user)
+        return user
+      }
+      throw new Error('User not found for preference update')
     }
   }
 

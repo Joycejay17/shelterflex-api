@@ -84,7 +84,6 @@ class InMemoryDealStore implements DealStorePort {
       depositNgn: input.depositNgn,
       financedAmountNgn: input.annualRentNgn - input.depositNgn,
       termMonths: input.termMonths,
-      paymentType: input.paymentType,
       createdAt: now,
       status: DealStatus.DRAFT,
       schedule,
@@ -205,7 +204,6 @@ type DealRow = {
   deposit_ngn: string | number
   financed_amount_ngn: string | number
   term_months: number
-  payment_type: string | null
   status: DealStatus
   created_at: Date
   updated_at: Date
@@ -258,9 +256,8 @@ class PostgresDealStore implements DealStorePort {
           deposit_ngn,
           financed_amount_ngn,
           term_months,
-          payment_type,
           status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *`,
         [
           dealId,
@@ -271,7 +268,6 @@ class PostgresDealStore implements DealStorePort {
           input.depositNgn,
           input.annualRentNgn - input.depositNgn,
           input.termMonths,
-          input.paymentType ?? null,
           DealStatus.DRAFT,
         ],
       )
@@ -459,7 +455,6 @@ class PostgresDealStore implements DealStorePort {
       depositNgn: toNumber(row.deposit_ngn),
       financedAmountNgn: toNumber(row.financed_amount_ngn),
       termMonths: row.term_months,
-      paymentType: (row.payment_type as 'outright' | 'installment') ?? undefined,
       createdAt: new Date(row.created_at),
       status: row.status,
     }
