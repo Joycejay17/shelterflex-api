@@ -16,6 +16,8 @@ export interface ConversionRateQuote {
   /** NGN per 1 USDC */
   rate: number
   source: string
+  /** When the rate HTTP response includes providerRef, pass it through to conversions */
+  providerRef?: string
 }
 
 export interface ConversionProvider {
@@ -142,7 +144,8 @@ export class HttpConversionProvider implements ConversionProvider {
       }
 
       const rate = this.validateBoundedRate(parseFxRateFromJson(json))
-      return { rate, source: 'http' }
+      const providerRef = parseOptionalProviderRef(json)
+      return { rate, source: 'http', providerRef }
     } finally {
       clearTimeout(timer)
     }
@@ -153,13 +156,13 @@ export class HttpConversionProvider implements ConversionProvider {
       throw new ConversionProviderError('amountNgn must be positive', 'VALIDATION')
     }
 
-    const { rate: fxRateNgnPerUsdc } = await this.getRate()
-    const amountUsdc = input.amountNgn / fxRateNgnPerUsdc
-    const providerRef = `http:${input.depositId}:${fxRateNgnPerUsdc}`
+    const quote = await this.getRate()
+    const amountUsdc = input.amountNgn / quote.rate
+    const providerRef = quote.providerRef ?? `http:${input.depositId}:${quote.rate}`
 
     return {
       amountUsdc: toUsdcDecimalString(amountUsdc),
-      fxRateNgnPerUsdc,
+      fxRateNgnPerUsdc: quote.rate,
       providerRef,
     }
   }
