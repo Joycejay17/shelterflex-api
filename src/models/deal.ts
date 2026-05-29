@@ -5,6 +5,7 @@
 export enum DealStatus {
   DRAFT = 'draft',
   ACTIVE = 'active',
+  AT_RISK = 'at_risk',
   COMPLETED = 'completed',
   DEFAULTED = 'defaulted',
 }
@@ -25,7 +26,6 @@ export interface Deal {
   depositNgn: number
   financedAmountNgn: number
   termMonths: number
-  paymentType?: 'outright' | 'installment'
   createdAt: Date
   status: DealStatus
 }
@@ -37,7 +37,6 @@ export interface CreateDealInput {
   annualRentNgn: number
   depositNgn: number
   termMonths: number
-  paymentType?: 'outright' | 'installment'
 }
 
 export interface ScheduleItem {

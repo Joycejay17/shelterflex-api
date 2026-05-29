@@ -19,9 +19,10 @@ import { loadCircuitBreakerConfig } from './circuit-breaker-config.js'
  */
 export function createSorobanAdapter(config: SorobanConfig): SorobanAdapter {
   const mode = process.env.SOROBAN_ADAPTER_MODE ?? 'stub'
+  const useReal = mode === 'real' || process.env.USE_REAL_SOROBAN === 'true'
 
   let adapter: SorobanAdapter
-  if (mode === 'real') {
+  if (useReal) {
     adapter = new RealSorobanAdapter(config)
   } else {
     // Default to stub for safety

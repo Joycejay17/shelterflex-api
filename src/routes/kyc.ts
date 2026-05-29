@@ -145,6 +145,25 @@ router.get(
   },
 )
 
+router.get(
+  '/admin/:submissionId',
+  requireAdmin,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { submissionId } = req.params
+      const record = await kycRepository.findById(submissionId)
+
+      if (!record) {
+        throw new AppError(ErrorCode.NOT_FOUND, 404, 'KYC record not found')
+      }
+
+      res.json({ success: true, data: record })
+    } catch (error) {
+      next(error)
+    }
+  },
+)
+
 router.post(
   '/admin/:recordId/approve',
   requireAdmin,

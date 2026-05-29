@@ -40,9 +40,6 @@ class InMemoryListingStore implements ListingStorePort {
       bedrooms: input.bedrooms,
       bathrooms: input.bathrooms,
       annualRentNgn: input.annualRentNgn,
-      negotiatedLandlordRateNgn: input.negotiatedLandlordRateNgn,
-      outrightPriceNgn: input.outrightPriceNgn,
-      installmentBasePriceNgn: input.installmentBasePriceNgn,
       description: input.description,
       photos: input.photos,
       status: ListingStatus.PENDING_REVIEW,
@@ -60,7 +57,7 @@ class InMemoryListingStore implements ListingStorePort {
   }
 
   async list(filters: ListingFilters = {}): Promise<PaginatedListings> {
-    const { status, query, city, area, minBedrooms, maxBedrooms, minBathrooms, maxBathrooms, minAnnualRent, maxAnnualRent, sortBy, page = 1, pageSize = 20 } = filters
+    const { status, query, page = 1, pageSize = 20 } = filters
     let filtered = Array.from(this.listings.values())
 
     if (status) {
@@ -78,54 +75,7 @@ class InMemoryListingStore implements ListingStorePort {
       )
     }
 
-    if (city) {
-      filtered = filtered.filter((l) => l.city?.toLowerCase() === city.toLowerCase())
-    }
-
-    if (area) {
-      filtered = filtered.filter((l) => l.area?.toLowerCase().includes(area.toLowerCase()))
-    }
-
-    if (minBedrooms !== undefined) {
-      filtered = filtered.filter((l) => l.bedrooms >= minBedrooms)
-    }
-
-    if (maxBedrooms !== undefined) {
-      filtered = filtered.filter((l) => l.bedrooms <= maxBedrooms)
-    }
-
-    if (minBathrooms !== undefined) {
-      filtered = filtered.filter((l) => l.bathrooms >= minBathrooms)
-    }
-
-    if (maxBathrooms !== undefined) {
-      filtered = filtered.filter((l) => l.bathrooms <= maxBathrooms)
-    }
-
-    if (minAnnualRent !== undefined) {
-      filtered = filtered.filter((l) => l.annualRentNgn >= minAnnualRent)
-    }
-
-    if (maxAnnualRent !== undefined) {
-      filtered = filtered.filter((l) => l.annualRentNgn <= maxAnnualRent)
-    }
-
-    // Sorting
-    switch (sortBy) {
-      case 'price_asc':
-        filtered.sort((a, b) => a.annualRentNgn - b.annualRentNgn)
-        break
-      case 'price_desc':
-        filtered.sort((a, b) => b.annualRentNgn - a.annualRentNgn)
-        break
-      case 'bedrooms_desc':
-        filtered.sort((a, b) => b.bedrooms - a.bedrooms)
-        break
-      case 'newest':
-      default:
-        filtered.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-        break
-    }
+    filtered.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
 
     const total = filtered.length
     const totalPages = Math.ceil(total / pageSize)
@@ -232,9 +182,6 @@ type ListingRow = {
   bedrooms: number
   bathrooms: number
   annual_rent_ngn: string | number
-  negotiated_landlord_rate_ngn: string | number | null
-  outright_price_ngn: string | number | null
-  installment_base_price_ngn: string | number | null
   description: string | null
   photos: unknown
   status: ListingStatus
@@ -272,12 +219,9 @@ class PostgresListingStore implements ListingStorePort {
         bedrooms,
         bathrooms,
         annual_rent_ngn,
-        negotiated_landlord_rate_ngn,
-        outright_price_ngn,
-        installment_base_price_ngn,
         description,
         photos
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
       RETURNING *`,
       [
         listingId,
@@ -288,9 +232,6 @@ class PostgresListingStore implements ListingStorePort {
         input.bedrooms,
         input.bathrooms,
         input.annualRentNgn,
-        input.negotiatedLandlordRateNgn ?? null,
-        input.outrightPriceNgn ?? null,
-        input.installmentBasePriceNgn ?? null,
         input.description ?? null,
         JSON.stringify(input.photos),
       ],
@@ -331,64 +272,10 @@ class PostgresListingStore implements ListingStorePort {
       )`)
     }
 
-    if (filters.city) {
-      values.push(filters.city)
-      where.push(`LOWER(city) = LOWER($${values.length})`)
-    }
-
-    if (filters.area) {
-      values.push(`%${filters.area}%`)
-      where.push(`LOWER(area) ILIKE LOWER($${values.length})`)
-    }
-
-    if (filters.minBedrooms !== undefined) {
-      values.push(filters.minBedrooms)
-      where.push(`bedrooms >= $${values.length}`)
-    }
-
-    if (filters.maxBedrooms !== undefined) {
-      values.push(filters.maxBedrooms)
-      where.push(`bedrooms <= $${values.length}`)
-    }
-
-    if (filters.minBathrooms !== undefined) {
-      values.push(filters.minBathrooms)
-      where.push(`bathrooms >= $${values.length}`)
-    }
-
-    if (filters.maxBathrooms !== undefined) {
-      values.push(filters.maxBathrooms)
-      where.push(`bathrooms <= $${values.length}`)
-    }
-
-    if (filters.minAnnualRent !== undefined) {
-      values.push(filters.minAnnualRent)
-      where.push(`annual_rent_ngn >= $${values.length}`)
-    }
-
-    if (filters.maxAnnualRent !== undefined) {
-      values.push(filters.maxAnnualRent)
-      where.push(`annual_rent_ngn <= $${values.length}`)
-    }
-
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : ''
     const page = filters.page && filters.page > 0 ? filters.page : 1
     const pageSize = filters.pageSize && filters.pageSize > 0 ? filters.pageSize : 20
     const offset = (page - 1) * pageSize
-
-    // Sorting
-    let orderBy = 'ORDER BY created_at DESC'
-    switch (filters.sortBy) {
-      case 'price_asc':
-        orderBy = 'ORDER BY annual_rent_ngn ASC'
-        break
-      case 'price_desc':
-        orderBy = 'ORDER BY annual_rent_ngn DESC'
-        break
-      case 'bedrooms_desc':
-        orderBy = 'ORDER BY bedrooms DESC'
-        break
-    }
 
     const countResult = await pool.query(
       `SELECT COUNT(*) AS count FROM whistleblower_listings ${whereClause}`,
@@ -398,7 +285,7 @@ class PostgresListingStore implements ListingStorePort {
     const queryValues = [...values, pageSize, offset]
     const listingRows = await pool.query(
       `SELECT * FROM whistleblower_listings ${whereClause}
-       ${orderBy}
+       ORDER BY created_at DESC
        LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
       queryValues,
     )
@@ -517,9 +404,6 @@ class PostgresListingStore implements ListingStorePort {
       bedrooms: row.bedrooms,
       bathrooms: row.bathrooms,
       annualRentNgn: toNumber(row.annual_rent_ngn),
-      negotiatedLandlordRateNgn: row.negotiated_landlord_rate_ngn != null ? toNumber(row.negotiated_landlord_rate_ngn) : undefined,
-      outrightPriceNgn: row.outright_price_ngn != null ? toNumber(row.outright_price_ngn) : undefined,
-      installmentBasePriceNgn: row.installment_base_price_ngn != null ? toNumber(row.installment_base_price_ngn) : undefined,
       description: row.description ?? undefined,
       photos,
       status: row.status,

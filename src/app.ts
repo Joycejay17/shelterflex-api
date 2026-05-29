@@ -46,6 +46,7 @@ import { createReceiptsRouter } from "./routes/receiptsRoute.js"
 import { getPool, getPoolMetricsForOtel } from "./db.js"
 import { StakingService } from "./services/stakingService.js"
 import { StakingFinalizer } from "./jobs/stakingFinalizer.js"
+import { LatePaymentJob } from "./jobs/latePaymentJob.js"
 import { initOutboxStore, PostgresOutboxStore } from "./outbox/store.js"
 import { OutboxSender } from "./outbox/sender.js"
 import { OutboxWorker } from "./outbox/worker.js"
@@ -65,12 +66,21 @@ import { createAdminJobsRouter } from "./routes/adminJobs.js"
 import { getNotificationService } from "./notifications/index.js"
 import { createWebhookReplayRouter } from "./routes/webhookReplay.js"
 import { PostgresWebhookReplayStore, initWebhookReplayStore as initStore } from "./webhookReplay/index.js"
+import { processWebhookDeliveryJob } from "./services/webhookDeliveryService.js"
+import { kycStatusEmitter } from "./services/index.js"
+import { WebhookEventType } from "./models/webhookSubscription.js"
+import { enqueueDelivery } from "./services/webhookDeliveryService.js"
+
+
 
 import { sanitizeRequest, detectMaliciousPatterns } from "./middleware/sanitization.js"
 import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js"
 import { createWhistleblowerApplicationsRouter } from "./routes/whistleblowerApplications.js"
 import { createAdminWhistleblowerApplicationsRouter } from "./routes/adminWhistleblowerApplications.js"
 import { createConversionProviderFromEnv } from "./services/conversionProviderFactory.js"
+import { ConversionRateService } from "./services/conversionRateService.js"
+import { createConversionRouter } from "./routes/conversion.js"
+import { createUserPreferencesRouter } from "./routes/userPreferences.js"
 import { createAdminAuditRouter } from "./routes/adminAudit.js"
 import { createAdminUnderwritingRouter } from "./routes/adminUnderwriting.js"
 import { PostgresRewardsDataLayer } from "./services/postgres-rewards-data-layer.js"
@@ -91,10 +101,6 @@ import { durableIdempotencyService } from "./services/durableIdempotencyService.
 import { createSupportRouter } from "./routes/support.js";
 import { createPropertyIssueReportsRouter } from "./routes/propertyIssueReports.js";
 import { createPropertyPhotosRouter } from "./routes/propertyPhotos.js";
-import { createPropertiesRouter } from "./routes/properties.js";
-import { createTenantRatingCardRouter } from "./routes/tenantRatingCard.js";
-import { createQuoteRouter } from "./routes/quote.js";
-import { createLeaseAgreementsRouter } from "./routes/leaseAgreements.js";
 import {
   PostgresTenantApplicationStore,
   initTenantApplicationStore,
@@ -115,9 +121,14 @@ import { createPartnerLandlordApplicationsRouter } from "./routes/partnerLandlor
 import { createApartmentReviewsRouter } from "./routes/apartmentReviews.js";
 import { createComplianceReportRouter } from "./routes/complianceReport.js";
 import { createTenantCreditScoringRouter } from "./routes/tenantCreditScoring.js";
+import { createTenantOnboardingRouter } from "./routes/tenantOnboarding.js";
+import { createAdminTenantCreditScoreRouter } from "./routes/adminTenantCreditScore.js";
 import { createTenantDocumentVaultRouter } from "./routes/tenantDocumentVault.js";
 import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSchedule.js";
 import { createDocsRouter } from "./routes/docs.js";
+import { createKycRouter } from "./routes/kyc.js";
+import { createAbuseRouter } from "./routes/abuse.js";
+
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
 import { createAdminFraudRouter } from "./routes/adminFraud.js";
 import { initializeCacheInvalidationWebhooks } from "./services/cacheInvalidation.js";
@@ -230,13 +241,13 @@ export function createApp() {
   const rewardsDataLayer = process.env.DATABASE_URL
     ? new PostgresRewardsDataLayer()
     : new StubRewardsDataLayer();
-  const earningsService = new EarningsServiceImpl(rewardsDataLayer, {
-    usdcToNgnRate: 1600, // Example exchange rate: 1 USDC = 1600 NGN
-  });
-
   const conversionProvider = createConversionProviderFromEnv(env);
+  const conversionRateService = new ConversionRateService(conversionProvider);
   const conversionService = new ConversionService(conversionProvider, "onramp");
   app.set("conversionService", conversionService);
+  app.set("conversionRateService", conversionRateService);
+
+  const earningsService = new EarningsServiceImpl(rewardsDataLayer, conversionRateService);
   const stakingService = new StakingService(sorobanAdapter);
 
   // Workers collection for graceful shutdown
@@ -246,6 +257,14 @@ export function createApp() {
   const stakingFinalizer = new StakingFinalizer(stakingService);
   stakingFinalizer.start();
   workers.push(stakingFinalizer);
+
+  const latePaymentJob = new LatePaymentJob(
+    parseInt(process.env.LATE_PAYMENT_JOB_POLL_MS ?? String(6 * 60 * 60 * 1000), 10),
+  );
+  if (env.NODE_ENV !== "test") {
+    latePaymentJob.start();
+    workers.push(latePaymentJob);
+  }
 
   // Outbox store — swap to Postgres when DATABASE_URL is set
   if (process.env.DATABASE_URL) {
@@ -282,6 +301,21 @@ export function createApp() {
   jobScheduler.registerHandler('notification.send', async (job) => {
     await notificationService.send(job.payload as any)
   })
+
+  // Register webhook delivery job handler
+  jobScheduler.registerHandler('webhook.delivery', async (job) => {
+    await processWebhookDeliveryJob(job.payload as any)
+  })
+
+  // Centralized KYC Status Change Webhook Trigger
+  kycStatusEmitter.on('statusChanged', (userId: string, status: any) => {
+    const eventType = status === 'approved' ? WebhookEventType.KYC_APPROVED : WebhookEventType.KYC_REJECTED
+    enqueueDelivery(eventType, { userId, status }).catch(err => {
+      console.error('[webhook] failed to enqueue KYC status webhook:', err)
+    })
+  })
+
+
 
   // Webhook Replay Store — swap to Postgres store when DATABASE_URL is set
   if (process.env.DATABASE_URL) {
@@ -440,6 +474,8 @@ export function createApp() {
   // Routes
   app.use("/health", createHealthRouter(sorobanAdapter))
   app.use("/api/auth", createAuthRateLimiter(env), authRouter)
+  app.use("/api/conversion", createConversionRouter(conversionRateService))
+  app.use("/api/user", createUserPreferencesRouter())
   app.use(createPublicRateLimiter(env))
 
   // API versioning — applied to all /api routes after rate limiting
@@ -461,7 +497,7 @@ export function createApp() {
   app.use('/api/admin/webhook-replay', createWebhookReplayRouter())
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
-  app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
+  app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService, conversionRateService))
   app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
   app.use('/api/deposits', createDepositsRouter(conversionService))
   app.use('/api/gas-metrics', createGasMetricsRouter())
@@ -515,6 +551,7 @@ export function createApp() {
   app.use("/api/whistleblower-applications", createWhistleblowerApplicationsRouter());
   app.use("/api/admin/whistleblower-applications", createAdminWhistleblowerApplicationsRouter());
   app.use("/api/admin/underwriting", createAdminUnderwritingRouter());
+  app.use("/api/admin", createAdminTenantCreditScoreRouter());
   app.use("/api/admin", createSettlementAdminRouter());
   app.use(
     "/api/staking",
@@ -525,13 +562,15 @@ export function createApp() {
       ngnWalletService,
       conversionService,
       stakingService,
+      receiptRepo,
+      conversionRateService,
     ),
+
   );
   app.use("/api/webhooks", createWebhooksRouter(ngnWalletService));
   app.use("/api/deposits", createDepositsRouter(conversionService));
   app.use("/api/gas-metrics", createGasMetricsRouter());
   app.use("/api", createPropertyPhotosRouter());
-  app.use("/api/properties", createPropertiesRouter());
   app.use("/api/landlord/properties", createLandlordPropertiesRouter());
   app.use(
     "/api/landlord/partner-applications",
@@ -552,11 +591,11 @@ export function createApp() {
   app.use("/api/admin", createSettlementAdminRouter());
   app.use("/api/apartment-reviews", createApartmentReviewsRouter());
   app.use("/api/compliance/reports", createComplianceReportRouter());
+  app.use("/api/kyc", createKycRouter());
+  app.use("/api/admin/abuse", createAbuseRouter());
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
+  app.use("/api/tenant/onboarding", createTenantOnboardingRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
-  app.use("/api/tenant-rating-card", createTenantRatingCardRouter());
-  app.use("/api/quote", createQuoteRouter());
-  app.use("/api", createLeaseAgreementsRouter());
   app.use("/api/landlord/payout-schedule", createLandlordPayoutScheduleRouter());
   app.use("/api", migrationGuideRouter);
 
