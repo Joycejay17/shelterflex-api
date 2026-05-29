@@ -1,6 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
-import crypto from 'crypto'
 import { kycSubmissionSchema, kycStatusSchema } from '../schemas/kyc.js'
 import { kycRepository, MAX_ATTEMPTS } from '../repositories/KycRepository.js'
 import { createKycProvider } from '../services/kycProvider.js'
@@ -8,6 +7,7 @@ import { authenticateToken } from '../middleware/auth.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { auditLog, extractAuditContext, type AuditEventType } from '../utils/auditLogger.js'
+import { verifyHmacSha256 } from '../utils/webhookSignature.js'
 import { emitKycStatusChanged } from '../services/index.js'
 import { logger } from '../utils/logger.js'
 
@@ -267,13 +267,7 @@ export function createKycWebhookRouter(): Router {
           logger.warn('kyc.provider_webhook_missing_signature', { provider })
           return res.status(401).json({ error: 'Missing signature' })
         }
-        const expected = crypto
-          .createHmac('sha256', secret)
-          .update(rawBody)
-          .digest('hex')
-        const sigBuf = Buffer.from(signature.replace(/^sha256=/, ''), 'hex')
-        const expBuf = Buffer.from(expected, 'hex')
-        if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+        if (!verifyHmacSha256(secret, rawBody, signature)) {
           logger.warn('kyc.provider_webhook_invalid_signature', { provider })
           return res.status(401).json({ error: 'Invalid signature' })
         }
