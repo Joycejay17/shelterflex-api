@@ -25,6 +25,8 @@ import { detectDuplicateDealSpam } from '../services/abuseDetectionService.js'
 import { enqueueDelivery } from '../services/webhookDeliveryService.js'
 import { WebhookEventType } from '../models/webhookSubscription.js'
 import { logger } from '../utils/logger.js'
+import { applyDealRepaymentMethod } from '../services/salaryDeductionService.js'
+import { updateDealRepaymentSchema } from '../schemas/employer.js'
 
 const router = Router()
 
@@ -108,15 +110,25 @@ router.post('/', async (req: Request, res: Response, next) => {
     }
     
     const deal = await dealStore.create(validatedData as any)
+
+    if (validatedData.repaymentMethod === 'salary_deduction') {
+      await applyDealRepaymentMethod(deal.dealId, 'salary_deduction', {
+        employerId: validatedData.employerId,
+        employeeId: validatedData.employeeId,
+        deductionDay: validatedData.deductionDay,
+      })
+    }
     
     // Lock listing to deal if listingId is provided
     if (validatedData.listingId) {
       await listingStore.lockToDeal(validatedData.listingId, deal.dealId)
     }
+
+    const responseDeal = await dealStore.findById(deal.dealId)
     
     res.status(201).json({
       success: true,
-      data: deal
+      data: responseDeal ?? deal
     })
   } catch (error) {
     if (error instanceof Error && error.name === 'ZodError') {
@@ -294,6 +306,32 @@ router.patch('/:dealId/schedule/:period', async (req: Request, res: Response, ne
       success: true,
       data: deal
     })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'ZodError') {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, error.message))
+    }
+    next(error)
+  }
+})
+
+/**
+ * PATCH /api/deals/:dealId/repayment
+ * Update repayment method and salary deduction linkage
+ */
+router.patch('/:dealId/repayment', async (req: Request, res: Response, next) => {
+  const { dealId } = req.params
+  if (!dealId) {
+    return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Deal ID is required'))
+  }
+  try {
+    const body = updateDealRepaymentSchema.parse(req.body)
+    await applyDealRepaymentMethod(dealId, body.repaymentMethod, {
+      employerId: body.employerId,
+      employeeId: body.employeeId,
+      deductionDay: body.deductionDay,
+    })
+    const deal = await dealStore.findById(dealId)
+    res.json({ success: true, data: deal })
   } catch (error) {
     if (error instanceof Error && error.name === 'ZodError') {
       return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, error.message))

@@ -141,6 +141,8 @@ import { createAdminFraudRouter } from "./routes/adminFraud.js";
 import { initializeCacheInvalidationWebhooks } from "./services/cacheInvalidation.js";
 import { createKycWebhookRouter } from "./routes/kyc.js";
 import { createOnboardingRouter } from "./routes/onboarding.js";
+import { createEmployersRouter } from "./routes/employers.js";
+import { MonthlyDeductionReminderJob } from "./jobs/monthlyDeductionReminderJob.js";
 
 export function createApp() {
   const app = express();
@@ -278,9 +280,14 @@ export function createApp() {
   const dataRetentionJob = new DataRetentionJob(
     parseInt(process.env.DATA_RETENTION_JOB_POLL_MS ?? String(24 * 60 * 60 * 1000), 10),
   );
+  const monthlyDeductionReminderJob = new MonthlyDeductionReminderJob(
+    parseInt(process.env.MONTHLY_DEDUCTION_REMINDER_POLL_MS ?? String(24 * 60 * 60 * 1000), 10),
+  );
   if (env.NODE_ENV !== "test") {
     dataRetentionJob.start();
     workers.push(dataRetentionJob);
+    monthlyDeductionReminderJob.start();
+    workers.push(monthlyDeductionReminderJob);
   }
 
   // Outbox store — swap to Postgres when DATABASE_URL is set
@@ -573,6 +580,7 @@ export function createApp() {
   app.use("/api/admin", createAdminAuditRouter());
   app.use("/api/admin/erasure", createAdminErasureRouter());
   app.use("/api/deals", createDealsRouter());
+  app.use("/api", createEmployersRouter());
   app.use("/api/whistleblower", createWhistleblowerRouter(earningsService));
   app.use("/api/whistleblower-applications", createWhistleblowerApplicationsRouter());
   app.use("/api/admin/whistleblower-applications", createAdminWhistleblowerApplicationsRouter());
