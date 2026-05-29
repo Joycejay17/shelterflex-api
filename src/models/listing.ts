@@ -18,6 +18,9 @@ export interface Listing {
   bedrooms: number
   bathrooms: number
   annualRentNgn: number
+  negotiatedLandlordRateNgn?: number
+  outrightPriceNgn?: number
+  installmentBasePriceNgn?: number
   description?: string
   photos: string[]
   status: ListingStatus
@@ -37,6 +40,9 @@ export interface CreateListingInput {
   bedrooms: number
   bathrooms: number
   annualRentNgn: number
+  negotiatedLandlordRateNgn?: number
+  outrightPriceNgn?: number
+  installmentBasePriceNgn?: number
   description?: string
   photos: string[]
 }
@@ -44,6 +50,15 @@ export interface CreateListingInput {
 export interface ListingFilters {
   status?: ListingStatus
   query?: string
+  city?: string
+  area?: string
+  minBedrooms?: number
+  maxBedrooms?: number
+  minBathrooms?: number
+  maxBathrooms?: number
+  minAnnualRent?: number
+  maxAnnualRent?: number
+  sortBy?: 'price_asc' | 'price_desc' | 'newest' | 'bedrooms_desc'
   page?: number
   pageSize?: number
 }
