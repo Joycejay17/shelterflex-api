@@ -16,6 +16,7 @@ import {
 } from "../schemas/tenantApplication.js";
 import { AppError } from "../errors/AppError.js";
 import { ErrorCode } from "../errors/errorCodes.js";
+import { isNewApplicationsBlocked } from "../models/userApplicationBlockStore.js";
 
 const router = Router();
 
@@ -41,6 +42,14 @@ router.post(
 
       const validatedData: CreateTenantApplicationRequest =
         createTenantApplicationSchema.parse(req.body);
+
+      if (isNewApplicationsBlocked(userId)) {
+        throw new AppError(
+          ErrorCode.FORBIDDEN,
+          403,
+          "New applications are blocked due to a defaulted payment. Contact support.",
+        );
+      }
 
       // Validate deposit is at least 20% of annual rent
       const minDeposit = validatedData.annualRent * 0.2;

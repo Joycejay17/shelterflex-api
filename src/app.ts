@@ -46,6 +46,7 @@ import { createReceiptsRouter } from "./routes/receiptsRoute.js"
 import { getPool, getPoolMetricsForOtel } from "./db.js"
 import { StakingService } from "./services/stakingService.js"
 import { StakingFinalizer } from "./jobs/stakingFinalizer.js"
+import { LatePaymentJob } from "./jobs/latePaymentJob.js"
 import { initOutboxStore, PostgresOutboxStore } from "./outbox/store.js"
 import { OutboxSender } from "./outbox/sender.js"
 import { OutboxWorker } from "./outbox/worker.js"
@@ -245,6 +246,14 @@ export function createApp() {
   const stakingFinalizer = new StakingFinalizer(stakingService);
   stakingFinalizer.start();
   workers.push(stakingFinalizer);
+
+  const latePaymentJob = new LatePaymentJob(
+    parseInt(process.env.LATE_PAYMENT_JOB_POLL_MS ?? String(6 * 60 * 60 * 1000), 10),
+  );
+  if (env.NODE_ENV !== "test") {
+    latePaymentJob.start();
+    workers.push(latePaymentJob);
+  }
 
   // Outbox store — swap to Postgres when DATABASE_URL is set
   if (process.env.DATABASE_URL) {

@@ -29,12 +29,15 @@ interface DealStorePort {
   create(input: CreateDealInput): Promise<DealWithSchedule>
   findById(dealId: string): Promise<DealWithSchedule | null>
   findMany(filters?: DealFilters): Promise<PaginatedDeals>
+  listActiveDealsWithSchedules(): Promise<DealWithSchedule[]>
   updateStatus(dealId: string, status: DealStatus): Promise<DealWithSchedule | null>
   updateScheduleItemStatus(
     dealId: string,
     period: number,
     status: ScheduleItemStatus,
   ): Promise<DealWithSchedule | null>
+  /** Test helper: override instalment due date (in-memory adapter only). */
+  setScheduleDueDateForTest(dealId: string, period: number, dueDateIso: string): Promise<void>
   clear(): Promise<void>
 }
 
@@ -106,6 +109,15 @@ class InMemoryDealStore implements DealStorePort {
       ...deal,
       schedule: [...deal.schedule],
     }
+  }
+
+  async listActiveDealsWithSchedules(): Promise<DealWithSchedule[]> {
+    return Array.from(this.deals.values())
+      .filter((d) => d.status === DealStatus.ACTIVE || d.status === DealStatus.AT_RISK)
+      .map((deal) => ({
+        ...deal,
+        schedule: [...deal.schedule],
+      }))
   }
 
   async findMany(filters: DealFilters = {}): Promise<PaginatedDeals> {
@@ -189,6 +201,18 @@ class InMemoryDealStore implements DealStorePort {
       ...deal,
       schedule: [...deal.schedule],
     }
+  }
+
+  async setScheduleDueDateForTest(
+    dealId: string,
+    period: number,
+    dueDateIso: string,
+  ): Promise<void> {
+    const deal = this.deals.get(dealId)
+    if (!deal) throw new Error(`Deal ${dealId} not found`)
+    const item = deal.schedule.find((s) => s.period === period)
+    if (!item) throw new Error(`Period ${period} not found`)
+    item.dueDate = dueDateIso
   }
 
   async clear(): Promise<void> {
@@ -308,6 +332,19 @@ class PostgresDealStore implements DealStorePort {
   async findById(dealId: string): Promise<DealWithSchedule | null> {
     const pool = await this.pool()
     return this.fetchDealWithSchedule(pool, dealId)
+  }
+
+  async listActiveDealsWithSchedules(): Promise<DealWithSchedule[]> {
+    const pool = await this.pool()
+    const { rows } = await pool.query(
+      `SELECT deal_id FROM tenant_deals WHERE status IN ('active', 'at_risk')`,
+    )
+    const deals: DealWithSchedule[] = []
+    for (const row of rows) {
+      const deal = await this.fetchDealWithSchedule(pool, (row as { deal_id: string }).deal_id)
+      if (deal) deals.push(deal)
+    }
+    return deals
   }
 
   async findMany(filters: DealFilters = {}): Promise<PaginatedDeals> {
@@ -440,6 +477,19 @@ class PostgresDealStore implements DealStorePort {
     return this.fetchDealWithSchedule(pool, dealId)
   }
 
+  async setScheduleDueDateForTest(
+    dealId: string,
+    period: number,
+    dueDateIso: string,
+  ): Promise<void> {
+    const pool = await this.pool()
+    await pool.query(
+      `UPDATE tenant_deal_schedules SET due_date = $3, updated_at = NOW()
+       WHERE deal_id = $1 AND period = $2`,
+      [dealId, period, new Date(dueDateIso)],
+    )
+  }
+
   async clear(): Promise<void> {
     const pool = await this.pool()
     if (process.env.NODE_ENV !== 'test') {
@@ -525,6 +575,11 @@ class HybridDealStore implements DealStorePort {
     return adapter.findMany(filters)
   }
 
+  async listActiveDealsWithSchedules(): Promise<DealWithSchedule[]> {
+    const adapter = await this.adapter()
+    return adapter.listActiveDealsWithSchedules()
+  }
+
   async updateStatus(dealId: string, status: DealStatus): Promise<DealWithSchedule | null> {
     const adapter = await this.adapter()
     return adapter.updateStatus(dealId, status)
@@ -537,6 +592,15 @@ class HybridDealStore implements DealStorePort {
   ): Promise<DealWithSchedule | null> {
     const adapter = await this.adapter()
     return adapter.updateScheduleItemStatus(dealId, period, status)
+  }
+
+  async setScheduleDueDateForTest(
+    dealId: string,
+    period: number,
+    dueDateIso: string,
+  ): Promise<void> {
+    const adapter = await this.adapter()
+    return adapter.setScheduleDueDateForTest(dealId, period, dueDateIso)
   }
 
   async clear(): Promise<void> {
