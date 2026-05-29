@@ -33,6 +33,12 @@ export interface UnderwritingContext {
     missedPayments: number
     totalPayments: number
   }
+  backgroundCheckData?: {
+    employmentVerified?: boolean
+    incomeStability?: 'stable' | 'variable' | 'unstable'
+    averageMonthlyIncome?: number
+    overdraftCount?: number
+  }
   metadata?: Record<string, any>
 }
 
@@ -119,6 +125,35 @@ export const DEFAULT_RULE_CONFIG: RuleEngineConfig = {
     {
       ruleId: 'no_missed_payments',
       ruleName: 'No Missed Payments',
+      weight: 15,
+      enabled: true,
+      severity: 'warning',
+    },
+    {
+      ruleId: 'employment_verified',
+      ruleName: 'Employment Verified',
+      weight: 25,
+      enabled: true,
+      severity: 'critical',
+    },
+    {
+      ruleId: 'income_stable',
+      ruleName: 'Stable Income',
+      weight: 20,
+      enabled: true,
+      severity: 'warning',
+    },
+    {
+      ruleId: 'income_sufficient',
+      ruleName: 'Sufficient Income',
+      weight: 25,
+      enabled: true,
+      threshold: 3,
+      severity: 'critical',
+    },
+    {
+      ruleId: 'no_overdrafts',
+      ruleName: 'No Overdrafts',
       weight: 15,
       enabled: true,
       severity: 'warning',
@@ -278,6 +313,75 @@ export class UnderwritingRuleEngine {
           result.score = rule.weight * 0.5
           result.reason = 'No payment history available - treated as neutral'
           result.details = { hasPaymentHistory: false }
+        }
+        break
+
+      case 'employment_verified':
+        if (context.backgroundCheckData?.employmentVerified !== undefined) {
+          result.passed = context.backgroundCheckData.employmentVerified
+          result.score = result.passed ? rule.weight : 0
+          result.reason = result.passed
+            ? 'Employment verified successfully'
+            : 'Employment verification failed'
+          result.details = { employmentVerified: context.backgroundCheckData.employmentVerified }
+        } else {
+          // No background check data - treat as neutral
+          result.passed = true
+          result.score = rule.weight * 0.5
+          result.reason = 'No employment verification data - treated as neutral'
+          result.details = { hasEmploymentData: false }
+        }
+        break
+
+      case 'income_stable':
+        if (context.backgroundCheckData?.incomeStability) {
+          result.passed = context.backgroundCheckData.incomeStability === 'stable'
+          result.score = result.passed ? rule.weight : rule.weight * 0.5
+          result.reason = result.passed
+            ? 'Income stability is stable'
+            : `Income stability is ${context.backgroundCheckData.incomeStability}`
+          result.details = { incomeStability: context.backgroundCheckData.incomeStability }
+        } else {
+          // No background check data - treat as neutral
+          result.passed = true
+          result.score = rule.weight * 0.5
+          result.reason = 'No income stability data - treated as neutral'
+          result.details = { hasIncomeData: false }
+        }
+        break
+
+      case 'income_sufficient':
+        if (context.backgroundCheckData?.averageMonthlyIncome && context.monthlyPayment) {
+          const incomeRatio = context.backgroundCheckData.averageMonthlyIncome / context.monthlyPayment
+          result.passed = incomeRatio >= (rule.threshold || 3)
+          result.score = result.passed ? rule.weight : 0
+          result.reason = result.passed
+            ? `Income to payment ratio ${incomeRatio.toFixed(2)} meets threshold ${rule.threshold}`
+            : `Income to payment ratio ${incomeRatio.toFixed(2)} below threshold ${rule.threshold}`
+          result.details = { incomeRatio, threshold: rule.threshold, averageMonthlyIncome: context.backgroundCheckData.averageMonthlyIncome, monthlyPayment: context.monthlyPayment }
+        } else {
+          // No background check data - treat as neutral
+          result.passed = true
+          result.score = rule.weight * 0.5
+          result.reason = 'No income data - treated as neutral'
+          result.details = { hasIncomeData: false }
+        }
+        break
+
+      case 'no_overdrafts':
+        if (context.backgroundCheckData?.overdraftCount !== undefined) {
+          result.passed = context.backgroundCheckData.overdraftCount === 0
+          result.score = result.passed ? rule.weight : rule.weight * 0.3
+          result.reason = result.passed
+            ? 'No overdrafts detected'
+            : `${context.backgroundCheckData.overdraftCount} overdraft(s) detected`
+          result.details = { overdraftCount: context.backgroundCheckData.overdraftCount }
+        } else {
+          // No background check data - treat as neutral
+          result.passed = true
+          result.score = rule.weight * 0.5
+          result.reason = 'No overdraft data - treated as neutral'
+          result.details = { hasOverdraftData: false }
         }
         break
 

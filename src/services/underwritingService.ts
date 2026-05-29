@@ -20,6 +20,7 @@ import {
 import { decisionFromCreditBand } from "../models/tenantCreditScore.js";
 import { creditBureauService } from "./creditBureauService.js";
 import type { TenantCreditScore } from "../models/tenantCreditScore.js";
+import { backgroundCheckService } from "./backgroundCheckService.js";
 
 export interface UnderwritingEvaluationInput {
   applicationId: string;
@@ -27,6 +28,12 @@ export interface UnderwritingEvaluationInput {
     onTimePaymentRate: number;
     missedPayments: number;
     totalPayments: number;
+  };
+  backgroundCheckData?: {
+    employmentVerified?: boolean;
+    incomeStability?: "stable" | "variable" | "unstable";
+    averageMonthlyIncome?: number;
+    overdraftCount?: number;
   };
   metadata?: Record<string, any>;
 }
@@ -113,6 +120,7 @@ export class UnderwritingService {
           }
         : undefined,
       paymentHistory: input.paymentHistory,
+      backgroundCheckData: input.backgroundCheckData,
       metadata: input.metadata,
     };
 
