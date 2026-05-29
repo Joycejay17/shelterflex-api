@@ -127,6 +127,10 @@ import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSched
 import { createDocsRouter } from "./routes/docs.js";
 import { createKycRouter } from "./routes/kyc.js";
 import { createAbuseRouter } from "./routes/abuse.js";
+import { createInspectorJobsRouter, createAdminInspectorJobsRouter } from "./routes/inspectorJobs.js";
+import { createRentGuaranteeRouter } from "./routes/rentGuarantee.js";
+import { createTenantRatingCardRouter } from "./routes/tenantRatingCard.js";
+import { createRentGuaranteeProviderFromEnv } from "./services/insurance/rentGuaranteeProviderFactory.js";
 
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
 import { createAdminFraudRouter } from "./routes/adminFraud.js";
@@ -597,6 +601,17 @@ export function createApp() {
   app.use("/api/webhooks/kyc", createKycWebhookRouter());
   app.use("/api/onboarding", createOnboardingRouter());
   app.use("/api", migrationGuideRouter);
+
+  // Inspector job routes
+  app.use('/api/inspector', authenticateToken, createInspectorJobsRouter())
+  app.use('/api/admin/inspector', authenticateToken, createAdminInspectorJobsRouter())
+
+  // Rent guarantee insurance routes
+  const rentGuaranteeProvider = createRentGuaranteeProviderFromEnv(process.env.RENT_GUARANTEE_PROVIDER)
+  app.use('/api', createRentGuaranteeRouter(rentGuaranteeProvider))
+
+  // Tenant rating card routes
+  app.use('/api', createTenantRatingCardRouter())
 
   // Interactive API documentation
   app.use("/docs", createDocsRouter());
