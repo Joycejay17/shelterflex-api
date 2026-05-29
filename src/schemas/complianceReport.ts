@@ -1,6 +1,15 @@
 import { z } from 'zod'
 
-export const reportTypeSchema = z.enum(['transaction', 'kyc'])
+export const reportTypeSchema = z.enum([
+  'transaction',
+  'kyc',
+  'ACTIVE_DEALS_REPORT',
+  'DEFAULTED_DEALS_REPORT',
+  'KYC_STATUS_REPORT',
+  'TRANSACTION_VOLUME_REPORT',
+  'LATE_FEE_REVENUE_REPORT'
+])
+
 
 export const reportFormatSchema = z.enum(['json', 'csv'])
 

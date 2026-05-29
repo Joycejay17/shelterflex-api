@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { appEventEmitter } from '../utils/eventEmitter.js'
 import { auditLog, type AuditContext } from '../utils/auditLogger.js'
 
+export type ComplianceReportType = 'transaction' | 'kyc' | 'ACTIVE_DEALS_REPORT' | 'DEFAULTED_DEALS_REPORT' | 'KYC_STATUS_REPORT' | 'TRANSACTION_VOLUME_REPORT' | 'LATE_FEE_REVENUE_REPORT'
+
 export interface ComplianceReport {
   reportId: string
-  reportType: 'transaction' | 'kyc'
+  reportType: ComplianceReportType
   format: 'json' | 'csv'
   dateFrom: Date
   dateTo: Date
@@ -14,6 +16,7 @@ export interface ComplianceReport {
   content?: string
   generatedAt?: Date
   createdAt: Date
+  expiresAt?: Date
   accessLog: Array<{
     userId: string
     accessedAt: Date
@@ -25,8 +28,9 @@ class ComplianceReportStore {
   private reports: Map<string, ComplianceReport> = new Map()
 
   create(data: {
-    reportType: 'transaction' | 'kyc'
+    reportType: ComplianceReportType
     format: 'json' | 'csv'
+
     dateFrom: Date
     dateTo: Date
     jurisdiction?: string
@@ -40,8 +44,10 @@ class ComplianceReportStore {
       jurisdiction: data.jurisdiction,
       status: 'pending',
       createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 7 * 365 * 24 * 60 * 60 * 1000), // 7 years retention
       accessLog: [],
     }
+
 
     this.reports.set(report.reportId, report)
     return report
