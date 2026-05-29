@@ -33,6 +33,12 @@ export interface UnderwritingEvaluationInput {
     missedPayments: number;
     totalPayments: number;
   };
+  backgroundCheckData?: {
+    employmentVerified?: boolean;
+    incomeStability?: "stable" | "variable" | "unstable";
+    averageMonthlyIncome?: number;
+    overdraftCount?: number;
+  };
   metadata?: Record<string, any>;
 }
 
@@ -122,6 +128,7 @@ export class UnderwritingService {
           }
         : undefined,
       paymentHistory: input.paymentHistory,
+      backgroundCheckData: input.backgroundCheckData,
       metadata: input.metadata,
     };
 

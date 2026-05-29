@@ -76,6 +76,12 @@ describe('credit scoring pipeline integration', () => {
     const credit = tenantCreditScoringService.computeCompositeScore(TENANT)
     const evaluation = await underwriting.evaluateApplication({
       applicationId: application.applicationId,
+      backgroundCheckData: {
+        employmentVerified: true,
+        incomeStability: 'stable',
+        averageMonthlyIncome: 600_000,
+        overdraftCount: 0,
+      },
     })
 
     expect(credit.band).toMatch(/^[AB]$/)
