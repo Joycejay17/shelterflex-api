@@ -72,6 +72,9 @@ import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLi
 import { createWhistleblowerApplicationsRouter } from "./routes/whistleblowerApplications.js"
 import { createAdminWhistleblowerApplicationsRouter } from "./routes/adminWhistleblowerApplications.js"
 import { createConversionProviderFromEnv } from "./services/conversionProviderFactory.js"
+import { ConversionRateService } from "./services/conversionRateService.js"
+import { createConversionRouter } from "./routes/conversion.js"
+import { createUserPreferencesRouter } from "./routes/userPreferences.js"
 import { createAdminAuditRouter } from "./routes/adminAudit.js"
 import { createAdminUnderwritingRouter } from "./routes/adminUnderwriting.js"
 import { PostgresRewardsDataLayer } from "./services/postgres-rewards-data-layer.js"
@@ -91,10 +94,6 @@ import { durableIdempotencyService } from "./services/durableIdempotencyService.
 import { createSupportRouter } from "./routes/support.js";
 import { createPropertyIssueReportsRouter } from "./routes/propertyIssueReports.js";
 import { createPropertyPhotosRouter } from "./routes/propertyPhotos.js";
-import { createPropertiesRouter } from "./routes/properties.js";
-import { createTenantRatingCardRouter } from "./routes/tenantRatingCard.js";
-import { createQuoteRouter } from "./routes/quote.js";
-import { createLeaseAgreementsRouter } from "./routes/leaseAgreements.js";
 import {
   PostgresTenantApplicationStore,
   initTenantApplicationStore,
@@ -115,6 +114,8 @@ import { createPartnerLandlordApplicationsRouter } from "./routes/partnerLandlor
 import { createApartmentReviewsRouter } from "./routes/apartmentReviews.js";
 import { createComplianceReportRouter } from "./routes/complianceReport.js";
 import { createTenantCreditScoringRouter } from "./routes/tenantCreditScoring.js";
+import { createTenantOnboardingRouter } from "./routes/tenantOnboarding.js";
+import { createAdminTenantCreditScoreRouter } from "./routes/adminTenantCreditScore.js";
 import { createTenantDocumentVaultRouter } from "./routes/tenantDocumentVault.js";
 import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSchedule.js";
 import { createDocsRouter } from "./routes/docs.js";
@@ -230,13 +231,13 @@ export function createApp() {
   const rewardsDataLayer = process.env.DATABASE_URL
     ? new PostgresRewardsDataLayer()
     : new StubRewardsDataLayer();
-  const earningsService = new EarningsServiceImpl(rewardsDataLayer, {
-    usdcToNgnRate: 1600, // Example exchange rate: 1 USDC = 1600 NGN
-  });
-
   const conversionProvider = createConversionProviderFromEnv(env);
+  const conversionRateService = new ConversionRateService(conversionProvider);
   const conversionService = new ConversionService(conversionProvider, "onramp");
   app.set("conversionService", conversionService);
+  app.set("conversionRateService", conversionRateService);
+
+  const earningsService = new EarningsServiceImpl(rewardsDataLayer, conversionRateService);
   const stakingService = new StakingService(sorobanAdapter);
 
   // Workers collection for graceful shutdown
@@ -448,6 +449,8 @@ export function createApp() {
   // Routes
   app.use("/health", createHealthRouter(sorobanAdapter))
   app.use("/api/auth", createAuthRateLimiter(env), authRouter)
+  app.use("/api/conversion", createConversionRouter(conversionRateService))
+  app.use("/api/user", createUserPreferencesRouter())
   app.use(createPublicRateLimiter(env))
 
   // API versioning — applied to all /api routes after rate limiting
@@ -469,7 +472,7 @@ export function createApp() {
   app.use('/api/admin/webhook-replay', createWebhookReplayRouter())
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
-  app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
+  app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService, conversionRateService))
   app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
   app.use('/api/deposits', createDepositsRouter(conversionService))
   app.use('/api/gas-metrics', createGasMetricsRouter())
@@ -523,6 +526,7 @@ export function createApp() {
   app.use("/api/whistleblower-applications", createWhistleblowerApplicationsRouter());
   app.use("/api/admin/whistleblower-applications", createAdminWhistleblowerApplicationsRouter());
   app.use("/api/admin/underwriting", createAdminUnderwritingRouter());
+  app.use("/api/admin", createAdminTenantCreditScoreRouter());
   app.use("/api/admin", createSettlementAdminRouter());
   app.use(
     "/api/staking",
@@ -533,13 +537,13 @@ export function createApp() {
       ngnWalletService,
       conversionService,
       stakingService,
+      conversionRateService,
     ),
   );
   app.use("/api/webhooks", createWebhooksRouter(ngnWalletService));
   app.use("/api/deposits", createDepositsRouter(conversionService));
   app.use("/api/gas-metrics", createGasMetricsRouter());
   app.use("/api", createPropertyPhotosRouter());
-  app.use("/api/properties", createPropertiesRouter());
   app.use("/api/landlord/properties", createLandlordPropertiesRouter());
   app.use(
     "/api/landlord/partner-applications",
@@ -557,10 +561,8 @@ export function createApp() {
   app.use("/api/apartment-reviews", createApartmentReviewsRouter());
   app.use("/api/compliance/reports", createComplianceReportRouter());
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
+  app.use("/api/tenant/onboarding", createTenantOnboardingRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
-  app.use("/api/tenant-rating-card", createTenantRatingCardRouter());
-  app.use("/api/quote", createQuoteRouter());
-  app.use("/api", createLeaseAgreementsRouter());
   app.use("/api/landlord/payout-schedule", createLandlordPayoutScheduleRouter());
   app.use("/api", migrationGuideRouter);
 
