@@ -4,6 +4,7 @@
  */
 
 import { UnderwritingDecision, RuleEvaluation } from '../services/underwritingRuleEngine.js'
+import type { AiRiskScoreResult } from '../services/aiRiskScoreProvider.js'
 
 export interface UnderwritingDecisionTrace {
   id: string
@@ -15,6 +16,7 @@ export interface UnderwritingDecisionTrace {
   triggeredRules: RuleEvaluation[]
   decisionReason: string
   ruleConfigVersion: string
+  aiRiskScore?: AiRiskScoreResult
   evaluatedAt: string
   createdAt: string
 }
@@ -28,6 +30,7 @@ export interface CreateUnderwritingDecisionTraceInput {
   triggeredRules: RuleEvaluation[]
   decisionReason: string
   ruleConfigVersion: string
+  aiRiskScore?: AiRiskScoreResult
   evaluatedAt: string
 }
 
