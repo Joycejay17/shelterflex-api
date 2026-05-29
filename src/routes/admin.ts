@@ -37,6 +37,7 @@ import { env } from "../schemas/env.js";
 import type { WalletStore } from "../models/wallet.js";
 import type { EncryptionService } from "../services/walletService.js";
 import { ReceiptIndexer } from "../indexer/worker.js";
+import { kycRepository } from "../repositories/KycRepository.js";
 
 export function createAdminRouter(
   adapter: SorobanAdapter,
@@ -736,6 +737,17 @@ export function createAdminRouter(
               currentStatus: listing.status,
               allowedFrom: ListingStatus.PENDING_REVIEW,
             },
+          );
+        }
+
+        // KYC gate: landlord (whistleblower) must have approved KYC before listing can go live
+        const landlordKyc = await kycRepository.findByUserId(listing.whistleblowerId);
+        if (!landlordKyc || landlordKyc.status !== 'approved') {
+          throw new AppError(
+            ErrorCode.FORBIDDEN,
+            403,
+            'LANDLORD_KYC_REQUIRED',
+            { kycStatus: landlordKyc?.status ?? 'not_submitted' },
           );
         }
 

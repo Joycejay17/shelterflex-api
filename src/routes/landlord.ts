@@ -4,6 +4,7 @@ import { userStore } from '../models/authStore.js'
 import { AuthenticatedRequest } from '../middleware/auth.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
+import { kycRepository, MAX_ATTEMPTS } from '../repositories/KycRepository.js'
 
 export function createLandlordRouter() {
   const router = Router()
@@ -74,6 +75,37 @@ export function createLandlordRouter() {
           accountNumber: profile?.accountNumber || "",
           accountName: profile?.accountName || "",
         }
+      })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  // GET /api/landlord/kyc-status
+  // Returns the landlord's current KYC status, rejection reasons, and attempts remaining.
+  // Used by the frontend to gate listing creation.
+  router.get('/kyc-status', async (req: Request, res: Response, next: NextFunction) => {
+    const authReq = req as AuthenticatedRequest
+    try {
+      const userId = authReq.user?.id
+      if (!userId) throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Unauthorized')
+
+      const record = await kycRepository.findByUserId(userId)
+
+      if (!record) {
+        return res.json({
+          status: 'not_submitted',
+          attemptsRemaining: MAX_ATTEMPTS,
+          rejectionReason: null,
+        })
+      }
+
+      res.json({
+        status: record.status,
+        attemptsRemaining: Math.max(0, MAX_ATTEMPTS - record.attemptCount),
+        rejectionReason: record.rejectionReason,
+        updatedAt: record.updatedAt,
+        expiresAt: record.expiresAt,
       })
     } catch (error) {
       next(error)
