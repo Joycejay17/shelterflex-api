@@ -15,6 +15,8 @@ import { stakeFromDepositSchema, type StakeFromDepositRequest } from '../schemas
 import { stakeFinalizeSchema, type StakeFinalizeRequest } from '../schemas/stakeFinalize.js'
 import { conversionStore } from '../models/conversionStore.js'
 import { ConversionService } from '../services/conversionService.js'
+import type { ConversionRateService } from '../services/conversionRateService.js'
+import { getDisplayAmounts } from '../services/conversionUtils.js'
 import { WalletService } from '../services/walletService.js'
 import { NgnWalletService } from '../services/ngnWalletService.js'
 import { stakingQuoteSchema, type StakingQuoteRequest } from '../schemas/stakingQuote.js'
@@ -66,6 +68,7 @@ export function createStakingRouter(
   ngnWalletService?: NgnWalletService,
   conversionService?: ConversionService,
   stakingService?: StakingService,
+  conversionRateService?: ConversionRateService,
 ) {
   const router = Router()
   const sender = new OutboxSender(adapter)
@@ -745,9 +748,26 @@ export function createStakingRouter(
           adapter.getClaimableRewards(account),
         ])
 
+        const stakedUsdc = Number(formatAmount6(stakedMicro))
+        const claimableUsdc = Number(formatAmount6(claimableMicro))
+        let dualFields: Record<string, string | number> = {}
+        if (conversionRateService) {
+          const { rate } = await conversionRateService.getRate()
+          const stakedDual = getDisplayAmounts(0, stakedUsdc, rate)
+          const claimableDual = getDisplayAmounts(0, claimableUsdc, rate)
+          dualFields = {
+            stakedAmountNgn: stakedDual.ngn,
+            stakedAmountUsdc: stakedDual.usdc,
+            claimableAmountNgn: claimableDual.ngn,
+            claimableAmountUsdc: claimableDual.usdc,
+            rateUsed: rate,
+          }
+        }
+
         const position: StakingPositionResponse = stakingPositionSchema.parse({
           staked: formatAmount6(stakedMicro),
           claimable: formatAmount6(claimableMicro),
+          ...dualFields,
         })
 
         logger.info('Staking position requested', {

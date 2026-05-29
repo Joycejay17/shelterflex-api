@@ -10,6 +10,7 @@ export interface AuthenticatedRequest extends Request {
     email: string
     name: string
     role: 'tenant' | 'landlord' | 'agent'
+    displayCurrency?: 'NGN' | 'USDC'
   }
 }
 
@@ -59,7 +60,13 @@ export async function authenticateToken(
       return
     }
 
-    req.user = user
+    req.user = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      displayCurrency: user.displayCurrency,
+    }
     logger.info('User authenticated successfully', {
       userId: user.id,
       email: user.email,

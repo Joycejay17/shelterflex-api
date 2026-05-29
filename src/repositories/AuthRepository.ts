@@ -3,6 +3,7 @@ import { getPool } from '../db.js'
 import { userCache } from '../utils/cache.js'
 
 export type UserRole = 'tenant' | 'landlord' | 'agent'
+export type DisplayCurrency = 'NGN' | 'USDC'
 
 export interface User {
   id: string
@@ -13,6 +14,7 @@ export interface User {
   walletAddress?: string
   tier: 'free' | 'pro' | 'enterprise'
   planQuota: number
+  displayCurrency: DisplayCurrency
 }
 
 export interface LandlordProfile {
@@ -69,7 +71,7 @@ export class PostgresUserRepository {
 
     const pool = await this.pool()
     const { rows } = await pool.query(
-      `SELECT id, email, name, role, wallet_address, created_at, tier, plan_quota 
+      `SELECT id, email, name, role, wallet_address, created_at, tier, plan_quota, display_currency 
        FROM users WHERE email = $1`,
       [email.toLowerCase()]
     )
@@ -85,7 +87,8 @@ export class PostgresUserRepository {
       walletAddress: row.wallet_address,
       createdAt: row.created_at,
       tier: row.tier,
-      planQuota: row.plan_quota
+      planQuota: row.plan_quota,
+      displayCurrency: row.display_currency ?? 'NGN',
     }
 
     await userCache.set(cacheKey, user)
@@ -100,7 +103,7 @@ export class PostgresUserRepository {
 
     const pool = await this.pool()
     const { rows } = await pool.query(
-      `SELECT id, email, name, role, wallet_address, created_at, tier, plan_quota 
+      `SELECT id, email, name, role, wallet_address, created_at, tier, plan_quota, display_currency 
        FROM users WHERE id = $1`,
       [id]
     )
@@ -116,7 +119,8 @@ export class PostgresUserRepository {
       walletAddress: row.wallet_address,
       createdAt: row.created_at,
       tier: row.tier,
-      planQuota: row.plan_quota
+      planQuota: row.plan_quota,
+      displayCurrency: row.display_currency ?? 'NGN',
     }
 
     await userCache.set(cacheKey, user)
@@ -132,7 +136,7 @@ export class PostgresUserRepository {
     const { rows } = await pool.query(
       `INSERT INTO users (email, name, role) 
        VALUES ($1, $2, $3) 
-       RETURNING id, email, name, role, wallet_address, created_at, tier, plan_quota`,
+       RETURNING id, email, name, role, wallet_address, created_at, tier, plan_quota, display_currency`,
       [
         email.toLowerCase(),
         email.split('@')[0] ?? email,
@@ -149,14 +153,43 @@ export class PostgresUserRepository {
       walletAddress: row.wallet_address,
       createdAt: row.created_at,
       tier: row.tier,
-      planQuota: row.plan_quota
+      planQuota: row.plan_quota,
+      displayCurrency: row.display_currency ?? 'NGN',
     }
+  }
+
+  async updateDisplayCurrency(email: string, displayCurrency: DisplayCurrency): Promise<User> {
+    const pool = await this.pool()
+    const { rows } = await pool.query(
+      `UPDATE users SET display_currency = $1, updated_at = NOW()
+       WHERE email = $2
+       RETURNING id, email, name, role, wallet_address, created_at, tier, plan_quota, display_currency`,
+      [displayCurrency, email.toLowerCase()],
+    )
+    if (rows.length === 0) {
+      throw new Error('User not found')
+    }
+    const row = rows[0]
+    const user: User = {
+      id: row.id,
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      walletAddress: row.wallet_address,
+      createdAt: row.created_at,
+      tier: row.tier,
+      planQuota: row.plan_quota,
+      displayCurrency: row.display_currency,
+    }
+    await userCache.delete(`email:${email.toLowerCase()}`)
+    await userCache.delete(`id:${user.id}`)
+    return user
   }
 
   async getByWalletAddress(address: string): Promise<User | null> {
     const pool = await this.pool()
     const { rows } = await pool.query(
-      `SELECT id, email, name, role, wallet_address, created_at, tier, plan_quota 
+      `SELECT id, email, name, role, wallet_address, created_at, tier, plan_quota, display_currency 
        FROM users WHERE wallet_address = $1`,
       [address.toLowerCase()]
     )
@@ -172,7 +205,8 @@ export class PostgresUserRepository {
       walletAddress: row.wallet_address,
       createdAt: row.created_at,
       tier: row.tier,
-      planQuota: row.plan_quota
+      planQuota: row.plan_quota,
+      displayCurrency: row.display_currency ?? 'NGN',
     }
   }
 
@@ -182,7 +216,7 @@ export class PostgresUserRepository {
       `UPDATE users 
        SET wallet_address = $1, updated_at = NOW() 
        WHERE email = $2 
-       RETURNING id, email, name, role, wallet_address, created_at, tier, plan_quota`,
+       RETURNING id, email, name, role, wallet_address, created_at, tier, plan_quota, display_currency`,
       [walletAddress.toLowerCase(), email.toLowerCase()]
     )
 
@@ -195,7 +229,8 @@ export class PostgresUserRepository {
       walletAddress: row.wallet_address,
       createdAt: row.created_at,
       tier: row.tier,
-      planQuota: row.plan_quota
+      planQuota: row.plan_quota,
+      displayCurrency: row.display_currency ?? 'NGN',
     }
     // Invalidate/Update
     await userCache.set(`id:${user.id}`, user)

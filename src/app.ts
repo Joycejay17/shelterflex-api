@@ -71,6 +71,9 @@ import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLi
 import { createWhistleblowerApplicationsRouter } from "./routes/whistleblowerApplications.js"
 import { createAdminWhistleblowerApplicationsRouter } from "./routes/adminWhistleblowerApplications.js"
 import { createConversionProviderFromEnv } from "./services/conversionProviderFactory.js"
+import { ConversionRateService } from "./services/conversionRateService.js"
+import { createConversionRouter } from "./routes/conversion.js"
+import { createUserPreferencesRouter } from "./routes/userPreferences.js"
 import { createAdminAuditRouter } from "./routes/adminAudit.js"
 import { createAdminUnderwritingRouter } from "./routes/adminUnderwriting.js"
 import { PostgresRewardsDataLayer } from "./services/postgres-rewards-data-layer.js"
@@ -225,13 +228,13 @@ export function createApp() {
   const rewardsDataLayer = process.env.DATABASE_URL
     ? new PostgresRewardsDataLayer()
     : new StubRewardsDataLayer();
-  const earningsService = new EarningsServiceImpl(rewardsDataLayer, {
-    usdcToNgnRate: 1600, // Example exchange rate: 1 USDC = 1600 NGN
-  });
-
   const conversionProvider = createConversionProviderFromEnv(env);
+  const conversionRateService = new ConversionRateService(conversionProvider);
   const conversionService = new ConversionService(conversionProvider, "onramp");
   app.set("conversionService", conversionService);
+  app.set("conversionRateService", conversionRateService);
+
+  const earningsService = new EarningsServiceImpl(rewardsDataLayer, conversionRateService);
   const stakingService = new StakingService(sorobanAdapter);
 
   // Workers collection for graceful shutdown
@@ -435,6 +438,8 @@ export function createApp() {
   // Routes
   app.use("/health", createHealthRouter(sorobanAdapter))
   app.use("/api/auth", createAuthRateLimiter(env), authRouter)
+  app.use("/api/conversion", createConversionRouter(conversionRateService))
+  app.use("/api/user", createUserPreferencesRouter())
   app.use(createPublicRateLimiter(env))
 
   // API versioning — applied to all /api routes after rate limiting
@@ -456,7 +461,7 @@ export function createApp() {
   app.use('/api/admin/webhook-replay', createWebhookReplayRouter())
   app.use('/api/deals', createDealsRouter())
   app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
-  app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService))
+  app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService, conversionRateService))
   app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
   app.use('/api/deposits', createDepositsRouter(conversionService))
   app.use('/api/gas-metrics', createGasMetricsRouter())
@@ -520,6 +525,7 @@ export function createApp() {
       ngnWalletService,
       conversionService,
       stakingService,
+      conversionRateService,
     ),
   );
   app.use("/api/webhooks", createWebhooksRouter(ngnWalletService));
