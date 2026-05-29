@@ -25,11 +25,6 @@ export interface OutrightBreakdown {
   totalPayable: number
 }
 
-export interface PricingValidationError {
-  code: string
-  message: string
-}
-
 /**
  * Compute installment schedule for a given base price, deposit, and term
  */
