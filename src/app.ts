@@ -117,6 +117,9 @@ import { createTenantCreditScoringRouter } from "./routes/tenantCreditScoring.js
 import { createTenantDocumentVaultRouter } from "./routes/tenantDocumentVault.js";
 import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSchedule.js";
 import { createDocsRouter } from "./routes/docs.js";
+import { createKycRouter } from "./routes/kyc.js";
+import { createAbuseRouter } from "./routes/abuse.js";
+
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
 import { createAdminFraudRouter } from "./routes/adminFraud.js";
 import { initializeCacheInvalidationWebhooks } from "./services/cacheInvalidation.js";
@@ -547,6 +550,8 @@ export function createApp() {
   app.use("/api/admin", createSettlementAdminRouter());
   app.use("/api/apartment-reviews", createApartmentReviewsRouter());
   app.use("/api/compliance/reports", createComplianceReportRouter());
+  app.use("/api/kyc", createKycRouter());
+  app.use("/api/admin/abuse", createAbuseRouter());
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
   app.use("/api/tenant-rating-card", createTenantRatingCardRouter());

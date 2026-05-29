@@ -34,3 +34,6 @@ export function expectErrorShape(
   expect(response.body.error).toHaveProperty('message')
   expect(typeof response.body.error.message).toBe('string')
 }
+
+export const RATE_LIMIT_BYPASS_TOKEN = 'test-bypass-token-12345'
+

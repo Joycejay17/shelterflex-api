@@ -21,8 +21,10 @@ import { ErrorCode } from '../errors/errorCodes.js'
 import { outboxStore } from '../outbox/index.js'
 import { TxType } from '../outbox/types.js'
 import { computeDealProgress } from '../services/dealProgress.js'
+import { detectDuplicateDealSpam } from '../services/abuseDetectionService.js'
 
 const router = Router()
+
 
 /**
  * POST /api/deals
@@ -46,6 +48,19 @@ const router = Router()
 router.post('/', async (req: Request, res: Response, next) => {
   try {
     const validatedData: CreateDealRequest = createDealSchema.parse(req.body)
+
+    const userId = req.headers['x-user-id'] || (req as any).user?.id
+    if (userId && validatedData.listingId) {
+      const flagged = await detectDuplicateDealSpam(String(userId), validatedData.listingId)
+      if (flagged) {
+        throw new AppError(
+          ErrorCode.TOO_MANY_REQUESTS,
+          429,
+          'Your account is temporarily blocked from submitting deal applications.'
+        )
+      }
+    }
+
     
     // Validate listing if listingId is provided
     if (validatedData.listingId) {
