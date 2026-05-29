@@ -20,7 +20,7 @@ import { getSorobanConfigFromEnv } from "../soroban/client.js";
 import { NgnWalletService } from "../services/ngnWalletService.js";
 import { getPaymentProvider } from "../payments/index.js";
 import { requireValidWebhookSignature } from "../payments/webhookSignature.js";
-import { jsonPayloadSha256Hex } from "../utils/sha256.js";
+import { jsonPayloadSha256Hex, sha256Hex, generateRandomSecretHex } from "../utils/sha256.js";
 import { z } from "zod";
 import { authenticateToken, type AuthenticatedRequest } from "../middleware/auth.js";
 import {
@@ -28,7 +28,6 @@ import {
   webhookSubscriptionStore,
   webhookDeliveryStore
 } from "../models/webhookSubscription.js";
-import crypto from "node:crypto";
 
 
 export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
@@ -384,8 +383,8 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
           throw new AppError(ErrorCode.VALIDATION_ERROR, 400, "Target URL must use HTTPS protocol");
         }
 
-        const plainSecret = `whsec_${crypto.randomBytes(24).toString("hex")}`;
-        const hashedSecret = crypto.createHash("sha256").update(plainSecret).digest("hex");
+        const plainSecret = `whsec_${generateRandomSecretHex(24)}`;
+        const hashedSecret = sha256Hex(plainSecret);
 
         const sub = webhookSubscriptionStore.create({
           ownerId: userId,

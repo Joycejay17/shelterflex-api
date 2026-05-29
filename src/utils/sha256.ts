@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 
 export function sha256Hex(s: string): string {
   return createHash('sha256').update(s).digest('hex')
@@ -7,4 +7,8 @@ export function sha256Hex(s: string): string {
 /** Stable JSON + SHA-256 (body hashing for idempotency / webhooks). */
 export function jsonPayloadSha256Hex(value: unknown): string {
   return sha256Hex(JSON.stringify(value ?? null))
+}
+
+export function generateRandomSecretHex(bytesCount = 24): string {
+  return randomBytes(bytesCount).toString('hex')
 }
