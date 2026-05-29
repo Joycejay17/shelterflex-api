@@ -22,8 +22,12 @@ import { outboxStore } from '../outbox/index.js'
 import { TxType } from '../outbox/types.js'
 import { computeDealProgress } from '../services/dealProgress.js'
 import { detectDuplicateDealSpam } from '../services/abuseDetectionService.js'
+import { enqueueDelivery } from '../services/webhookDeliveryService.js'
+import { WebhookEventType } from '../models/webhookSubscription.js'
+import { logger } from '../utils/logger.js'
 
 const router = Router()
+
 
 
 /**
@@ -222,6 +226,29 @@ router.patch('/:dealId/status', async (req: Request, res: Response, next) => {
     if (!deal) {
       throw new AppError(ErrorCode.NOT_FOUND, 404, `Deal with ID ${dealId} not found`)
     }
+
+    if (deal) {
+      let eventType: WebhookEventType | undefined
+      if (validatedData.status === 'active') {
+        eventType = WebhookEventType.DEAL_ACTIVATED
+      } else if (validatedData.status === 'completed') {
+        eventType = WebhookEventType.DEAL_COMPLETED
+      } else if (validatedData.status === 'defaulted') {
+        eventType = WebhookEventType.DEAL_DEFAULTED
+      }
+
+      if (eventType) {
+        await enqueueDelivery(eventType, {
+          dealId: deal.dealId,
+          status: deal.status,
+          listingId: deal.listingId,
+          tenantId: deal.tenantId,
+          landlordId: deal.landlordId,
+          totalFinancedAmount: deal.totalFinancedAmount
+        }).catch(err => logger.error('Failed to enqueue deal webhook:', err))
+      }
+    }
+
     
     res.json({
       success: true,
