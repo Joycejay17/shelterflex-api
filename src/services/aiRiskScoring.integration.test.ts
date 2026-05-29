@@ -113,6 +113,12 @@ describe('AI risk scoring integration', () => {
         missedPayments: 0,
         totalPayments: 24,
       },
+      backgroundCheckData: {
+        employmentVerified: true,
+        incomeStability: 'stable',
+        averageMonthlyIncome: 600_000,
+        overdraftCount: 0,
+      },
     })
 
     expect(result.decision).toBe('REVIEW')

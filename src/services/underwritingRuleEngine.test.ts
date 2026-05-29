@@ -24,6 +24,12 @@ describe('UnderwritingRuleEngine', () => {
           missedPayments: 0,
           totalPayments: 20,
         },
+        backgroundCheckData: {
+          employmentVerified: true,
+          incomeStability: 'stable',
+          averageMonthlyIncome: 25000,
+          overdraftCount: 0,
+        },
       }
 
       const result = engine.evaluate(context)
@@ -106,6 +112,12 @@ describe('UnderwritingRuleEngine', () => {
         duration: 12,
         monthlyPayment: 7000,
         totalAmount: 84000,
+        backgroundCheckData: {
+          employmentVerified: true,
+          incomeStability: 'stable',
+          averageMonthlyIncome: 25000,
+          overdraftCount: 0,
+        },
       }
 
       const result = engine.evaluate(context)
