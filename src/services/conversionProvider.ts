@@ -12,8 +12,15 @@ export interface ConvertNgnToUsdcOutput {
   providerRef: string
 }
 
+export interface ConversionRateQuote {
+  /** NGN per 1 USDC */
+  rate: number
+  source: string
+}
+
 export interface ConversionProvider {
   convertNgnToUsdc(input: ConvertNgnToUsdcInput): Promise<ConvertNgnToUsdcOutput>
+  getRate(): Promise<ConversionRateQuote>
 }
 
 export type ConversionProviderErrorCode = 'INVALID_RESPONSE' | 'NETWORK' | 'VALIDATION'
@@ -101,11 +108,7 @@ export class HttpConversionProvider implements ConversionProvider {
     return rate
   }
 
-  async convertNgnToUsdc(input: ConvertNgnToUsdcInput): Promise<ConvertNgnToUsdcOutput> {
-    if (input.amountNgn <= 0) {
-      throw new ConversionProviderError('amountNgn must be positive', 'VALIDATION')
-    }
-
+  async getRate(): Promise<ConversionRateQuote> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs)
 
@@ -138,18 +141,26 @@ export class HttpConversionProvider implements ConversionProvider {
         throw new ConversionProviderError('Conversion rate response is not valid JSON', 'INVALID_RESPONSE')
       }
 
-      const fxRateNgnPerUsdc = this.validateBoundedRate(parseFxRateFromJson(json))
-      const amountUsdc = input.amountNgn / fxRateNgnPerUsdc
-      const providerRef =
-        parseOptionalProviderRef(json) ?? `http:${input.depositId}:${fxRateNgnPerUsdc}`
-
-      return {
-        amountUsdc: toUsdcDecimalString(amountUsdc),
-        fxRateNgnPerUsdc,
-        providerRef,
-      }
+      const rate = this.validateBoundedRate(parseFxRateFromJson(json))
+      return { rate, source: 'http' }
     } finally {
       clearTimeout(timer)
+    }
+  }
+
+  async convertNgnToUsdc(input: ConvertNgnToUsdcInput): Promise<ConvertNgnToUsdcOutput> {
+    if (input.amountNgn <= 0) {
+      throw new ConversionProviderError('amountNgn must be positive', 'VALIDATION')
+    }
+
+    const { rate: fxRateNgnPerUsdc } = await this.getRate()
+    const amountUsdc = input.amountNgn / fxRateNgnPerUsdc
+    const providerRef = `http:${input.depositId}:${fxRateNgnPerUsdc}`
+
+    return {
+      amountUsdc: toUsdcDecimalString(amountUsdc),
+      fxRateNgnPerUsdc,
+      providerRef,
     }
   }
 }
@@ -162,6 +173,17 @@ export class FallbackConversionProvider implements ConversionProvider {
     private readonly primary: ConversionProvider,
     private readonly fallback: ConversionProvider,
   ) {}
+
+  async getRate(): Promise<ConversionRateQuote> {
+    try {
+      return await this.primary.getRate()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      logger.warn('Conversion rate primary provider failed; using fallback', { error: msg })
+      const quote = await this.fallback.getRate()
+      return { ...quote, source: `fallback:${quote.source}` }
+    }
+  }
 
   async convertNgnToUsdc(input: ConvertNgnToUsdcInput): Promise<ConvertNgnToUsdcOutput> {
     try {
@@ -189,6 +211,13 @@ export class FallbackConversionProvider implements ConversionProvider {
  */
 export class StubConversionProvider implements ConversionProvider {
   constructor(private fxRateNgnPerUsdc: number) {}
+
+  async getRate(): Promise<ConversionRateQuote> {
+    if (this.fxRateNgnPerUsdc <= 0) {
+      throw new ConversionProviderError('fxRateNgnPerUsdc must be positive', 'VALIDATION')
+    }
+    return { rate: this.fxRateNgnPerUsdc, source: 'stub' }
+  }
 
   async convertNgnToUsdc(input: ConvertNgnToUsdcInput): Promise<ConvertNgnToUsdcOutput> {
     if (input.amountNgn <= 0) {
