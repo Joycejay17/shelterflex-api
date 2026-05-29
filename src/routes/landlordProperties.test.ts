@@ -64,7 +64,7 @@ describe('Landlord Properties API', () => {
       expect(response.status).toBe(201)
       expect(response.body.title).toBe(validProperty.title)
       expect(response.body.landlordId).toBe(landlordId)
-      expect(response.body.status).toBe(PropertyStatus.PENDING)
+      expect(response.body.status).toBe(PropertyStatus.PENDING_REVIEW)
     })
 
     it('accepts the frontend wizard payload shape', async () => {
@@ -82,10 +82,15 @@ describe('Landlord Properties API', () => {
           baths: '2',
           sqm: '120',
           yearBuilt: '2020',
-          amenities: ['24/7 Security', 'Parking Space'],
+          amenities: ['security', 'parking'],
           images: [
-            { id: 'living-1', roomType: 'living', preview: '/placeholder.svg?text=living' },
+            { id: 'living-1', roomType: 'living', preview: 'https://example.com/1.jpg' },
+            { id: 'bed-1', roomType: 'bedroom', preview: 'https://example.com/2.jpg' },
+            { id: 'bath-1', roomType: 'bathroom', preview: 'https://example.com/3.jpg' },
           ],
+          negotiatedLandlordRateNgn: 3000000,
+          outrightPriceNgn: 3300000,
+          installmentBasePriceNgn: 3500000,
         })
 
       expect(response.status).toBe(201)
@@ -202,11 +207,11 @@ describe('Landlord Properties API', () => {
       const response = await request
         .patch(`/api/landlord/properties/${property.id}`)
         .set('Authorization', `Bearer ${token}`)
-        .send({ title: 'New Title', status: PropertyStatus.ACTIVE })
+        .send({ title: 'New Title', status: PropertyStatus.APPROVED })
 
       expect(response.status).toBe(200)
       expect(response.body.title).toBe('New Title')
-      expect(response.body.status).toBe(PropertyStatus.ACTIVE)
+      expect(response.body.status).toBe(PropertyStatus.APPROVED)
     })
 
     it('should not allow updating another landlord\'s property', async () => {
@@ -226,6 +231,84 @@ describe('Landlord Properties API', () => {
         .send({ title: 'Tried to change' })
 
       expectErrorShape(response, 'FORBIDDEN', 403)
+    })
+  })
+
+  describe('pricing validation', () => {
+    it('rejects outright price greater than installment base', async () => {
+      const response = await request
+        .post('/api/landlord/properties')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          title: 'Bad Pricing',
+          address: '1 Test Road',
+          bedrooms: 2,
+          bathrooms: 1,
+          photos: [
+            'https://example.com/1.jpg',
+            'https://example.com/2.jpg',
+            'https://example.com/3.jpg',
+          ],
+          negotiatedLandlordRateNgn: 2000000,
+          outrightPriceNgn: 4000000,
+          installmentBasePriceNgn: 3500000,
+        })
+
+      expectErrorShape(response, 'VALIDATION_ERROR', 400)
+    })
+  })
+
+  describe('PATCH /api/landlord/properties/:id/deactivate', () => {
+    it('deactivates owned property', async () => {
+      const property = await landlordPropertyStore.create({
+        landlordId,
+        title: 'Live Listing',
+        address: 'Addr',
+        bedrooms: 2,
+        bathrooms: 1,
+        annualRentNgn: 2000000,
+        photos: [
+          'https://example.com/1.jpg',
+          'https://example.com/2.jpg',
+          'https://example.com/3.jpg',
+        ],
+      })
+
+      const response = await request
+        .patch(`/api/landlord/properties/${property.id}/deactivate`)
+        .set('Authorization', `Bearer ${token}`)
+
+      expect(response.status).toBe(200)
+      expect(response.body.status).toBe(PropertyStatus.DEACTIVATED)
+    })
+  })
+
+  describe('PATCH /api/landlord/properties/:id/relist', () => {
+    it('relists deactivated property to pending_review', async () => {
+      const property = await landlordPropertyStore.create({
+        landlordId,
+        title: 'Old Listing',
+        address: 'Addr',
+        bedrooms: 1,
+        bathrooms: 1,
+        annualRentNgn: 1000000,
+        photos: [
+          'https://example.com/1.jpg',
+          'https://example.com/2.jpg',
+          'https://example.com/3.jpg',
+        ],
+      })
+
+      await landlordPropertyStore.update(property.id, {
+        status: PropertyStatus.DEACTIVATED,
+      })
+
+      const response = await request
+        .patch(`/api/landlord/properties/${property.id}/relist`)
+        .set('Authorization', `Bearer ${token}`)
+
+      expect(response.status).toBe(200)
+      expect(response.body.status).toBe(PropertyStatus.PENDING_REVIEW)
     })
   })
 
