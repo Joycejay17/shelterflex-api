@@ -79,6 +79,7 @@ import { createLandlordPropertiesRouter } from "./routes/landlordProperties.js";
 import { createLandlordRouter } from "./routes/landlord.js";
 import { authenticateToken } from "./middleware/auth.js";
 import { createTenantApplicationsRouter } from "./routes/tenantApplications.js";
+import { createTenantSavedPropertiesRouter } from "./routes/tenantSavedProperties.js";
 import { createTenantPaymentsRouter } from "./routes/tenantPayments.js";
 import { createNotificationsRouter } from "./routes/notifications.js";
 import { createSettlementAdminRouter } from "./routes/settlementAdmin.js";
@@ -538,6 +539,10 @@ export function createApp() {
   );
   app.use("/api/landlord", authenticateToken, createLandlordRouter());
   app.use("/api/tenant/applications", createTenantApplicationsRouter());
+  app.use(
+    "/api/tenant/saved-properties",
+    createTenantSavedPropertiesRouter(),
+  );
   app.use(
     "/api/whistleblower/applications",
     createWhistleblowerApplicationsRouter(),
