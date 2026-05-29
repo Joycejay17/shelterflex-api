@@ -22,6 +22,10 @@ export const createDealSchema = z.object({
     .refine((val) => [3, 6, 12].includes(val), {
       message: 'Term months must be one of: 3, 6, 12',
     }),
+  repaymentMethod: z.enum(['self_pay', 'salary_deduction']).default('self_pay'),
+  employerId: z.string().uuid().optional(),
+  employeeId: z.string().min(1).max(128).optional(),
+  deductionDay: z.number().int().min(1).max(28).optional(),
 }).refine(
   (data) => data.depositNgn >= data.annualRentNgn * 0.2,
   {
@@ -34,7 +38,19 @@ export const createDealSchema = z.object({
     message: 'Deposit must be less than annual rent',
     path: ['depositNgn'],
   }
-)
+).superRefine((data, ctx) => {
+  if (data.repaymentMethod === 'salary_deduction') {
+    if (!data.employerId) {
+      ctx.addIssue({ code: 'custom', message: 'employerId is required for salary deduction', path: ['employerId'] })
+    }
+    if (!data.employeeId) {
+      ctx.addIssue({ code: 'custom', message: 'employeeId is required for salary deduction', path: ['employeeId'] })
+    }
+    if (!data.deductionDay) {
+      ctx.addIssue({ code: 'custom', message: 'deductionDay is required for salary deduction', path: ['deductionDay'] })
+    }
+  }
+})
 
 export type CreateDealRequest = z.infer<typeof createDealSchema>
 

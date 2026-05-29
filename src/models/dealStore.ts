@@ -14,6 +14,7 @@ import {
   PaginatedDeals,
   DealStatus,
   ScheduleItemStatus,
+  RepaymentMethod,
 } from './deal.js'
 import { generateRepaymentSchedule } from '../utils/scheduleGenerator.js'
 import {
@@ -38,6 +39,11 @@ interface DealStorePort {
   ): Promise<DealWithSchedule | null>
   /** Test helper: override instalment due date (in-memory adapter only). */
   setScheduleDueDateForTest(dealId: string, period: number, dueDateIso: string): Promise<void>
+  updateRepaymentMethod(
+    dealId: string,
+    repaymentMethod: RepaymentMethod,
+    options?: { employerId?: string; employeeId?: string; deductionDay?: number },
+  ): Promise<DealWithSchedule | null>
   clear(): Promise<void>
 }
 
@@ -89,6 +95,10 @@ class InMemoryDealStore implements DealStorePort {
       termMonths: input.termMonths,
       createdAt: now,
       status: DealStatus.DRAFT,
+      repaymentMethod: input.repaymentMethod ?? 'self_pay',
+      employerId: input.employerId,
+      employeeId: input.employeeId,
+      deductionDay: input.deductionDay,
       schedule,
     }
 
@@ -153,6 +163,10 @@ class InMemoryDealStore implements DealStorePort {
         termMonths: deal.termMonths,
         createdAt: deal.createdAt,
         status: deal.status,
+        repaymentMethod: deal.repaymentMethod,
+        employerId: deal.employerId,
+        employeeId: deal.employeeId,
+        deductionDay: deal.deductionDay,
       })),
       total: filteredDeals.length,
       page,
@@ -212,6 +226,31 @@ class InMemoryDealStore implements DealStorePort {
     const item = deal.schedule.find((s) => s.period === period)
     if (!item) throw new Error(`Period ${period} not found`)
     item.dueDate = dueDateIso
+  }
+
+  async updateRepaymentMethod(
+    dealId: string,
+    repaymentMethod: RepaymentMethod,
+    options?: { employerId?: string; employeeId?: string; deductionDay?: number },
+  ): Promise<DealWithSchedule | null> {
+    const deal = this.deals.get(dealId)
+    if (!deal) return null
+
+    deal.repaymentMethod = repaymentMethod
+    if (repaymentMethod === 'salary_deduction') {
+      deal.employerId = options?.employerId
+      deal.employeeId = options?.employeeId
+      deal.deductionDay = options?.deductionDay
+    } else {
+      deal.employerId = undefined
+      deal.employeeId = undefined
+      deal.deductionDay = undefined
+    }
+
+    return {
+      ...deal,
+      schedule: [...deal.schedule],
+    }
   }
 
   async clear(): Promise<void> {
@@ -495,6 +534,16 @@ class PostgresDealStore implements DealStorePort {
     await pool.query('TRUNCATE tenant_deals RESTART IDENTITY CASCADE')
   }
 
+  async updateRepaymentMethod(
+    dealId: string,
+    repaymentMethod: RepaymentMethod,
+    options?: { employerId?: string; employeeId?: string; deductionDay?: number },
+  ): Promise<DealWithSchedule | null> {
+    void repaymentMethod
+    void options
+    return this.findById(dealId)
+  }
+
   private mapDeal(row: DealRow): Deal {
     return {
       dealId: row.deal_id,
@@ -507,6 +556,7 @@ class PostgresDealStore implements DealStorePort {
       termMonths: row.term_months,
       createdAt: new Date(row.created_at),
       status: row.status,
+      repaymentMethod: 'self_pay',
     }
   }
 
@@ -596,6 +646,15 @@ class HybridDealStore implements DealStorePort {
   ): Promise<void> {
     const adapter = await this.adapter()
     return adapter.setScheduleDueDateForTest(dealId, period, dueDateIso)
+  }
+
+  async updateRepaymentMethod(
+    dealId: string,
+    repaymentMethod: RepaymentMethod,
+    options?: { employerId?: string; employeeId?: string; deductionDay?: number },
+  ): Promise<DealWithSchedule | null> {
+    const adapter = await this.adapter()
+    return adapter.updateRepaymentMethod(dealId, repaymentMethod, options)
   }
 
   async clear(): Promise<void> {

@@ -17,6 +17,8 @@ export enum ScheduleItemStatus {
   LATE = 'late',
 }
 
+export type RepaymentMethod = 'self_pay' | 'salary_deduction'
+
 export interface Deal {
   dealId: string
   tenantId: string
@@ -28,6 +30,10 @@ export interface Deal {
   termMonths: number
   createdAt: Date
   status: DealStatus
+  repaymentMethod: RepaymentMethod
+  employerId?: string
+  employeeId?: string
+  deductionDay?: number
 }
 
 export interface CreateDealInput {
@@ -37,6 +43,10 @@ export interface CreateDealInput {
   annualRentNgn: number
   depositNgn: number
   termMonths: number
+  repaymentMethod?: RepaymentMethod
+  employerId?: string
+  employeeId?: string
+  deductionDay?: number
 }
 
 export interface ScheduleItem {
