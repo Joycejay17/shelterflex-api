@@ -86,6 +86,19 @@ export type AuditEventType =
   // Disputes
   | 'DISPUTE_CREATED'
   | 'DISPUTE_RESOLVED'
+  // Inspector jobs
+  | 'INSPECTOR_JOB_CREATED'
+  | 'INSPECTOR_JOB_CLAIMED'
+  | 'INSPECTOR_REPORT_SUBMITTED'
+  | 'INSPECTOR_REPORT_APPROVED'
+  | 'INSPECTOR_REPORT_REJECTED'
+  // Rent guarantee insurance
+  | 'INSURANCE_QUOTE_REQUESTED'
+  | 'INSURANCE_POLICY_PURCHASED'
+  | 'INSURANCE_CLAIM_FILED'
+  // Tenant rating card
+  | 'TENANT_RATING_SUBMITTED'
+  | 'TENANT_RATING_SHARE_TOKEN_GENERATED'
   // State-changing operations (auto-generated)
   | 'STATE_CHANGED'
   | 'STATE_DELETED'
