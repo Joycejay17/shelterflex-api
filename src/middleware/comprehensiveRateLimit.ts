@@ -12,6 +12,7 @@ import {
   abuseEventStore,
 } from '../services/abuseDetectionService.js'
 import { slidingWindowLimiter } from '../services/SlidingWindowLimiter.js'
+import { quotaService } from '../services/QuotaService.js'
 
 export interface EndpointRateLimitConfig {
   windowMs: number
@@ -31,38 +32,56 @@ export function setEndpointRateLimit(
   customEndpointLimits.set(key, config)
 }
 
-function getEndpointConfig(method: string, path: string): RateLimitConfig {
+function getEndpointConfig(method: string, path: string): RateLimitConfig & { matchedKey?: string } {
   const exactKey = `${method} ${path}`
-  if (customEndpointLimits.has(exactKey)) return customEndpointLimits.get(exactKey)!
-  if (customEndpointLimits.has(path)) return customEndpointLimits.get(path)!
+  if (customEndpointLimits.has(exactKey)) return { ...customEndpointLimits.get(exactKey)!, matchedKey: exactKey }
+  if (customEndpointLimits.has(path)) return { ...customEndpointLimits.get(path)!, matchedKey: path }
 
   for (const [key, config] of customEndpointLimits.entries()) {
     if (path.startsWith(key) && !key.includes(' ')) {
-      return config
+      return { ...config, matchedKey: key }
     }
   }
 
+  if (path.startsWith('/api/auth/request-otp') || path.startsWith('/auth/request-otp')) {
+    return { windowMs: 15 * 60 * 1000, limit: 5, keyPrefix: 'auth_otp', matchedKey: 'auth_otp' }
+  }
+  if (path.startsWith('/api/auth/verify-otp') || path.startsWith('/auth/verify-otp')) {
+    return { windowMs: 15 * 60 * 1000, limit: 10, keyPrefix: 'auth_verify', matchedKey: 'auth_verify' }
+  }
+  if (
+    path.startsWith('/api/auth/wallet-challenge') || path.startsWith('/auth/wallet-challenge') ||
+    path.startsWith('/api/auth/wallet/challenge') || path.startsWith('/auth/wallet/challenge')
+  ) {
+    return { windowMs: 60 * 1000, limit: 20, keyPrefix: 'auth_challenge', matchedKey: 'auth_challenge' }
+  }
+  if (
+    path.startsWith('/api/auth/wallet-verify') || path.startsWith('/auth/wallet-verify') ||
+    path.startsWith('/api/auth/wallet/verify') || path.startsWith('/auth/wallet/verify')
+  ) {
+    return { windowMs: 60 * 1000, limit: 20, keyPrefix: 'auth_wallet_verify', matchedKey: 'auth_wallet_verify' }
+  }
   if (path.startsWith('/api/auth') || path.startsWith('/auth')) {
-    return RateLimitTiers.auth
+    return { windowMs: 60 * 1000, limit: 20, keyPrefix: 'auth', matchedKey: 'auth' }
   }
 
   if (method === 'POST' && (path === '/api/kyc' || path === '/api/kyc/' || path === '/kyc' || path === '/kyc/')) {
-    return RateLimitTiers.kyc_submit
+    return { ...RateLimitTiers.kyc_submit, matchedKey: 'kyc_submit' }
   }
 
   if (method === 'POST' && (path === '/api/deals' || path === '/api/deals/' || path === '/deals' || path === '/deals/')) {
-    return RateLimitTiers.deal_apply
+    return { ...RateLimitTiers.deal_apply, matchedKey: 'deal_apply' }
   }
 
   if (method === 'POST' && (path === '/api/payments/confirm' || path === '/api/payments/confirm/' || path === '/payments/confirm' || path === '/payments/confirm/')) {
-    return RateLimitTiers.payment_initiate
+    return { ...RateLimitTiers.payment_initiate, matchedKey: 'payment_initiate' }
   }
 
   if (path.startsWith('/api/properties') || path.startsWith('/properties')) {
-    return RateLimitTiers.search
+    return { ...RateLimitTiers.search, matchedKey: 'search' }
   }
 
-  return RateLimitTiers.public
+  return { ...RateLimitTiers.public, matchedKey: 'public' }
 }
 
 export function createComprehensiveRateLimiter(options: {
@@ -126,11 +145,23 @@ export function createComprehensiveRateLimiter(options: {
         }
       }
 
-      const windowMs = config.windowMs
-      const limit = config.limit
+      const userTierLimits = await quotaService.getUserLimits(user)
 
+      let windowMs = config.windowMs
+      let limit = config.limit
+
+      if (config.keyPrefix === 'public') {
+        windowMs = options.defaultWindowMs ?? 15 * 60 * 1000
+        limit = options.defaultLimit ?? userTierLimits.requestsPerMinute ?? 100
+      }
+
+      if (userId) {
+        limit = limit * 2
+      }
+
+      const matchedKey = config.matchedKey || endpoint
       const identifier = userId ? `user:${userId}` : `ip:${clientIp}`
-      const key = `ratelimit:${config.keyPrefix || 'api'}:${identifier}:${endpoint}`
+      const key = `ratelimit:${config.keyPrefix || 'api'}:${identifier}:${matchedKey}`
 
       const result = await slidingWindowLimiter.checkLimit(key, limit, windowMs)
 
@@ -177,4 +208,5 @@ export function getRateLimitStats(): {
 export function resetRateLimitStore(): void {
   customEndpointLimits.clear()
   abuseEventStore.clear()
+  slidingWindowLimiter.clear()
 }

@@ -548,7 +548,9 @@ export function createApp() {
       ngnWalletService,
       conversionService,
       stakingService,
+      receiptRepo,
     ),
+
   );
   app.use("/api/webhooks", createWebhooksRouter(ngnWalletService));
   app.use("/api/deposits", createDepositsRouter(conversionService));

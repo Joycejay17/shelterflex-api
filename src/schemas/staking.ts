@@ -94,6 +94,10 @@ export const stakingPositionSchema = z.object({
     .string()
     .regex(/^\d+(\.\d{1,6})?$/, 'Must be a positive decimal with up to 6 places')
     .describe('Amount of rewards available for claiming in USDC'),
+  warming: z.string().optional(),
+  cooling: z.string().optional(),
+  lockExpiry: z.string().optional(),
 })
+
 
 export type StakingPositionResponse = z.infer<typeof stakingPositionSchema>

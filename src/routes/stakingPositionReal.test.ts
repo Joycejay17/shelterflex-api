@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createApp } from '../app.js'
 import { sessionStore, userStore } from '../models/authStore.js'
 import request from 'supertest'
@@ -28,6 +28,10 @@ describe('Staking Position (Real Adapter)', () => {
     userStore.getOrCreateByEmail(email)
     authToken = 'test-token-real-position'
     sessionStore.create(email, authToken)
+  })
+
+  afterEach(() => {
+    delete process.env.USE_REAL_SOROBAN
   })
 
   it('should return real staking position using on-chain adapter', async () => {

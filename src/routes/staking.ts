@@ -20,6 +20,8 @@ import { NgnWalletService } from '../services/ngnWalletService.js'
 import { stakingQuoteSchema, type StakingQuoteRequest } from '../schemas/stakingQuote.js'
 import { quoteStore } from '../models/quoteStore.js'
 import { StakingService } from '../services/stakingService.js'
+import { ReceiptRepository } from '../indexer/receipt-repository.js'
+
 import {
   stakeSchema,
   unstakeSchema,
@@ -66,6 +68,7 @@ export function createStakingRouter(
   ngnWalletService?: NgnWalletService,
   conversionService?: ConversionService,
   stakingService?: StakingService,
+  receiptRepo?: ReceiptRepository,
 ) {
   const router = Router()
   const sender = new OutboxSender(adapter)
@@ -748,7 +751,11 @@ export function createStakingRouter(
         const position: StakingPositionResponse = stakingPositionSchema.parse({
           staked: formatAmount6(stakedMicro),
           claimable: formatAmount6(claimableMicro),
+          warming: "0.000000",
+          cooling: "0.000000",
+          lockExpiry: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(), // 2 days lock
         })
+
 
         logger.info('Staking position requested', {
           requestId: req.requestId,
@@ -765,5 +772,86 @@ export function createStakingRouter(
     },
   )
 
+  router.get(
+    '/history',
+    authenticateToken,
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const userId = req.user?.id
+        if (!userId) {
+          throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication required')
+        }
+
+        const accountHeader = req.headers['x-wallet-address']
+        let account: string
+        if (typeof accountHeader === 'string' && accountHeader.length > 0) {
+          account = accountHeader
+        } else if (env.CUSTODIAL_MODE_ENABLED) {
+          try {
+            account = await walletService.getPublicAddress(userId)
+          } catch (error) {
+            if (error instanceof Error && error.message.includes('Wallet not found')) {
+              throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'User wallet not found')
+            }
+            throw error
+          }
+        } else {
+          const linked = await linkedAddressStore.getLinkedAddress(userId)
+          if (!linked) {
+            throw new AppError(
+              ErrorCode.VALIDATION_ERROR,
+              400,
+              'No linked wallet address found for user',
+            )
+          }
+          account = linked
+        }
+
+        if (!receiptRepo) {
+          return res.status(200).json({ success: true, history: [] })
+        }
+
+        const paged = await receiptRepo.query({
+          fromAddress: account,
+          pageSize: 100,
+        })
+
+        const pagedTo = await receiptRepo.query({
+          toAddress: account,
+          pageSize: 100,
+        })
+
+        const allReceipts = [...paged.data, ...pagedTo.data]
+        const stakingReceipts = allReceipts.filter(r => 
+          r.txType === TxType.STAKE || 
+          r.txType === TxType.UNSTAKE || 
+          r.txType === TxType.STAKE_REWARD_CLAIM
+        )
+
+        const uniqueMap = new Map<string, typeof stakingReceipts[0]>()
+        for (const r of stakingReceipts) {
+          uniqueMap.set(r.txId, r)
+        }
+
+        const sorted = [...uniqueMap.values()].sort((a, b) => b.indexedAt.getTime() - a.indexedAt.getTime())
+
+        res.status(200).json({
+          success: true,
+          history: sorted.map(r => ({
+            txId: r.txId,
+            txType: r.txType,
+            amountUsdc: r.amountUsdc,
+            amountNgn: r.amountNgn,
+            fxRate: r.fxRate,
+            indexedAt: r.indexedAt.toISOString(),
+          }))
+        })
+      } catch (error) {
+        next(error)
+      }
+    }
+  )
+
   return router
 }
+
