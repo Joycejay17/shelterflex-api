@@ -90,10 +90,6 @@ import { durableIdempotencyService } from "./services/durableIdempotencyService.
 import { createSupportRouter } from "./routes/support.js";
 import { createPropertyIssueReportsRouter } from "./routes/propertyIssueReports.js";
 import { createPropertyPhotosRouter } from "./routes/propertyPhotos.js";
-import { createPropertiesRouter } from "./routes/properties.js";
-import { createTenantRatingCardRouter } from "./routes/tenantRatingCard.js";
-import { createQuoteRouter } from "./routes/quote.js";
-import { createLeaseAgreementsRouter } from "./routes/leaseAgreements.js";
 import {
   PostgresTenantApplicationStore,
   initTenantApplicationStore,
@@ -530,7 +526,6 @@ export function createApp() {
   app.use("/api/deposits", createDepositsRouter(conversionService));
   app.use("/api/gas-metrics", createGasMetricsRouter());
   app.use("/api", createPropertyPhotosRouter());
-  app.use("/api/properties", createPropertiesRouter());
   app.use("/api/landlord/properties", createLandlordPropertiesRouter());
   app.use(
     "/api/landlord/partner-applications",
@@ -549,9 +544,6 @@ export function createApp() {
   app.use("/api/compliance/reports", createComplianceReportRouter());
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
-  app.use("/api/tenant-rating-card", createTenantRatingCardRouter());
-  app.use("/api/quote", createQuoteRouter());
-  app.use("/api", createLeaseAgreementsRouter());
   app.use("/api/landlord/payout-schedule", createLandlordPayoutScheduleRouter());
   app.use("/api", migrationGuideRouter);
 

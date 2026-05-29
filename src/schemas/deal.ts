@@ -22,7 +22,6 @@ export const createDealSchema = z.object({
     .refine((val) => [3, 6, 12].includes(val), {
       message: 'Term months must be one of: 3, 6, 12',
     }),
-  paymentType: z.enum(['outright', 'installment']).optional(),
 }).refine(
   (data) => data.depositNgn >= data.annualRentNgn * 0.2,
   {

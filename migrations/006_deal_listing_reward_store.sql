@@ -10,9 +10,6 @@ CREATE TABLE IF NOT EXISTS whistleblower_listings (
     bedrooms INTEGER NOT NULL CHECK (bedrooms >= 0),
     bathrooms INTEGER NOT NULL CHECK (bathrooms >= 0),
     annual_rent_ngn NUMERIC(20,2) NOT NULL CHECK (annual_rent_ngn > 0),
-    negotiated_landlord_rate_ngn NUMERIC(20,2),
-    outright_price_ngn NUMERIC(20,2),
-    installment_base_price_ngn NUMERIC(20,2),
     description TEXT,
     photos JSONB NOT NULL DEFAULT '[]'::jsonb,
     status TEXT NOT NULL DEFAULT 'pending_review' CHECK (status IN ('pending_review', 'approved', 'rejected', 'rented')),
@@ -50,7 +47,6 @@ CREATE TABLE IF NOT EXISTS tenant_deals (
     financed_amount_ngn NUMERIC(20,2) NOT NULL CHECK (financed_amount_ngn >= 0),
     term_months INTEGER NOT NULL CHECK (term_months > 0),
     status TEXT NOT NULL CHECK (status IN ('draft', 'active', 'completed', 'defaulted')),
-    payment_type TEXT CHECK (payment_type IS NULL OR payment_type IN ('outright', 'installment')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
