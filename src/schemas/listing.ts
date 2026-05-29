@@ -15,9 +15,6 @@ export const createListingSchema = z.object({
     .number()
     .positive('Annual rent must be greater than 0')
     .int('Annual rent must be a whole number'),
-  negotiatedLandlordRateNgn: z.number().positive().int().optional(),
-  outrightPriceNgn: z.number().positive().int().optional(),
-  installmentBasePriceNgn: z.number().positive().int().optional(),
   description: z.string().optional(),
   photos: z
     .array(z.string().url('Each photo must be a valid URL'))
@@ -38,26 +35,6 @@ export const listingFiltersSchema = z.object({
 })
 
 export type ListingFiltersRequest = z.infer<typeof listingFiltersSchema>
-
-/**
- * Schema for property search filters (public-facing)
- */
-export const propertySearchSchema = z.object({
-  city: z.string().optional(),
-  area: z.string().optional(),
-  minBedrooms: z.coerce.number().int().min(0).optional(),
-  maxBedrooms: z.coerce.number().int().min(0).optional(),
-  minBathrooms: z.coerce.number().int().min(0).optional(),
-  maxBathrooms: z.coerce.number().int().min(0).optional(),
-  minAnnualRent: z.coerce.number().int().min(0).optional(),
-  maxAnnualRent: z.coerce.number().int().min(0).optional(),
-  query: z.string().optional(),
-  sortBy: z.enum(['price_asc', 'price_desc', 'newest', 'bedrooms_desc']).optional().default('newest'),
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
-})
-
-export type PropertySearchRequest = z.infer<typeof propertySearchSchema>
 
 /**
  * Query params for GET /api/admin/whistleblower/listings
