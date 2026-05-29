@@ -35,7 +35,8 @@ if (env.NODE_ENV === 'production') {
 
 async function main() {
   try {
-    validateCreditScoringConfig()
+    const { validateLatePaymentConfig } = await import('./config/latePayment.js')
+    validateLatePaymentConfig()
     await runMigrationsIfNeeded()
     startBackupJob()
     const app = createApp()

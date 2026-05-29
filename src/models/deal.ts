@@ -5,6 +5,7 @@
 export enum DealStatus {
   DRAFT = 'draft',
   ACTIVE = 'active',
+  AT_RISK = 'at_risk',
   COMPLETED = 'completed',
   DEFAULTED = 'defaulted',
 }
