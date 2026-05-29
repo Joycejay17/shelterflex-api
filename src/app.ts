@@ -47,6 +47,7 @@ import { getPool, getPoolMetricsForOtel } from "./db.js"
 import { StakingService } from "./services/stakingService.js"
 import { StakingFinalizer } from "./jobs/stakingFinalizer.js"
 import { LatePaymentJob } from "./jobs/latePaymentJob.js"
+import { DataRetentionJob } from "./jobs/dataRetentionJob.js"
 import { initOutboxStore, PostgresOutboxStore } from "./outbox/store.js"
 import { OutboxSender } from "./outbox/sender.js"
 import { OutboxWorker } from "./outbox/worker.js"
@@ -81,6 +82,8 @@ import { createConversionProviderFromEnv } from "./services/conversionProviderFa
 import { ConversionRateService } from "./services/conversionRateService.js"
 import { createConversionRouter } from "./routes/conversion.js"
 import { createUserPreferencesRouter } from "./routes/userPreferences.js"
+import { createUserErasureRouter } from "./routes/userErasure.js"
+import { createAdminErasureRouter } from "./routes/adminErasure.js"
 import { createAdminAuditRouter } from "./routes/adminAudit.js"
 import { createAdminUnderwritingRouter } from "./routes/adminUnderwriting.js"
 import { PostgresRewardsDataLayer } from "./services/postgres-rewards-data-layer.js"
@@ -138,6 +141,8 @@ import { createAdminFraudRouter } from "./routes/adminFraud.js";
 import { initializeCacheInvalidationWebhooks } from "./services/cacheInvalidation.js";
 import { createKycWebhookRouter } from "./routes/kyc.js";
 import { createOnboardingRouter } from "./routes/onboarding.js";
+import { createEmployersRouter } from "./routes/employers.js";
+import { MonthlyDeductionReminderJob } from "./jobs/monthlyDeductionReminderJob.js";
 
 export function createApp() {
   const app = express();
@@ -272,6 +277,19 @@ export function createApp() {
     workers.push(latePaymentJob);
   }
 
+  const dataRetentionJob = new DataRetentionJob(
+    parseInt(process.env.DATA_RETENTION_JOB_POLL_MS ?? String(24 * 60 * 60 * 1000), 10),
+  );
+  const monthlyDeductionReminderJob = new MonthlyDeductionReminderJob(
+    parseInt(process.env.MONTHLY_DEDUCTION_REMINDER_POLL_MS ?? String(24 * 60 * 60 * 1000), 10),
+  );
+  if (env.NODE_ENV !== "test") {
+    dataRetentionJob.start();
+    workers.push(dataRetentionJob);
+    monthlyDeductionReminderJob.start();
+    workers.push(monthlyDeductionReminderJob);
+  }
+
   // Outbox store — swap to Postgres when DATABASE_URL is set
   if (process.env.DATABASE_URL) {
     initOutboxStore(new PostgresOutboxStore());
@@ -311,6 +329,13 @@ export function createApp() {
   // Register webhook delivery job handler
   jobScheduler.registerHandler('webhook.delivery', async (job) => {
     await processWebhookDeliveryJob(job.payload as any)
+  })
+
+  jobScheduler.registerHandler('erasure.requested', async (job) => {
+    logger.info('erasure.requested', {
+      userId: (job.payload as { userId?: string }).userId,
+      requestId: (job.payload as { requestId?: string }).requestId,
+    })
   })
 
   // Centralized KYC Status Change Webhook Trigger
@@ -482,6 +507,7 @@ export function createApp() {
   app.use("/api/auth", createAuthRateLimiter(env), authRouter)
   app.use("/api/conversion", createConversionRouter(conversionRateService))
   app.use("/api/user", createUserPreferencesRouter())
+  app.use("/api/user", createUserErasureRouter())
   app.use(createPublicRateLimiter(env))
 
   // API versioning — applied to all /api routes after rate limiting
@@ -552,7 +578,9 @@ export function createApp() {
   app.use("/api/admin/jobs", createAdminJobsRouter());
   app.use("/api/admin/fraud", createAdminFraudRouter());
   app.use("/api/admin", createAdminAuditRouter());
+  app.use("/api/admin/erasure", createAdminErasureRouter());
   app.use("/api/deals", createDealsRouter());
+  app.use("/api", createEmployersRouter());
   app.use("/api/whistleblower", createWhistleblowerRouter(earningsService));
   app.use("/api/whistleblower-applications", createWhistleblowerApplicationsRouter());
   app.use("/api/admin/whistleblower-applications", createAdminWhistleblowerApplicationsRouter());

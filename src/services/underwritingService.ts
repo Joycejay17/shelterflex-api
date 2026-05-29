@@ -20,7 +20,11 @@ import {
 import { decisionFromCreditBand } from "../models/tenantCreditScore.js";
 import { creditBureauService } from "./creditBureauService.js";
 import type { TenantCreditScore } from "../models/tenantCreditScore.js";
-import { backgroundCheckService } from "./backgroundCheckService.js";
+import {
+  AiRiskScoringService,
+  aiRiskScoringService,
+} from "./aiRiskScoringService.js";
+import type { AiRiskScoreResult } from "./aiRiskScoreProvider.js";
 
 export interface UnderwritingEvaluationInput {
   applicationId: string;
@@ -46,6 +50,7 @@ export interface UnderwritingEvaluationOutput {
   creditScore?: TenantCreditScore;
   creditBandDecision?: string;
   externalCreditScore?: number;
+  aiRiskScore?: AiRiskScoreResult;
   evaluatedAt: string;
 }
 
@@ -76,14 +81,17 @@ function mergeUnderwritingDecisions(
 export class UnderwritingService {
   private ruleEngine: UnderwritingRuleEngine;
   private creditScoring: TenantCreditScoringService;
+  private aiRiskScoring: AiRiskScoringService;
 
   constructor(
     ruleEngine?: UnderwritingRuleEngine,
     creditScoring?: TenantCreditScoringService,
+    aiRiskScoring?: AiRiskScoringService,
   ) {
     this.ruleEngine =
       ruleEngine || new UnderwritingRuleEngine(DEFAULT_RULE_CONFIG);
     this.creditScoring = creditScoring || tenantCreditScoringService;
+    this.aiRiskScoring = aiRiskScoring || aiRiskScoringService;
   }
 
   /**
@@ -140,15 +148,29 @@ export class UnderwritingService {
 
     const result = this.ruleEngine.evaluate(context);
 
-    const finalDecision =
+    let finalDecision =
       creditDecision !== undefined
         ? mergeUnderwritingDecisions(creditDecision, result.decision)
         : result.decision;
 
-    const decisionReason =
+    const aiEvaluation = await this.aiRiskScoring.evaluateForUnderwriting(
+      application.userId,
+      finalDecision,
+    );
+    finalDecision = aiEvaluation.decision;
+
+    let decisionReason =
       creditScore !== undefined
         ? `${result.decisionReason}; credit band ${creditScore.band} (${creditScore.score}/1000) → ${creditDecision}, final ${finalDecision}`
         : result.decisionReason;
+
+    if (aiEvaluation.aiRiskScore) {
+      const ai = aiEvaluation.aiRiskScore;
+      decisionReason += `; AI risk ${ai.riskBand} (score ${ai.score}, confidence ${ai.confidence})`
+      if (aiEvaluation.overridden) {
+        decisionReason += ' → escalated to manual review'
+      }
+    }
 
     await underwritingDecisionTraceStore.create({
       applicationId: application.applicationId,
@@ -159,6 +181,7 @@ export class UnderwritingService {
       triggeredRules: result.triggeredRules,
       decisionReason,
       ruleConfigVersion: this.ruleEngine.getConfig().version,
+      aiRiskScore: aiEvaluation.aiRiskScore,
       evaluatedAt: result.evaluatedAt,
     });
 
@@ -171,6 +194,7 @@ export class UnderwritingService {
       creditBandDecision: creditScore
         ? decisionFromCreditBand(creditScore.band)
         : undefined,
+      aiRiskScore: aiEvaluation.aiRiskScore,
       evaluatedAt: result.evaluatedAt,
     };
   }
