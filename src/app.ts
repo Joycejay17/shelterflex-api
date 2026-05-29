@@ -116,6 +116,8 @@ import { createDocsRouter } from "./routes/docs.js";
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
 import { createAdminFraudRouter } from "./routes/adminFraud.js";
 import { initializeCacheInvalidationWebhooks } from "./services/cacheInvalidation.js";
+import { createKycRouter, createKycWebhookRouter } from "./routes/kyc.js";
+import { createOnboardingRouter } from "./routes/onboarding.js";
 
 export function createApp() {
   const app = express();
@@ -545,6 +547,9 @@ export function createApp() {
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
   app.use("/api/landlord/payout-schedule", createLandlordPayoutScheduleRouter());
+  app.use("/api/kyc", createKycRouter());
+  app.use("/api/webhooks/kyc", createKycWebhookRouter());
+  app.use("/api/onboarding", createOnboardingRouter());
   app.use("/api", migrationGuideRouter);
 
   // Interactive API documentation

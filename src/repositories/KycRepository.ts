@@ -1,6 +1,7 @@
 import { getPool } from '../db.js'
 import type { KycRecord, KycStatus, KycDocumentType } from '../schemas/kyc.js'
-import { logger } from '../utils/logger.js'
+
+const MAX_ATTEMPTS = 3
 
 export class KycRepository {
   private async pool() {
@@ -8,18 +9,46 @@ export class KycRepository {
     return pool
   }
 
+  /**
+   * Create a new KYC record or re-submit if the previous attempt was rejected/expired.
+   * Enforces a maximum of MAX_ATTEMPTS attempts per user.
+   */
   async create(userId: string, submission: { documentType: string; frontImageKey: string; backImageKey?: string; livenessSignal?: string }): Promise<KycRecord> {
     const pool = await this.pool()
     if (!pool) throw new Error('Database not configured')
 
-    const frontKey = submission.frontImageKey
-    const backKey = submission.backImageKey ?? null
+    const existing = await this.findByUserId(userId)
+
+    if (existing) {
+      if (existing.attemptCount >= MAX_ATTEMPTS) {
+        throw new Error('MAX_ATTEMPTS_EXCEEDED')
+      }
+      // Re-submission: update the existing record and increment attempt count
+      const { rows } = await pool.query(
+        `UPDATE kyc_documents
+         SET document_type = $2,
+             front_image_key = $3,
+             back_image_key = $4,
+             liveness_signal = $5,
+             status = 'pending',
+             provider_id = NULL,
+             external_id = NULL,
+             rejection_reason = NULL,
+             reviewed_by = NULL,
+             attempt_count = attempt_count + 1,
+             updated_at = NOW()
+         WHERE user_id = $1
+         RETURNING *`,
+        [userId, submission.documentType, submission.frontImageKey, submission.backImageKey ?? null, submission.livenessSignal ?? null],
+      )
+      return this.mapRowToRecord(rows[0])
+    }
 
     const { rows } = await pool.query(
-      `INSERT INTO kyc_documents (user_id, document_type, front_image_key, back_image_key, liveness_signal, status)
-       VALUES ($1, $2, $3, $4, $5, 'pending')
+      `INSERT INTO kyc_documents (user_id, document_type, front_image_key, back_image_key, liveness_signal, status, attempt_count)
+       VALUES ($1, $2, $3, $4, $5, 'pending', 1)
        RETURNING *`,
-      [userId, submission.documentType, frontKey, backKey, submission.livenessSignal ?? null],
+      [userId, submission.documentType, submission.frontImageKey, submission.backImageKey ?? null, submission.livenessSignal ?? null],
     )
 
     return this.mapRowToRecord(rows[0])
@@ -59,7 +88,7 @@ export class KycRepository {
     if (!pool) throw new Error('Database not configured')
 
     await pool.query(
-      `UPDATE kyc_documents 
+      `UPDATE kyc_documents
        SET status = $2, provider_id = COALESCE($3, provider_id), external_id = COALESCE($4, external_id),
            rejection_reason = $5, reviewed_by = $6, updated_at = NOW()
        WHERE id = $1`,
@@ -105,7 +134,7 @@ export class KycRepository {
     )
 
     return {
-      records: dataResult.rows.map(this.mapRowToRecord),
+      records: dataResult.rows.map(row => this.mapRowToRecord(row)),
       total,
       page,
       pageSize,
@@ -129,8 +158,10 @@ export class KycRepository {
       createdAt: new Date(row.created_at as string),
       updatedAt: new Date(row.updated_at as string),
       expiresAt: row.expires_at ? new Date(row.expires_at as string) : null,
+      attemptCount: (row.attempt_count as number) ?? 1,
     }
   }
 }
 
 export const kycRepository = new KycRepository()
+export { MAX_ATTEMPTS }
