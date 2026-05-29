@@ -3,73 +3,98 @@
  * Orchestrates the underwriting evaluation process for tenant applications
  */
 
-import { UnderwritingRuleEngine, UnderwritingContext, UnderwritingResult, UnderwritingDecision, DEFAULT_RULE_CONFIG } from './underwritingRuleEngine.js'
-import { tenantApplicationStore } from '../models/tenantApplicationStore.js'
-import { userRiskStateStore } from '../models/userRiskStateStore.js'
-import { underwritingDecisionTraceStore } from '../models/underwritingDecisionTraceStore.js'
-import { tenantCreditScoringService, TenantCreditScoringService } from './tenantCreditScoringService.js'
-import { decisionFromCreditBand } from '../models/tenantCreditScore.js'
-import type { TenantCreditScore } from '../models/tenantCreditScore.js'
+import {
+  UnderwritingRuleEngine,
+  UnderwritingContext,
+  UnderwritingResult,
+  UnderwritingDecision,
+  DEFAULT_RULE_CONFIG,
+} from "./underwritingRuleEngine.js";
+import { tenantApplicationStore } from "../models/tenantApplicationStore.js";
+import { userRiskStateStore } from "../models/userRiskStateStore.js";
+import { underwritingDecisionTraceStore } from "../models/underwritingDecisionTraceStore.js";
+import {
+  tenantCreditScoringService,
+  TenantCreditScoringService,
+} from "./tenantCreditScoringService.js";
+import { decisionFromCreditBand } from "../models/tenantCreditScore.js";
+import { creditBureauService } from "./creditBureauService.js";
+import type { TenantCreditScore } from "../models/tenantCreditScore.js";
 
 export interface UnderwritingEvaluationInput {
-  applicationId: string
+  applicationId: string;
   paymentHistory?: {
-    onTimePaymentRate: number
-    missedPayments: number
-    totalPayments: number
-  }
-  metadata?: Record<string, any>
+    onTimePaymentRate: number;
+    missedPayments: number;
+    totalPayments: number;
+  };
+  metadata?: Record<string, any>;
 }
 
 export interface UnderwritingEvaluationOutput {
-  applicationId: string
-  userId: string
-  decision: UnderwritingDecision
-  result: UnderwritingResult
-  creditScore?: TenantCreditScore
-  creditBandDecision?: string
-  evaluatedAt: string
+  applicationId: string;
+  userId: string;
+  decision: UnderwritingDecision;
+  result: UnderwritingResult;
+  creditScore?: TenantCreditScore;
+  creditBandDecision?: string;
+  externalCreditScore?: number;
+  evaluatedAt: string;
 }
 
 /**
  * Underwriting Service
  * Evaluates tenant applications using the rule engine
  */
-function creditBandToUnderwritingDecision(bandDecision: ReturnType<typeof decisionFromCreditBand>): UnderwritingDecision {
-  if (bandDecision === 'approve') return 'APPROVE'
-  if (bandDecision === 'manual_review') return 'REVIEW'
-  return 'REJECT'
+function creditBandToUnderwritingDecision(
+  bandDecision: ReturnType<typeof decisionFromCreditBand>,
+): UnderwritingDecision {
+  if (bandDecision === "approve") return "APPROVE";
+  if (bandDecision === "manual_review") return "REVIEW";
+  return "REJECT";
 }
 
 function mergeUnderwritingDecisions(
   credit: UnderwritingDecision,
   rules: UnderwritingDecision,
 ): UnderwritingDecision {
-  const rank: Record<UnderwritingDecision, number> = { REJECT: 3, REVIEW: 2, APPROVE: 1 }
-  return rank[credit] >= rank[rules] ? credit : rules
+  const rank: Record<UnderwritingDecision, number> = {
+    REJECT: 3,
+    REVIEW: 2,
+    APPROVE: 1,
+  };
+  return rank[credit] >= rank[rules] ? credit : rules;
 }
 
 export class UnderwritingService {
-  private ruleEngine: UnderwritingRuleEngine
-  private creditScoring: TenantCreditScoringService
+  private ruleEngine: UnderwritingRuleEngine;
+  private creditScoring: TenantCreditScoringService;
 
-  constructor(ruleEngine?: UnderwritingRuleEngine, creditScoring?: TenantCreditScoringService) {
-    this.ruleEngine = ruleEngine || new UnderwritingRuleEngine(DEFAULT_RULE_CONFIG)
-    this.creditScoring = creditScoring || tenantCreditScoringService
+  constructor(
+    ruleEngine?: UnderwritingRuleEngine,
+    creditScoring?: TenantCreditScoringService,
+  ) {
+    this.ruleEngine =
+      ruleEngine || new UnderwritingRuleEngine(DEFAULT_RULE_CONFIG);
+    this.creditScoring = creditScoring || tenantCreditScoringService;
   }
 
   /**
    * Evaluate a tenant application for underwriting
    */
-  async evaluateApplication(input: UnderwritingEvaluationInput): Promise<UnderwritingEvaluationOutput> {
+  async evaluateApplication(
+    input: UnderwritingEvaluationInput,
+  ): Promise<UnderwritingEvaluationOutput> {
     // Fetch the application
-    const application = await tenantApplicationStore.findById(input.applicationId)
+    const application = await tenantApplicationStore.findById(
+      input.applicationId,
+    );
     if (!application) {
-      throw new Error(`Application ${input.applicationId} not found`)
+      throw new Error(`Application ${input.applicationId} not found`);
     }
 
     // Fetch user risk state
-    const riskState = await userRiskStateStore.getByUserId(application.userId)
+    const riskState = await userRiskStateStore.getByUserId(application.userId);
 
     // Build underwriting context
     const context: UnderwritingContext = {
@@ -89,29 +114,33 @@ export class UnderwritingService {
         : undefined,
       paymentHistory: input.paymentHistory,
       metadata: input.metadata,
-    }
+    };
 
     // Credit scoring pipeline (onboarding verification data required)
-    let creditScore: TenantCreditScore | undefined
-    let creditDecision: UnderwritingDecision | undefined
+    let creditScore: TenantCreditScore | undefined;
+    let creditDecision: UnderwritingDecision | undefined;
     try {
-      creditScore = this.creditScoring.computeCompositeScore(application.userId)
-      creditDecision = creditBandToUnderwritingDecision(decisionFromCreditBand(creditScore.band))
+      creditScore = this.creditScoring.computeCompositeScore(
+        application.userId,
+      );
+      creditDecision = creditBandToUnderwritingDecision(
+        decisionFromCreditBand(creditScore.band),
+      );
     } catch {
       // No onboarding data yet — rule engine only
     }
 
-    const result = this.ruleEngine.evaluate(context)
+    const result = this.ruleEngine.evaluate(context);
 
     const finalDecision =
       creditDecision !== undefined
         ? mergeUnderwritingDecisions(creditDecision, result.decision)
-        : result.decision
+        : result.decision;
 
     const decisionReason =
       creditScore !== undefined
         ? `${result.decisionReason}; credit band ${creditScore.band} (${creditScore.score}/1000) → ${creditDecision}, final ${finalDecision}`
-        : result.decisionReason
+        : result.decisionReason;
 
     await underwritingDecisionTraceStore.create({
       applicationId: application.applicationId,
@@ -123,7 +152,7 @@ export class UnderwritingService {
       decisionReason,
       ruleConfigVersion: this.ruleEngine.getConfig().version,
       evaluatedAt: result.evaluatedAt,
-    })
+    });
 
     return {
       applicationId: application.applicationId,
@@ -131,32 +160,34 @@ export class UnderwritingService {
       decision: finalDecision,
       result: { ...result, decision: finalDecision, decisionReason },
       creditScore,
-      creditBandDecision: creditScore ? decisionFromCreditBand(creditScore.band) : undefined,
+      creditBandDecision: creditScore
+        ? decisionFromCreditBand(creditScore.band)
+        : undefined,
       evaluatedAt: result.evaluatedAt,
-    }
+    };
   }
 
   /**
    * Update the rule engine configuration
    */
   updateRuleConfig(config: Partial<typeof DEFAULT_RULE_CONFIG>): void {
-    this.ruleEngine.updateConfig(config)
+    this.ruleEngine.updateConfig(config);
   }
 
   /**
    * Get current rule engine configuration
    */
   getRuleConfig() {
-    return this.ruleEngine.getConfig()
+    return this.ruleEngine.getConfig();
   }
 
   /**
    * Get rule engine instance (for testing)
    */
   getRuleEngine(): UnderwritingRuleEngine {
-    return this.ruleEngine
+    return this.ruleEngine;
   }
 }
 
 // Singleton instance
-export const underwritingService = new UnderwritingService()
+export const underwritingService = new UnderwritingService();
