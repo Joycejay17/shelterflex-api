@@ -25,6 +25,7 @@ export interface Deal {
   depositNgn: number
   financedAmountNgn: number
   termMonths: number
+  paymentType?: 'outright' | 'installment'
   createdAt: Date
   status: DealStatus
 }
@@ -36,6 +37,7 @@ export interface CreateDealInput {
   annualRentNgn: number
   depositNgn: number
   termMonths: number
+  paymentType?: 'outright' | 'installment'
 }
 
 export interface ScheduleItem {
