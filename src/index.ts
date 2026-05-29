@@ -7,6 +7,7 @@ import { createRequire } from "node:module"
 import { getUsdcTokenAddress } from "./utils/token.js"
 import { runMigrationsIfNeeded } from "./migrations/runMigrations.js"
 import { validateCreditScoringConfig } from "./config/creditScoring.js"
+import { validatePiiEncryptionKey } from "./utils/piiEncryption.js"
 import { startBackupJob } from "./jobs/backupJob.js"
 import { ReconciliationWorker } from "./reconciliation/index.js"
 
@@ -35,6 +36,7 @@ if (env.NODE_ENV === 'production') {
 
 async function main() {
   try {
+    validatePiiEncryptionKey(env.ENCRYPTION_KEY, env.NODE_ENV)
     const { validateLatePaymentConfig } = await import('./config/latePayment.js')
     validateLatePaymentConfig()
     await runMigrationsIfNeeded()
