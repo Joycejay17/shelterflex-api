@@ -11,8 +11,10 @@ import { otpChallengeStore, sessionStore, userStore, walletChallengeStore } from
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 import { PostgresLinkedAddressStore } from '../models/linkedAddressStore.js'
 import { createOtpDeliveryProvider } from '../services/otpDeliveryFactory.js'
+import { detectCredentialStuffing } from '../services/abuseDetectionService.js'
 import {
   auditAuthOtpRequested,
+
   auditAuthLoginSuccess,
   auditAuthLoginFailed,
   auditAuthLogout,
@@ -81,18 +83,21 @@ router.post(
       const challenge = await otpChallengeStore.getByEmail(email)
       if (!challenge) {
         auditAuthLoginFailed(req, { email, reason: 'no_otp_challenge' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'No OTP requested for this email')
       }
 
       if (new Date() > challenge.expiresAt) {
         await otpChallengeStore.deleteByEmail(email)
         auditAuthLoginFailed(req, { email, reason: 'otp_expired' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'OTP has expired')
       }
 
       if (challenge.attempts >= OTP_MAX_ATTEMPTS) {
         await otpChallengeStore.deleteByEmail(email)
         auditAuthLoginFailed(req, { email, reason: 'max_attempts_exceeded' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid OTP')
       }
 
@@ -100,6 +105,7 @@ router.post(
       if (!ok) {
         await otpChallengeStore.updateAttempts(email, challenge.attempts + 1)
         auditAuthLoginFailed(req, { email, reason: 'invalid_otp' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid OTP')
       }
 
@@ -203,18 +209,21 @@ router.post(
       const challenge = await walletChallengeStore.getByAddress(normalizedAddress)
       if (!challenge) {
         auditAuthWalletLoginFailed(req, { address: normalizedAddress, reason: 'no_challenge' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
       }
 
       if (new Date() > challenge.expiresAt) {
         await walletChallengeStore.deleteByAddress(normalizedAddress)
         auditAuthWalletLoginFailed(req, { address: normalizedAddress, reason: 'challenge_expired' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
       }
 
       if (challenge.attempts >= WALLET_MAX_ATTEMPTS) {
         await walletChallengeStore.deleteByAddress(normalizedAddress)
         auditAuthWalletLoginFailed(req, { address: normalizedAddress, reason: 'max_attempts_exceeded' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
       }
 
@@ -223,6 +232,7 @@ router.post(
       if (!isValid) {
         await walletChallengeStore.updateAttempts(normalizedAddress, challenge.attempts + 1)
         auditAuthWalletLoginFailed(req, { address: normalizedAddress, reason: 'invalid_signature' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
       }
 

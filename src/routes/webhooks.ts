@@ -20,7 +20,15 @@ import { getSorobanConfigFromEnv } from "../soroban/client.js";
 import { NgnWalletService } from "../services/ngnWalletService.js";
 import { getPaymentProvider } from "../payments/index.js";
 import { requireValidWebhookSignature } from "../payments/webhookSignature.js";
-import { jsonPayloadSha256Hex } from "../utils/sha256.js";
+import { jsonPayloadSha256Hex, sha256Hex, generateRandomSecretHex } from "../utils/sha256.js";
+import { z } from "zod";
+import { authenticateToken, type AuthenticatedRequest } from "../middleware/auth.js";
+import {
+  WebhookEventType,
+  webhookSubscriptionStore,
+  webhookDeliveryStore
+} from "../models/webhookSubscription.js";
+
 
 export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
   const router = Router();
@@ -350,5 +358,170 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
     },
   );
 
+  const subscriptionSchema = z.object({
+    targetUrl: z.string().url(),
+    events: z.array(z.nativeEnum(WebhookEventType)),
+  });
+
+  /**
+   * POST /api/webhooks/subscriptions
+   * Register a new subscription (authenticated; owner scoped)
+   */
+  router.post(
+    "/subscriptions",
+    authenticateToken,
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const userId = req.user?.id;
+        if (!userId) {
+          throw new AppError(ErrorCode.UNAUTHORIZED, 401, "Authentication required");
+        }
+
+        const { targetUrl, events } = subscriptionSchema.parse(req.body);
+
+        if (!targetUrl.startsWith("https://")) {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, "Target URL must use HTTPS protocol");
+        }
+
+        const plainSecret = `whsec_${generateRandomSecretHex(24)}`;
+        const hashedSecret = sha256Hex(plainSecret);
+
+        const sub = webhookSubscriptionStore.create({
+          ownerId: userId,
+          targetUrl,
+          secret: hashedSecret,
+          events: events as WebhookEventType[],
+        });
+
+        res.status(201).json({
+          success: true,
+          subscription: {
+            id: sub.id,
+            ownerId: sub.ownerId,
+            targetUrl: sub.targetUrl,
+            secret: plainSecret,
+            events: sub.events,
+            active: sub.active,
+            createdAt: sub.createdAt.toISOString(),
+          }
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === "ZodError") {
+          return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, error.message));
+        }
+        next(error);
+      }
+    }
+  );
+
+  /**
+   * GET /api/webhooks/subscriptions
+   * List own subscriptions
+   */
+  router.get(
+    "/subscriptions",
+    authenticateToken,
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const userId = req.user?.id;
+        if (!userId) {
+          throw new AppError(ErrorCode.UNAUTHORIZED, 401, "Authentication required");
+        }
+
+        const subs = webhookSubscriptionStore.listByOwner(userId);
+        res.status(200).json({
+          success: true,
+          subscriptions: subs.map(s => ({
+            id: s.id,
+            ownerId: s.ownerId,
+            targetUrl: s.targetUrl,
+            events: s.events,
+            active: s.active,
+            createdAt: s.createdAt.toISOString(),
+          }))
+        });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  /**
+   * DELETE /api/webhooks/subscriptions/:id
+   * Remove a subscription
+   */
+  router.delete(
+    "/subscriptions/:id",
+    authenticateToken,
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const userId = req.user?.id;
+        if (!userId) {
+          throw new AppError(ErrorCode.UNAUTHORIZED, 401, "Authentication required");
+        }
+
+        const { id } = req.params;
+        const sub = webhookSubscriptionStore.findById(id);
+        if (!sub) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, "Subscription not found");
+        }
+
+        if (sub.ownerId !== userId) {
+          throw new AppError(ErrorCode.FORBIDDEN, 403, "Access denied");
+        }
+
+        webhookSubscriptionStore.delete(id);
+        res.status(200).json({ success: true, message: "Subscription removed" });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  /**
+   * GET /api/webhooks/subscriptions/:id/deliveries
+   * Delivery history for a subscription
+   */
+  router.get(
+    "/subscriptions/:id/deliveries",
+    authenticateToken,
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        const userId = req.user?.id;
+        if (!userId) {
+          throw new AppError(ErrorCode.UNAUTHORIZED, 401, "Authentication required");
+        }
+
+        const { id } = req.params;
+        const sub = webhookSubscriptionStore.findById(id);
+        if (!sub) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, "Subscription not found");
+        }
+
+        if (sub.ownerId !== userId) {
+          throw new AppError(ErrorCode.FORBIDDEN, 403, "Access denied");
+        }
+
+        const deliveries = webhookDeliveryStore.getHistoryBySubscription(id);
+        res.status(200).json({
+          success: true,
+          deliveries: deliveries.map(d => ({
+            id: d.id,
+            subscriptionId: d.subscriptionId,
+            event: d.event,
+            payload: d.payload,
+            status: d.status,
+            responseCode: d.responseCode,
+            responseBody: d.responseBody,
+            attemptedAt: d.attemptedAt.toISOString(),
+          }))
+        });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
   return router;
 }
+

@@ -66,6 +66,12 @@ import { createAdminJobsRouter } from "./routes/adminJobs.js"
 import { getNotificationService } from "./notifications/index.js"
 import { createWebhookReplayRouter } from "./routes/webhookReplay.js"
 import { PostgresWebhookReplayStore, initWebhookReplayStore as initStore } from "./webhookReplay/index.js"
+import { processWebhookDeliveryJob } from "./services/webhookDeliveryService.js"
+import { kycStatusEmitter } from "./services/index.js"
+import { WebhookEventType } from "./models/webhookSubscription.js"
+import { enqueueDelivery } from "./services/webhookDeliveryService.js"
+
+
 
 import { sanitizeRequest, detectMaliciousPatterns } from "./middleware/sanitization.js"
 import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js"
@@ -119,6 +125,9 @@ import { createAdminTenantCreditScoreRouter } from "./routes/adminTenantCreditSc
 import { createTenantDocumentVaultRouter } from "./routes/tenantDocumentVault.js";
 import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSchedule.js";
 import { createDocsRouter } from "./routes/docs.js";
+import { createKycRouter } from "./routes/kyc.js";
+import { createAbuseRouter } from "./routes/abuse.js";
+
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
 import { createAdminFraudRouter } from "./routes/adminFraud.js";
 import { initializeCacheInvalidationWebhooks } from "./services/cacheInvalidation.js";
@@ -291,6 +300,21 @@ export function createApp() {
   jobScheduler.registerHandler('notification.send', async (job) => {
     await notificationService.send(job.payload as any)
   })
+
+  // Register webhook delivery job handler
+  jobScheduler.registerHandler('webhook.delivery', async (job) => {
+    await processWebhookDeliveryJob(job.payload as any)
+  })
+
+  // Centralized KYC Status Change Webhook Trigger
+  kycStatusEmitter.on('statusChanged', (userId: string, status: any) => {
+    const eventType = status === 'approved' ? WebhookEventType.KYC_APPROVED : WebhookEventType.KYC_REJECTED
+    enqueueDelivery(eventType, { userId, status }).catch(err => {
+      console.error('[webhook] failed to enqueue KYC status webhook:', err)
+    })
+  })
+
+
 
   // Webhook Replay Store — swap to Postgres store when DATABASE_URL is set
   if (process.env.DATABASE_URL) {
@@ -537,8 +561,10 @@ export function createApp() {
       ngnWalletService,
       conversionService,
       stakingService,
+      receiptRepo,
       conversionRateService,
     ),
+
   );
   app.use("/api/webhooks", createWebhooksRouter(ngnWalletService));
   app.use("/api/deposits", createDepositsRouter(conversionService));
@@ -560,6 +586,8 @@ export function createApp() {
   app.use("/api/admin", createSettlementAdminRouter());
   app.use("/api/apartment-reviews", createApartmentReviewsRouter());
   app.use("/api/compliance/reports", createComplianceReportRouter());
+  app.use("/api/kyc", createKycRouter());
+  app.use("/api/admin/abuse", createAbuseRouter());
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
   app.use("/api/tenant/onboarding", createTenantOnboardingRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());

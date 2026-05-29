@@ -19,7 +19,7 @@ export function createComplianceReportRouter() {
     if (!user) {
       throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Authentication required')
     }
-    if (user.role !== 'admin' && user.role !== 'compliance' && user.role !== 'super_admin') {
+    if (user.role !== 'admin' && user.role !== 'super_admin') {
       throw new AppError(ErrorCode.FORBIDDEN, 403, 'Compliance role required')
     }
     return user
@@ -110,6 +110,7 @@ export function createComplianceReportRouter() {
           integrityHash: report.integrityHash,
           generatedAt: report.generatedAt?.toISOString(),
           createdAt: report.createdAt.toISOString(),
+          expiresAt: report.expiresAt?.toISOString(),
         })
       } catch (error) {
         next(error)
@@ -214,6 +215,7 @@ export function createComplianceReportRouter() {
             integrityHash: r.integrityHash,
             generatedAt: r.generatedAt?.toISOString(),
             createdAt: r.createdAt.toISOString(),
+            expiresAt: r.expiresAt?.toISOString(),
           })),
           pagination: {
             total: result.total,
