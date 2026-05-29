@@ -143,6 +143,40 @@ router.post(
 )
 
 /**
+ * Presigned-style upload instructions (client uploads via multipart batch — issue #894).
+ * POST /api/properties/:propertyId/photos/presign
+ */
+router.post(
+  '/properties/:propertyId/photos/presign',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response, next) => {
+    try {
+      const property = await landlordPropertyStore.getById(req.params.propertyId)
+      if (!property) {
+        throw new AppError(ErrorCode.NOT_FOUND, 404, 'Property not found')
+      }
+
+      if (property.landlordId !== req.user?.id && req.user?.role !== 'admin') {
+        throw new AppError(ErrorCode.FORBIDDEN, 403, 'You do not have permission to upload photos')
+      }
+
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+
+      res.json({
+        strategy: 'multipart_batch',
+        uploadUrl: `/api/properties/${req.params.propertyId}/photos/batch`,
+        method: 'POST',
+        fieldName: 'photos',
+        maxFiles: 20,
+        expiresAt,
+      })
+    } catch (error) {
+      next(error)
+    }
+  },
+)
+
+/**
  * Batch upload multiple photos
  * POST /api/properties/:propertyId/photos/batch
  */
