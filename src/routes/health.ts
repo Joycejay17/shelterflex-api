@@ -46,9 +46,11 @@ export function createHealthRouter(adapter: SorobanAdapter): Router {
     }
 
     const memory = process.memoryUsage()
+    const uptimeSeconds = Math.floor(process.uptime())
     res.json({
       status: "ok",
-      uptime: process.uptime(),
+      uptime: uptimeSeconds,
+      uptimeSeconds,
       version: env.VERSION,
       dbLatencyMs,
       memoryUsageMb: Math.round(memory.heapUsed / 1024 / 1024),

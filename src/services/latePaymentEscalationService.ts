@@ -30,7 +30,7 @@ export class LatePaymentEscalationService {
   constructor(private config: LatePaymentConfig = getLatePaymentConfig()) {}
 
   private markEscalationStep(paymentId: string, step: EscalationStep): boolean {
-    const applied = this.markEscalationStep(paymentId, step)
+    const applied = latePaymentEscalationStore.markStepOnce(paymentId, step)
     if (applied) {
       recordLatePaymentEscalation(step)
     }
