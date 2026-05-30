@@ -372,14 +372,37 @@ class PostgresDealStore implements DealStorePort {
   async listActiveDealsWithSchedules(): Promise<DealWithSchedule[]> {
     const pool = await this.pool()
     const { rows } = await pool.query(
-      `SELECT deal_id FROM tenant_deals WHERE status IN ('active', 'at_risk')`,
+      `SELECT
+        td.deal_id, td.tenant_id, td.landlord_id, td.listing_id,
+        td.annual_rent_ngn, td.deposit_ngn, td.financed_amount_ngn,
+        td.term_months, td.status AS deal_status, td.created_at, td.updated_at,
+        tds.period, tds.due_date, tds.amount_ngn, tds.status AS schedule_status
+      FROM tenant_deals td
+      LEFT JOIN tenant_deal_schedules tds ON tds.deal_id = td.deal_id
+      WHERE td.status IN ('active', 'at_risk')
+      ORDER BY td.deal_id, tds.period ASC`,
     )
-    const deals: DealWithSchedule[] = []
-    for (const row of rows) {
-      const deal = await this.fetchDealWithSchedule(pool, (row as { deal_id: string }).deal_id)
-      if (deal) deals.push(deal)
+
+    const dealMap = new Map<string, DealWithSchedule>()
+    for (const row of rows as Array<Record<string, unknown>>) {
+      const dealId = row.deal_id as string
+      if (!dealMap.has(dealId)) {
+        dealMap.set(dealId, {
+          ...this.mapDeal({ ...row, status: row.deal_status } as DealRow),
+          schedule: [],
+        })
+      }
+      if (row.period != null) {
+        const entry = dealMap.get(dealId)!
+        entry.schedule.push({
+          period: row.period as number,
+          dueDate: new Date(row.due_date as string).toISOString(),
+          amountNgn: toNumber(row.amount_ngn as string | number),
+          status: row.schedule_status as ScheduleItemStatus,
+        })
+      }
     }
-    return deals
+    return Array.from(dealMap.values())
   }
 
   async findMany(filters: DealFilters = {}): Promise<PaginatedDeals> {
