@@ -80,6 +80,7 @@ import { sanitizeRequest, detectMaliciousPatterns } from "./middleware/sanitizat
 import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js"
 import { createWhistleblowerApplicationsRouter } from "./routes/whistleblowerApplications.js"
 import { createAdminWhistleblowerApplicationsRouter } from "./routes/adminWhistleblowerApplications.js"
+import { createAdminAnalyticsRouter } from "./routes/adminAnalytics.js"
 import { createConversionProviderFromEnv } from "./services/conversionProviderFactory.js"
 import { ConversionRateService } from "./services/conversionRateService.js"
 import { createConversionRouter } from "./routes/conversion.js"
@@ -522,35 +523,7 @@ export function createApp() {
   // API versioning — applied to all /api routes after rate limiting
   app.use('/api', apiVersioning)
 
-  app.use("/", publicRouter)
-  app.use('/api', createBalanceRouter(sorobanAdapter))
-  app.use('/api', createReceiptsRouter(receiptRepo))
-  app.use('/api/wallet', createWalletRateLimiter(env), createWalletRouter(walletService))
-  app.use('/api/wallet/ngn', createNgnWalletRouter(ngnWalletService))
-  app.use('/api/risk', createRiskRouter(ngnWalletService))
-  app.use('/api/admin/risk', createAdminRiskRouter(ngnWalletService))
-  app.use('/api/admin', createAdminWithdrawalsRouter(ngnWalletService))
-  app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
-  app.use('/api/admin', createAdminRouter(sorobanAdapter, walletStore as any, encryptionService as any, indexer))
-  app.use('/api/admin/reconciliation', createAdminReconciliationRouter(ngnWalletService))
-  app.use('/api/admin/secrets', createSecretRotationRouter())
-  app.use('/api/admin/jobs', createAdminJobsRouter())
-  app.use('/api/admin/webhook-replay', createWebhookReplayRouter())
-  app.use('/api/deals', createDealsRouter())
-  app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
-  app.use('/api/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService, conversionRateService))
-  app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
-  app.use('/api/deposits', createDepositsRouter(conversionService))
-  app.use('/api/gas-metrics', createGasMetricsRouter())
-  app.use('/api', migrationGuideRouter)
-  app.use("/health", createHealthRouter(sorobanAdapter));
-
-  // Global API Rate Limiting
   app.use("/api", createComprehensiveRateLimiter());
-
-  app.use("/api/auth", authRouter);
-
-  // API versioning — applied to all /api routes after rate limiting
   app.use("/api", apiVersioning);
 
   app.use("/", publicRouter);
@@ -560,6 +533,7 @@ export function createApp() {
   app.use("/api/property-issue-reports", createPropertyIssueReportsRouter());
   app.use(
     "/api/wallet",
+    createWalletRateLimiter(env),
     createWalletRouter(walletService),
   );
   app.use("/api/wallet/ngn", createNgnWalletRouter(ngnWalletService));
@@ -585,6 +559,7 @@ export function createApp() {
   app.use("/api/admin/sessions", createAdminSessionsRouter());
   app.use("/api/admin/secrets", createSecretRotationRouter());
   app.use("/api/admin/jobs", createAdminJobsRouter());
+  app.use("/api/admin/webhook-replay", createWebhookReplayRouter());
   app.use("/api/admin/fraud", createAdminFraudRouter());
   app.use("/api/admin", createAdminAuditRouter());
   app.use("/api/admin/erasure", createAdminErasureRouter());
@@ -594,6 +569,7 @@ export function createApp() {
   app.use("/api/whistleblower-applications", createWhistleblowerApplicationsRouter());
   app.use("/api/admin/whistleblower-applications", createAdminWhistleblowerApplicationsRouter());
   app.use("/api/admin/underwriting", createAdminUnderwritingRouter());
+  app.use("/api/admin/analytics", createAdminAnalyticsRouter());
   app.use("/api/admin", createAdminTenantCreditScoreRouter());
   app.use("/api/admin", createSettlementAdminRouter());
   app.use(
@@ -608,7 +584,6 @@ export function createApp() {
       receiptRepo,
       conversionRateService,
     ),
-
   );
   app.use("/api/webhooks", createWebhooksRouter(ngnWalletService));
   app.use("/api/deposits", createDepositsRouter(conversionService));
