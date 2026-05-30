@@ -4,6 +4,7 @@ import { kycSubmissionSchema, kycStatusSchema } from '../schemas/kyc.js'
 import { kycRepository, MAX_ATTEMPTS } from '../repositories/KycRepository.js'
 import { createKycProvider } from '../services/kycProvider.js'
 import { authenticateToken } from '../middleware/auth.js'
+import { requirePermission } from '../middleware/rbac.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { auditLog, extractAuditContext, type AuditEventType } from '../utils/auditLogger.js'
@@ -11,13 +12,6 @@ import { verifyHmacSha256 } from '../utils/webhookSignature.js'
 import { emitKycStatusChanged } from '../services/index.js'
 import { logger } from '../utils/logger.js'
 import { recordKycSubmission } from '../metrics.js'
-
-function requireAdmin(req: Request): void {
-  const user = (req as any).user
-  if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
-    throw new AppError(ErrorCode.FORBIDDEN, 403, 'Admin access required')
-  }
-}
 
 const router = Router()
 const kycProvider = createKycProvider()
@@ -156,9 +150,9 @@ router.post(
 router.get(
   '/admin',
   authenticateToken,
+  requirePermission('kyc', 'view'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       const { status, userId, page, pageSize } = req.query
       const result = await kycRepository.list({
         status: status as any,
@@ -176,7 +170,8 @@ router.get(
 
 router.get(
   '/admin/:submissionId',
-  requireAdmin,
+  authenticateToken,
+  requirePermission('kyc', 'view'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { submissionId } = req.params
@@ -196,9 +191,9 @@ router.get(
 router.post(
   '/admin/:recordId/approve',
   authenticateToken,
+  requirePermission('kyc', 'verify'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       const { recordId } = req.params
       const adminId = (req as any).user.id as string
       const { reason } = req.body as { reason?: string }
@@ -231,9 +226,9 @@ router.post(
 router.post(
   '/admin/:recordId/reject',
   authenticateToken,
+  requirePermission('kyc', 'verify'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      requireAdmin(req)
       const { recordId } = req.params
       const adminId = (req as any).user.id as string
       const { reason } = req.body as { reason?: string }

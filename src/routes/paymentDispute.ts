@@ -2,17 +2,11 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { paymentDisputeCreateSchema } from '../schemas/paymentDispute.js'
 import { paymentDisputeRepository } from '../repositories/PaymentDisputeRepository.js'
 import { authenticateToken } from '../middleware/auth.js'
+import { requirePermission } from '../middleware/rbac.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { auditLog, extractAuditContext, type AuditEventType } from '../utils/auditLogger.js'
 import { logger } from '../utils/logger.js'
-
-function requireAdmin(req: Request): void {
-  const user = (req as any).user
-  if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
-    throw new AppError(ErrorCode.FORBIDDEN, 403, 'Admin access required')
-  }
-}
 
 const router = Router()
 
@@ -67,7 +61,8 @@ router.get(
 
 router.get(
   '/admin',
-  requireAdmin,
+  authenticateToken,
+  requirePermission('disputes', 'view'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { status, userId, page, pageSize } = req.query
@@ -87,7 +82,8 @@ router.get(
 
 router.post(
   '/admin/:disputeId/resolve',
-  requireAdmin,
+  authenticateToken,
+  requirePermission('disputes', 'resolve'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { disputeId } = req.params

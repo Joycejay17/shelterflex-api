@@ -2,6 +2,7 @@ import { Router, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import { validate } from '../middleware/validate.js'
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
+import { requirePermission } from '../middleware/rbac.js'
 import { NgnWalletService } from '../services/ngnWalletService.js'
 import { withdrawalResponseSchema } from '../schemas/ngnWallet.js'
 import { AppError } from '../errors/AppError.js'
@@ -17,6 +18,7 @@ export function createAdminWithdrawalsRouter(ngnWalletService: NgnWalletService)
   router.post(
     '/withdrawals/:id/approve',
     authenticateToken,
+    requirePermission('payouts', 'trigger'),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {
         const { id } = req.params
@@ -42,6 +44,7 @@ export function createAdminWithdrawalsRouter(ngnWalletService: NgnWalletService)
   router.post(
     '/withdrawals/:id/reject',
     authenticateToken,
+    requirePermission('payouts', 'trigger'),
     validate(rejectWithdrawalSchema, 'body'),
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       try {

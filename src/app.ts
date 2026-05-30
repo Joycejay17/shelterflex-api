@@ -132,6 +132,7 @@ import { createTenantDocumentVaultRouter } from "./routes/tenantDocumentVault.js
 import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSchedule.js";
 import { createDocsRouter } from "./routes/docs.js";
 import { createKycRouter } from "./routes/kyc.js";
+import { createAdminRolesRouter } from "./routes/adminRoles.js";
 import { createAbuseRouter } from "./routes/abuse.js";
 import { createInspectorJobsRouter, createAdminInspectorJobsRouter } from "./routes/inspectorJobs.js";
 import { createRentGuaranteeRouter } from "./routes/rentGuarantee.js";
@@ -631,6 +632,7 @@ export function createApp() {
   app.use("/api/tenant/payments", createTenantPaymentsRouter());
   app.use("/api/notifications", createNotificationsRouter());
   app.use("/api/admin", createSettlementAdminRouter());
+  app.use("/api/admin", createAdminRolesRouter());
   app.use("/api/apartment-reviews", createApartmentReviewsRouter());
   app.use("/api/compliance/reports", createComplianceReportRouter());
   app.use("/api/kyc", createKycRouter());
