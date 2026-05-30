@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express"
 import { randomUUID } from "crypto"
+import { requestContext } from "../request-context.js"
 
 export function requestIdMiddleware(
   req: Request,
@@ -16,5 +17,23 @@ export function requestIdMiddleware(
   req.requestId = requestId
   res.setHeader("x-request-id", requestId)
 
-  next()
+  const store = { requestId, queryCount: 0 }
+  requestContext.run(store, () => {
+    res.on("finish", () => {
+      if (process.env.NODE_ENV === "test") return
+      console.log(
+        JSON.stringify({
+          level: "info",
+          message: "Request database queries",
+          requestId,
+          queryCount: store.queryCount,
+          method: req.method,
+          path: req.originalUrl,
+          statusCode: res.statusCode,
+          timestamp: new Date().toISOString(),
+        }),
+      )
+    })
+    next()
+  })
 }

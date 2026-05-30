@@ -8,6 +8,7 @@ import { createLogger } from "./middleware/logger.js"
 import { logger } from "./utils/logger.js"
 import { apiVersioning } from "./middleware/apiVersioning.js"
 import { createHealthRouter } from "./routes/health.js"
+import { createPrometheusMetricsRouter } from "./routes/prometheusMetrics.js"
 import { mountOpenApiDocs } from "./docs/openApiRegistry.js"
 import { createPublicRateLimiter, createAuthRateLimiter, createWalletRateLimiter } from "./middleware/rateLimit.js"
 import publicRouter from "./routes/publicRoutes.js"
@@ -504,6 +505,7 @@ export function createApp() {
   );
 
   // Routes
+  app.use("/metrics", createPrometheusMetricsRouter())
   app.use("/health", createHealthRouter(sorobanAdapter))
 
   // OpenAPI / Swagger docs (issue #929). Disabled in production unless the

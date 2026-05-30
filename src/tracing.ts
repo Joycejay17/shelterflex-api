@@ -1,7 +1,9 @@
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { ConsoleSpanExporter } from "@opentelemetry/sdk-trace-base";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import {
+  SEMRESATTRS_DEPLOYMENT_ENVIRONMENT,
   SEMRESATTRS_SERVICE_NAME,
   SEMRESATTRS_SERVICE_VERSION,
 } from "@opentelemetry/semantic-conventions";
@@ -32,6 +34,11 @@ const otlpExporter = new OTLPTraceExporter({
   headers: parseHeaders(env.OTEL_EXPORTER_OTLP_HEADERS),
 });
 
+const isDevelopment = env.NODE_ENV === "development";
+const traceExporter = isDevelopment
+  ? new ConsoleSpanExporter()
+  : otlpExporter;
+
 const sampler = new ParentBasedSampler({
   root: new TraceIdRatioBasedSampler(env.OTEL_SAMPLING_RATIO),
 });
@@ -40,8 +47,9 @@ const sdk = new NodeSDK({
   resource: resourceFromAttributes({
     [SEMRESATTRS_SERVICE_NAME]: env.OTEL_SERVICE_NAME,
     [SEMRESATTRS_SERVICE_VERSION]: env.VERSION,
+    [SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]: env.NODE_ENV,
   }),
-  traceExporter: otlpExporter,
+  traceExporter,
   sampler: sampler,
   instrumentations: [
     new HttpInstrumentation({

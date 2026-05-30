@@ -25,6 +25,7 @@ import { detectDuplicateDealSpam } from '../services/abuseDetectionService.js'
 import { enqueueDelivery } from '../services/webhookDeliveryService.js'
 import { WebhookEventType } from '../models/webhookSubscription.js'
 import { logger } from '../utils/logger.js'
+import { recordDealActivationDuration } from '../metrics.js'
 import { applyDealRepaymentMethod } from '../services/salaryDeductionService.js'
 import { updateDealRepaymentSchema } from '../schemas/employer.js'
 
@@ -232,6 +233,8 @@ router.patch('/:dealId/status', async (req: Request, res: Response, next) => {
   
   try {
     const validatedData: UpdateDealStatusRequest = updateDealStatusSchema.parse(req.body)
+    const activationStart =
+      validatedData.status === 'active' ? Date.now() : null
     
     const deal = await dealStore.updateStatus(dealId, validatedData.status)
     
@@ -242,6 +245,9 @@ router.patch('/:dealId/status', async (req: Request, res: Response, next) => {
     if (deal) {
       let eventType: WebhookEventType | undefined
       if (validatedData.status === 'active') {
+        if (activationStart !== null) {
+          recordDealActivationDuration(Date.now() - activationStart)
+        }
         eventType = WebhookEventType.DEAL_ACTIVATED
       } else if (validatedData.status === 'completed') {
         eventType = WebhookEventType.DEAL_COMPLETED

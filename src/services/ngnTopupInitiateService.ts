@@ -4,6 +4,7 @@ import { ngnDepositStore } from '../models/ngnDepositStore.js'
 import { NgnWalletService } from './ngnWalletService.js'
 import { getPaymentProvider } from '../payments/index.js'
 import { logger } from '../utils/logger.js'
+import { recordPaymentInitiated } from '../metrics.js'
 import {
   ngnTopupInitiateResponseSchema,
   type NgnTopupInitiateRequest,
@@ -24,6 +25,7 @@ export async function initiateNgnTopup(params: {
 }): Promise<{ status: 200 | 201; body: NgnTopupInitiateResponse }> {
   const { userId, body, idempotencyKey, requestId } = params
 
+  try {
   if (idempotencyKey) {
     const existing = await ngnDepositStore.getByUserIdAndIdempotencyKey(userId, idempotencyKey)
     if (existing) {
@@ -38,6 +40,7 @@ export async function initiateNgnTopup(params: {
         ...(existing.redirectUrl ? { redirectUrl: existing.redirectUrl } : {}),
         ...(existing.bankDetails ? { bankDetails: existing.bankDetails } : {}),
       }
+      recordPaymentInitiated(body.rail, 'success')
       return { status: 200, body: ngnTopupInitiateResponseSchema.parse(response) }
     }
   }
@@ -95,5 +98,10 @@ export async function initiateNgnTopup(params: {
     ...(bankDetails ? { bankDetails } : {}),
   }
 
+  recordPaymentInitiated(body.rail, 'success')
   return { status: 201, body: ngnTopupInitiateResponseSchema.parse(response) }
+  } catch (error) {
+    recordPaymentInitiated(body.rail, 'failed')
+    throw error
+  }
 }

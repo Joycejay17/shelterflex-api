@@ -1,3 +1,8 @@
+import {
+  getRequestContext,
+  incrementRequestQueryCount,
+} from './request-context.js'
+
 export type PgClientLike = {
   query: (text: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number }>
   release: () => void
@@ -21,7 +26,7 @@ const DB_POOL_MIN = parseInt(process.env.DB_POOL_MIN ?? '2', 10)
 const DB_POOL_IDLE_TIMEOUT_MS = parseInt(process.env.DB_POOL_IDLE_TIMEOUT_MS ?? '30000', 10)
 const DB_POOL_CONNECTION_TIMEOUT_MS = parseInt(process.env.DB_POOL_CONNECTION_TIMEOUT_MS ?? '5000', 10)
 const DB_STATEMENT_TIMEOUT_MS = parseInt(process.env.DB_STATEMENT_TIMEOUT_MS ?? '30000', 10)
-const DB_SLOW_QUERY_THRESHOLD_MS = parseInt(process.env.DB_SLOW_QUERY_THRESHOLD_MS ?? '200', 10)
+const DB_SLOW_QUERY_THRESHOLD_MS = parseInt(process.env.DB_SLOW_QUERY_THRESHOLD_MS ?? '100', 10)
 
 // Circuit breaker settings
 const CB_FAILURE_THRESHOLD = parseInt(process.env.DB_CB_FAILURE_THRESHOLD ?? '5', 10)
@@ -221,6 +226,7 @@ function wrapPoolWithQueryLogging(candidate: any): PgPoolLike {
     const start = Date.now()
     let success = true
     let isSlow = false
+    incrementRequestQueryCount()
     
     try {
       const result = await originalQuery(text, params)
@@ -234,7 +240,8 @@ function wrapPoolWithQueryLogging(candidate: any): PgPoolLike {
             level: 'warn',
             message: 'Slow query detected',
             durationMs,
-            query: text.slice(0, 200),
+            query: text,
+            requestId: getRequestContext()?.requestId,
             threshold: DB_SLOW_QUERY_THRESHOLD_MS,
             timestamp: new Date().toISOString(),
           }),
