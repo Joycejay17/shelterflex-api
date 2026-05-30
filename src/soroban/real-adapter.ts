@@ -11,7 +11,7 @@ import {
   StrKey,
   BASE_FEE,
 } from '@stellar/stellar-sdk'
-import { SorobanAdapter, RecordReceiptParams } from './adapter.js'
+import { SorobanAdapter, RecordReceiptParams, SyncDealStatusParams } from './adapter.js'
 import { SorobanConfig } from './client.js'
 import { RawReceiptEvent } from '../indexer/event-parser.js'
 import { logger } from '../utils/logger.js'
@@ -1024,6 +1024,45 @@ export class RealSorobanAdapter implements SorobanAdapter {
       networkPassphrase: this.config.networkPassphrase,
       adminSecret: this.config.adminSecret,
       server: this.server,
+    })
+  }
+
+  async syncDealStatus(params: SyncDealStatusParams): Promise<void> {
+    const contractId = this.config.dealEscrowId
+    if (!contractId) {
+      throw new ConfigurationError('SOROBAN_DEAL_ESCROW_ID not configured for deal status sync')
+    }
+    if (!this.config.adminSecret) {
+      throw new ConfigurationError('SOROBAN_ADMIN_SECRET not configured for deal status sync')
+    }
+
+    const methodMap = {
+      active: 'activate_deal',
+      completed: 'complete_deal',
+      defaulted: 'default_deal',
+    } as const
+
+    const method = methodMap[params.newStatus]
+    const adminAddress = Keypair.fromSecret(this.config.adminSecret).publicKey()
+    const args: xdr.ScVal[] = [
+      nativeToScVal(new Address(adminAddress)),
+      nativeToScVal(params.contractDealId, { type: 'string' }),
+    ]
+
+    await this.adminSigningService.executeAdminOperation({
+      contractId,
+      operation: method,
+      args,
+      networkPassphrase: this.config.networkPassphrase,
+      adminSecret: this.config.adminSecret,
+      server: this.server,
+    })
+
+    logger.info('Deal status synced on-chain', {
+      dealId: params.dealId,
+      contractDealId: params.contractDealId,
+      newStatus: params.newStatus,
+      actor: params.actor,
     })
   }
 

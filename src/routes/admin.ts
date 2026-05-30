@@ -265,6 +265,29 @@ export function createAdminRouter(
   );
 
   /**
+   * GET /api/admin/outbox/dead-letter
+   *
+   * List dead-lettered outbox items (issue #974).
+   */
+  router.get(
+    "/outbox/dead-letter",
+    requireAdminSecret,
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 100;
+        const items = await outboxStore.listByStatus(OutboxStatus.DEAD);
+        res.json({
+          success: true,
+          data: items.slice(0, Math.min(limit, 1000)),
+          total: items.length,
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  /**
    * GET /api/admin/outbox
    *
    * List outbox items, optionally filtered by status

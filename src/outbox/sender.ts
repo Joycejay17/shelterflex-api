@@ -44,6 +44,13 @@ export class OutboxSender {
         case TxType.CONVERSION:
           await this.sendReceipt(item)
           break
+        case TxType.DEAL_STATUS_CHANGED:
+          if (this.adapter.syncDealStatus) {
+            await this.sendDealStatus(item)
+          } else {
+            throw new Error('Deal status sync not supported by adapter')
+          }
+          break
         default:
           throw new Error(`Unknown tx type: ${item.txType}`)
       }
@@ -154,6 +161,23 @@ export class OutboxSender {
       dealId: String(payload.dealId),
       txId: item.txId,
       txType: item.txType,
+    })
+  }
+
+  private async sendDealStatus(item: OutboxItem): Promise<void> {
+    if (!this.adapter.syncDealStatus) {
+      throw new Error('Adapter does not support deal status sync')
+    }
+    const { payload } = item
+    const newStatus = payload.newStatus as 'active' | 'completed' | 'defaulted'
+    if (!payload.dealId || !newStatus) {
+      throw new Error('Invalid deal status sync payload')
+    }
+    await this.adapter.syncDealStatus({
+      dealId: String(payload.dealId),
+      contractDealId: String(payload.contractDealId ?? payload.dealId),
+      newStatus,
+      actor: String(payload.actor ?? 'system'),
     })
   }
 

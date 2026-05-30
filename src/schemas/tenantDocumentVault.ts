@@ -71,6 +71,20 @@ export type CreateDocumentRequest = z.infer<typeof createDocumentSchema>
 export type UpdateDocumentRequest = z.infer<typeof updateDocumentSchema>
 export type ListDocumentsRequest = z.infer<typeof listDocumentsSchema>
 
+export type UploadStatus = 'pending' | 'confirmed'
+
+export interface PendingUploadInput {
+  docType: string
+  contentType: string
+  objectKey: string
+}
+
+export interface ConfirmUploadInput {
+  fileName: string
+  fileFormat: SupportedFileFormat
+  fileSizeBytes: number
+}
+
 export interface TenantDocument {
   id: string
   userId: string
@@ -79,6 +93,9 @@ export interface TenantDocument {
   fileSizeBytes: number
   storageKey: string
   category: DocumentCategory
+  docType?: string | null
+  contentType?: string | null
+  uploadStatus: UploadStatus
   tags: string[]
   status: DocumentStatus
   expiresAt: string | null
