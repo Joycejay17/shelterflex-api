@@ -18,7 +18,7 @@ import {
   getTenantDocumentVaultStore,
 } from '../models/tenantDocumentVaultStore.js'
 import { logger } from '../utils/logger.js'
-import { auditLog, extractAuditContext, type AuditEventType } from '../utils/auditLogger.js'
+import { auditLog, extractAuditContext } from '../utils/auditLogger.js'
 
 const router = Router()
 
@@ -50,6 +50,10 @@ router.get(
         search: filters.search,
         page: filters.page,
         pageSize: filters.pageSize,
+      })
+
+      auditLog('DOCUMENT_LISTED', extractAuditContext(req, 'user'), {
+        resultCount: result.documents.length,
       })
 
       res.json({
@@ -93,6 +97,10 @@ router.get(
       if (!doc) {
         throw new AppError(ErrorCode.NOT_FOUND, 404, 'Document not found')
       }
+
+      auditLog('DOCUMENT_VIEWED', extractAuditContext(req, 'user'), {
+        documentId: doc.id,
+      })
 
       res.json({ success: true, data: doc })
     } catch (error) {
@@ -138,7 +146,7 @@ router.get(
         return
       }
 
-      auditLog('DOCUMENT_PREVIEWED' as AuditEventType, extractAuditContext(req, 'user'), {
+      auditLog('DOCUMENT_PREVIEWED', extractAuditContext(req, 'user'), {
         documentId: doc.id,
         fileFormat: doc.fileFormat,
       })
@@ -179,7 +187,7 @@ router.post(
       const store = getTenantDocumentVaultStore()
       const doc = await store.create(userId, parsed.data)
 
-      auditLog('DOCUMENT_UPLOADED' as AuditEventType, extractAuditContext(req, 'user'), {
+      auditLog('DOCUMENT_UPLOADED', extractAuditContext(req, 'user'), {
         documentId: doc.id,
         category: doc.category,
         fileFormat: doc.fileFormat,
@@ -223,7 +231,7 @@ router.patch(
         throw new AppError(ErrorCode.NOT_FOUND, 404, 'Document not found or access denied')
       }
 
-      auditLog('DOCUMENT_UPDATED' as AuditEventType, extractAuditContext(req, 'user'), {
+      auditLog('DOCUMENT_UPDATED', extractAuditContext(req, 'user'), {
         documentId,
         updatedFields: Object.keys(parsed.data),
       })
@@ -261,7 +269,7 @@ router.delete(
         throw new AppError(ErrorCode.NOT_FOUND, 404, 'Document not found or access denied')
       }
 
-      auditLog('DOCUMENT_DELETED' as AuditEventType, extractAuditContext(req, 'user'), {
+      auditLog('DOCUMENT_DELETED', extractAuditContext(req, 'user'), {
         documentId,
       })
 

@@ -8,7 +8,9 @@ import { AppError } from "../../errors/AppError.js";
 import { ErrorCode } from "../../errors/errorCodes.js";
 import { auditLog } from "../../repositories/AuditRepository.js";
 import { outboxStore } from "../../outbox/index.js";
+import { TxType } from "../../outbox/types.js";
 import { logger } from "../../utils/logger.js";
+import { isDealSyncEnabled, mapDealStatusToSyncTarget } from "./dealSyncConfig.js";
 
 export interface DealWithStatusHistory {
   dealId: string;
@@ -120,33 +122,34 @@ export class DealStateMachine {
     actor: string,
     reason?: string,
   ): Promise<void> {
-    if (to === DealStatus.ACTIVE) {
-      // Trigger agreement generation
+    const syncTarget = mapDealStatusToSyncTarget(to)
+    if (syncTarget && isDealSyncEnabled()) {
       await outboxStore.create({
-        txType: "RECEIPT" as any,
-        source: "deal_state_machine",
-        ref: `${dealId}-active`,
+        txType: TxType.DEAL_STATUS_CHANGED,
+        source: "deal_status",
+        ref: `${dealId}:${to}`,
+        eventType: "DEAL_STATUS_CHANGED",
+        aggregateType: "deal",
+        aggregateId: dealId,
         payload: {
-          type: "DealActivated",
+          eventType: "DEAL_STATUS_CHANGED",
           dealId,
-          action: "GenerateAgreement",
+          contractDealId: dealId,
+          newStatus: syncTarget,
+          actor,
+          from,
+          to,
+          reason,
         },
       });
+      logger.info(`Enqueued on-chain deal status sync for ${dealId} → ${to}`);
+    }
+
+    if (to === DealStatus.ACTIVE) {
       logger.info(`Triggered agreement generation for deal ${dealId}`);
     }
 
     if (to === DealStatus.COMPLETED) {
-      // Trigger payout settlement
-      await outboxStore.create({
-        txType: "RECEIPT" as any,
-        source: "deal_state_machine",
-        ref: `${dealId}-completed`,
-        payload: {
-          type: "DealCompleted",
-          dealId,
-          action: "SettlePayouts",
-        },
-      });
       logger.info(`Triggered payout settlement for deal ${dealId}`);
     }
   }

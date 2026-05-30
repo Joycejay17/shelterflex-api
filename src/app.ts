@@ -53,6 +53,7 @@ import { DataRetentionJob } from "./jobs/dataRetentionJob.js"
 import { initOutboxStore, PostgresOutboxStore } from "./outbox/store.js"
 import { OutboxSender } from "./outbox/sender.js"
 import { OutboxWorker } from "./outbox/worker.js"
+import { DealStatusSyncWorker } from "./workers/dealStatusSyncWorker.js"
 import { initializeAppSecretRotation, secretRotationMiddleware, createSecretRotationRouter } from "./middleware/secretRotation.js"
 import { getSecretRotationService } from "./services/secretRotationService.js"
 import migrationGuideRouter from "./routes/migrationGuide.js"
@@ -129,6 +130,7 @@ import { createTenantCreditScoringRouter } from "./routes/tenantCreditScoring.js
 import { createTenantOnboardingRouter } from "./routes/tenantOnboarding.js";
 import { createAdminTenantCreditScoreRouter } from "./routes/adminTenantCreditScore.js";
 import { createTenantDocumentVaultRouter } from "./routes/tenantDocumentVault.js";
+import { createTenantDocumentsPresignRouter } from "./routes/tenantDocumentsPresign.js";
 import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSchedule.js";
 import { createDocsRouter } from "./routes/docs.js";
 import { createKycRouter } from "./routes/kyc.js";
@@ -308,6 +310,14 @@ export function createApp() {
     );
     outboxWorker.start(intervalMs);
     workers.push(outboxWorker);
+
+    const dealStatusSyncWorker = new DealStatusSyncWorker(sorobanAdapter);
+    const dealSyncIntervalMs = parseInt(
+      process.env.DEAL_SYNC_WORKER_INTERVAL_MS ?? "30000",
+      10,
+    );
+    dealStatusSyncWorker.start(dealSyncIntervalMs);
+    workers.push(dealStatusSyncWorker);
   }
 
   // Job Scheduler — swap to Postgres store when DATABASE_URL is set
@@ -491,7 +501,14 @@ export function createApp() {
     app.use(createLogger());
   }
 
-  app.use(express.json());
+  app.use(express.json({
+    verify: (req, _res, buf) => {
+      const url = (req as import('express').Request).originalUrl ?? req.url ?? ''
+      if (url.startsWith('/api/webhooks/payments') || url.startsWith('/api/webhooks/reversals')) {
+        ;(req as import('express').Request).rawBody = buf.toString('utf8')
+      }
+    },
+  }))
 
   // Core administrative routes
   app.use(
@@ -640,6 +657,7 @@ export function createApp() {
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
   app.use("/api/tenant/onboarding", createTenantOnboardingRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
+  app.use("/api/documents", createTenantDocumentsPresignRouter());
   app.use("/api/landlord/payout-schedule", createLandlordPayoutScheduleRouter());
   app.use("/api/webhooks/kyc", createKycWebhookRouter());
   app.use("/api/onboarding", createOnboardingRouter());
