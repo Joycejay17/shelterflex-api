@@ -10,6 +10,7 @@ import { auditLog, extractAuditContext, type AuditEventType } from '../utils/aud
 import { verifyHmacSha256 } from '../utils/webhookSignature.js'
 import { emitKycStatusChanged } from '../services/index.js'
 import { logger } from '../utils/logger.js'
+import { recordKycSubmission } from '../metrics.js'
 
 function requireAdmin(req: Request): void {
   const user = (req as any).user
@@ -80,6 +81,8 @@ router.post(
         documentType: submission.documentType,
         attemptCount: record.attemptCount,
       })
+
+      recordKycSubmission(record.status)
 
       res.status(201).json({
         success: true,

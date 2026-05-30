@@ -19,6 +19,7 @@ import { updateScheduleStatuses } from '../utils/scheduleGenerator.js'
 import { lateFeeService } from './lateFeeService.js'
 import { sendLatePaymentNotification } from './latePaymentNotifier.js'
 import { logger } from '../utils/logger.js'
+import { recordLatePaymentEscalation } from '../metrics.js'
 
 export interface EscalationRunResult {
   dealsProcessed: number
@@ -27,6 +28,14 @@ export interface EscalationRunResult {
 
 export class LatePaymentEscalationService {
   constructor(private config: LatePaymentConfig = getLatePaymentConfig()) {}
+
+  private markEscalationStep(paymentId: string, step: EscalationStep): boolean {
+    const applied = latePaymentEscalationStore.markStepOnce(paymentId, step)
+    if (applied) {
+      recordLatePaymentEscalation(step)
+    }
+    return applied
+  }
 
   async processAllActiveDeals(now: Date = new Date()): Promise<EscalationRunResult> {
     const deals = await dealStore.listActiveDealsWithSchedules()
@@ -103,7 +112,7 @@ export class LatePaymentEscalationService {
     }
 
     if (dpd >= this.config.lateFeeDay) {
-      if (latePaymentEscalationStore.markStepOnce(paymentId, 't4_late_fee')) {
+      if (this.markEscalationStep(paymentId, 't4_late_fee')) {
         const { applied, lateFeeAmountNgn } = lateFeeService.applyLateFee(
           paymentId,
           this.config.lateFeeRate,
@@ -122,7 +131,7 @@ export class LatePaymentEscalationService {
     }
 
     if (dpd >= this.config.atRiskDay && deal.status === DealStatus.ACTIVE) {
-      if (latePaymentEscalationStore.markStepOnce(paymentId, 't7_at_risk')) {
+      if (this.markEscalationStep(paymentId, 't7_at_risk')) {
         await dealStore.updateStatus(deal.dealId, DealStatus.AT_RISK)
         await sendLatePaymentNotification({
           userId: deal.tenantId,
@@ -144,7 +153,7 @@ export class LatePaymentEscalationService {
     }
 
     if (dpd >= this.config.adminEscalationDay) {
-      if (latePaymentEscalationStore.markStepOnce(paymentId, 't14_admin_escalation')) {
+      if (this.markEscalationStep(paymentId, 't14_admin_escalation')) {
         adminTaskStore.create({
           type: 'late_payment_escalation',
           dealId: deal.dealId,
@@ -175,7 +184,7 @@ export class LatePaymentEscalationService {
     }
 
     if (dpd >= this.config.defaultDay) {
-      if (latePaymentEscalationStore.markStepOnce(paymentId, 't30_default')) {
+      if (this.markEscalationStep(paymentId, 't30_default')) {
         await dealStore.updateStatus(deal.dealId, DealStatus.DEFAULTED)
         userApplicationBlockStore.block(
           deal.tenantId,
