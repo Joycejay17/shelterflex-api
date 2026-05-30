@@ -143,6 +143,7 @@ import { createRentGuaranteeProviderFromEnv } from "./services/insurance/rentGua
 
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
 import { createAdminFraudRouter } from "./routes/adminFraud.js";
+import { createAdminOutboxRouter } from "./routes/adminOutbox.js";
 import { initializeCacheInvalidationWebhooks } from "./services/cacheInvalidation.js";
 import { createKycWebhookRouter } from "./routes/kyc.js";
 import { createOnboardingRouter } from "./routes/onboarding.js";
@@ -603,6 +604,7 @@ export function createApp() {
   app.use("/api/admin/secrets", createSecretRotationRouter());
   app.use("/api/admin/jobs", createAdminJobsRouter());
   app.use("/api/admin/fraud", createAdminFraudRouter());
+  app.use("/api/admin/outbox", createAdminOutboxRouter(sorobanAdapter));
   app.use("/api/admin", createAdminAuditRouter());
   app.use("/api/admin/erasure", createAdminErasureRouter());
   app.use("/api/deals", createDealsRouter());
