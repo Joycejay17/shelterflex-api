@@ -18,8 +18,14 @@ function buildKey(req: Request, keyBy: 'ip' | 'user'): string {
  * Fails open when Redis is unavailable and emits a warn-level log.
  * 429 responses follow the standard API error envelope:
  *   { success: false, error: { code, message, retryAfter } }
+ * In test mode (NODE_ENV=test) the middleware is a no-op pass-through so
+ * in-memory state cannot leak across tests sharing the same IP bucket.
  */
 export function createRateLimiter(options: RateLimiterOptions) {
+  if (process.env.NODE_ENV === 'test') {
+    return (_req: Request, _res: Response, next: NextFunction) => next()
+  }
+
   let limiter: RateLimiterRedis | RateLimiterMemory
 
   try {

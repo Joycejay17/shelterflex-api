@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Request, Response, NextFunction } from 'express'
-import { RateLimiterRes } from 'rate-limiter-flexible'
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -54,18 +53,12 @@ function makeReq(overrides: Partial<Request> = {}): Request {
 
 function makeRes() {
   const headers: Record<string, unknown> = {}
-  let statusCode = 200
-  let body: unknown
-
   return {
     setHeader: vi.fn((k: string, v: unknown) => { headers[k] = v }),
     status: vi.fn().mockReturnThis(),
-    json: vi.fn((b: unknown) => { body = b }),
+    json: vi.fn(),
     _headers: headers,
-    get statusCode() { return statusCode },
-    _setStatus(s: number) { statusCode = s },
-    get _body() { return body },
-  } as unknown as Response & { _headers: Record<string, unknown>; _body: unknown }
+  } as unknown as Response & { _headers: Record<string, unknown> }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -75,8 +68,14 @@ describe('createRateLimiter', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks()
+    // Run limiter logic even in the test environment
+    vi.stubEnv('NODE_ENV', 'production')
     const mod = await import('rate-limiter-flexible')
     consumeMock = (mod as any).consumeMock
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
   })
 
   const baseOptions = {
