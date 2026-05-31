@@ -3,7 +3,7 @@
  * Generates and manages deterministic installment calendars for deals
  */
 
-import { randomUUID } from 'node:crypto'
+import { v4 as uuidv4 } from 'uuid'
 import { getPool, type PgPoolLike } from '../db.js'
 
 export type RepaymentPlan = '3m' | '6m' | '12m' | 'outright'
@@ -165,7 +165,7 @@ export async function saveSchedule(
           status, paid_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
-          randomUUID(),
+          uuidv4(),
           dealId,
           item.paymentNumber,
           item.dueDate,

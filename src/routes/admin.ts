@@ -42,7 +42,7 @@ import type { EncryptionService } from "../services/walletService.js";
 import { ReceiptIndexer } from "../indexer/worker.js";
 import { kycRepository } from "../repositories/KycRepository.js";
 import { paymentDisputeRepository } from "../repositories/PaymentDisputeRepository.js";
-import { randomUUID } from "node:crypto";
+import { v4 as uuidv4 } from "uuid";
 
 export function createAdminRouter(
   adapter: SorobanAdapter,
@@ -1048,7 +1048,7 @@ export function createAdminRouter(
           );
         }
 
-        const batchId = randomUUID();
+        const batchId = uuidv4();
         const adminId = (req as any).user?.id || "admin";
 
         logger.info("Bulk KYC action requested", {
@@ -1216,7 +1216,7 @@ export function createAdminRouter(
           );
         }
 
-        const batchId = randomUUID();
+        const batchId = uuidv4();
         const adminId = (req as any).user?.id || "admin";
 
         logger.info("Bulk dispute action requested", {
@@ -1357,7 +1357,7 @@ export function createAdminRouter(
           );
         }
 
-        const batchId = randomUUID();
+        const batchId = uuidv4();
         const adminId = (req as any).user?.id || "admin";
 
         logger.info("Bulk listing action requested", {
