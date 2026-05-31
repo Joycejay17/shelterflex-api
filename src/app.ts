@@ -126,6 +126,9 @@ import {
 import { createPartnerLandlordApplicationsRouter } from "./routes/partnerLandlordApplications.js";
 import { createApartmentReviewsRouter } from "./routes/apartmentReviews.js";
 import { createComplianceReportRouter } from "./routes/complianceReport.js";
+import { createWhistleblowerReportsRouter } from "./routes/whistleblowerReports.js";
+import { createTenantDataExportRouter } from "./routes/tenantDataExport.js";
+import { createTenantErasureRouter } from "./routes/tenantErasure.js";
 import { createTenantCreditScoringRouter } from "./routes/tenantCreditScoring.js";
 import { createTenantOnboardingRouter } from "./routes/tenantOnboarding.js";
 import { createAdminTenantCreditScoreRouter } from "./routes/adminTenantCreditScore.js";
@@ -681,6 +684,9 @@ export function createApp() {
     app.use("/api/admin", createSettlementAdminRouter());
     app.use("/api/admin", createAdminRolesRouter());
     app.use("/api/apartment-reviews", createApartmentReviewsRouter());
+    app.use("/api/reports", createWhistleblowerReportsRouter());
+    app.use("/api/tenant/data-export", createTenantDataExportRouter());
+    app.use("/api/tenant/erasure", createTenantErasureRouter());
   }
 
   app.use(
@@ -761,6 +767,9 @@ export function createApp() {
   app.use("/api/v1/admin", createAdminRolesRouter());
   app.use("/api/v1/apartment-reviews", createApartmentReviewsRouter());
   app.use("/api/v1/compliance/reports", createComplianceReportRouter());
+  app.use("/api/v1/reports", createWhistleblowerReportsRouter());
+  app.use("/api/v1/tenant/data-export", createTenantDataExportRouter());
+  app.use("/api/v1/tenant/erasure", createTenantErasureRouter());
   app.use("/api/v1/kyc", createKycRouter());
   app.use("/api/v1/admin/abuse", createAbuseRouter());
   app.use("/api/v1/tenant/credit-scoring", createTenantCreditScoringRouter());
