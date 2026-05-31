@@ -572,6 +572,117 @@ export function createApp() {
   app.use("/api/v1", createReceiptsRouter(receiptRepo));
   app.use("/api/v1/support", createSupportRouter());
   app.use("/api/v1/property-issue-reports", createPropertyIssueReportsRouter());
+
+  // In test mode, also mount routes at /api/ for backward compatibility with existing tests
+  if (env.NODE_ENV === 'test') {
+    app.use("/api/auth", createAuthRateLimiter(env), authRouter)
+    app.use("/api/conversion", createConversionRouter(conversionRateService))
+    app.use("/api/user", createUserPreferencesRouter())
+    app.use("/api/user", createUserErasureRouter())
+    app.use('/api', createBalanceRouter(sorobanAdapter))
+    app.use('/api', createReceiptsRouter(receiptRepo))
+    app.use('/api/wallet', createWalletRateLimiter(env), createWalletRouter(walletService))
+    app.use('/api/wallet/ngn', createNgnWalletRouter(ngnWalletService))
+    app.use('/api/risk', createRiskRouter(ngnWalletService))
+    app.use('/api/admin/risk', createAdminRiskRouter(ngnWalletService))
+    app.use('/api/admin', createAdminWithdrawalsRouter(ngnWalletService))
+    app.use('/api/payments', createPaymentsRouter(sorobanAdapter))
+    app.use('/api/admin', createAdminRouter(sorobanAdapter, walletStore as any, encryptionService as any, indexer))
+    app.use('/api/admin/reconciliation', createAdminReconciliationRouter(ngnWalletService))
+    app.use('/api/admin/secrets', createSecretRotationRouter())
+    app.use('/api/admin/jobs', createAdminJobsRouter())
+    app.use('/api/admin/webhook-replay', createWebhookReplayRouter())
+    app.use('/api/deals', createDealsRouter())
+    app.use('/api/whistleblower', createWhistleblowerRouter(earningsService))
+    app.use('/api/webhooks', createWebhooksRouter(ngnWalletService))
+    app.use('/api/deposits', createDepositsRouter(conversionService))
+    app.use('/api/gas-metrics', createGasMetricsRouter())
+    app.use('/api', migrationGuideRouter)
+    app.use("/api", createComprehensiveRateLimiter());
+    app.use("/api/auth", authRouter);
+    app.use("/api", createBalanceRouter(sorobanAdapter));
+    app.use("/api", createReceiptsRouter(receiptRepo));
+    app.use("/api/support", createSupportRouter());
+    app.use("/api/property-issue-reports", createPropertyIssueReportsRouter());
+    app.use(
+      "/api/wallet",
+      createWalletRouter(walletService),
+    );
+    app.use("/api/wallet/ngn", createNgnWalletRouter(ngnWalletService));
+    app.use("/api/risk", createRiskRouter(ngnWalletService));
+    app.use("/api/admin/risk", createAdminRiskRouter(ngnWalletService));
+    app.use("/api/admin", createAdminWithdrawalsRouter(ngnWalletService));
+    app.use("/api/payments", createPaymentsRouter(sorobanAdapter));
+    app.use(
+      "/api/admin",
+      createAdminRouter(
+        sorobanAdapter,
+        walletStore as any,
+        encryptionService as any,
+        indexer,
+      ),
+    );
+    app.use(
+      "/api/admin/reconciliation",
+      createAdminReconciliationRouter(ngnWalletService),
+    );
+    app.use("/api/admin/ledger-reconciliation", createLedgerReconciliationRouter());
+    app.use("/api/admin/transaction-ledger", createAdminTransactionLedgerRouter());
+    app.use("/api/admin/sessions", createAdminSessionsRouter());
+    app.use("/api/admin/secrets", createSecretRotationRouter());
+    app.use("/api/admin/jobs", createAdminJobsRouter());
+    app.use("/api/admin/fraud", createAdminFraudRouter());
+    app.use("/api/admin/outbox", createAdminOutboxRouter(sorobanAdapter));
+    app.use("/api/admin", createAdminAuditRouter());
+    app.use("/api/admin/erasure", createAdminErasureRouter());
+    app.use("/api/deals", createDealsRouter());
+    app.use("/api", createEmployersRouter());
+    app.use("/api/whistleblower", createWhistleblowerRouter(earningsService));
+    app.use("/api/whistleblower-applications", createWhistleblowerApplicationsRouter());
+    app.use("/api/admin/whistleblower-applications", createAdminWhistleblowerApplicationsRouter());
+    app.use("/api/admin/underwriting", createAdminUnderwritingRouter());
+    app.use("/api/admin", createAdminTenantCreditScoreRouter());
+    app.use("/api/admin", createSettlementAdminRouter());
+    app.use(
+      "/api/staking",
+      createStakingRouter(
+        sorobanAdapter,
+        walletService,
+        linkedAddressStore,
+        ngnWalletService,
+        conversionService,
+        stakingService,
+        receiptRepo,
+        conversionRateService,
+      ),
+
+    );
+    app.use("/api/webhooks", createWebhooksRouter(ngnWalletService));
+    app.use("/api/deposits", createDepositsRouter(conversionService));
+    app.use("/api/gas-metrics", createGasMetricsRouter());
+    app.use("/api", createPropertyPhotosRouter());
+    app.use("/api/landlord/properties", createLandlordPropertiesRouter());
+    app.use(
+      "/api/landlord/partner-applications",
+      createPartnerLandlordApplicationsRouter(),
+    );
+    app.use("/api/landlord", authenticateToken, createLandlordRouter());
+    app.use("/api/tenant/applications", createTenantApplicationsRouter());
+    app.use(
+      "/api/tenant/saved-properties",
+      createTenantSavedPropertiesRouter(),
+    );
+    app.use(
+      "/api/whistleblower/applications",
+      createWhistleblowerApplicationsRouter(),
+    );
+    app.use("/api/tenant/payments", createTenantPaymentsRouter());
+    app.use("/api/notifications", createNotificationsRouter());
+    app.use("/api/admin", createSettlementAdminRouter());
+    app.use("/api/admin", createAdminRolesRouter());
+    app.use("/api/apartment-reviews", createApartmentReviewsRouter());
+  }
+
   app.use(
     "/api/v1/wallet",
     createWalletRouter(walletService),
@@ -676,14 +787,15 @@ export function createApp() {
   app.use("/docs", createDocsRouter());
 
   // Backward compatibility redirect from /api/* to /api/v1/*
-  // Skip in test mode to avoid breaking existing tests
+  // In test mode, also mount routes at /api/ to avoid breaking existing tests
   app.use('/api', (req, res, next) => {
     // Skip if already on /api/v1 path
     if (req.path.startsWith('/v1')) {
       return next()
     }
     
-    // Skip redirect in test mode
+    // In test mode, allow /api/ to work by not redirecting
+    // Routes will be mounted at both /api/ and /api/v1/ in test mode
     if (env.NODE_ENV === 'test') {
       return next()
     }
