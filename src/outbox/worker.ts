@@ -55,7 +55,7 @@ export class OutboxWorker {
     const failed = await outboxStore.listByStatus(OutboxStatus.FAILED)
     for (const item of failed) {
       if (item.retryCount >= outboxConfig.maxAttempts) {
-        await outboxProcessor.promoteToDeadLetter(item, 'Max retry attempts exhausted')
+        await outboxProcessor.promoteToDeadLetter(item, 'Max retry count reached')
         continue
       }
       if (!outboxProcessor.shouldRetry(item)) continue
