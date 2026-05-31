@@ -37,6 +37,7 @@ import { env } from "../schemas/env.js";
 import type { WalletStore } from "../models/wallet.js";
 import type { EncryptionService } from "../services/walletService.js";
 import { ReceiptIndexer } from "../indexer/worker.js";
+import { kycRepository } from "../repositories/KycRepository.js";
 
 export function createAdminRouter(
   adapter: SorobanAdapter,
@@ -256,6 +257,29 @@ export function createAdminRouter(
           status:
             summary.dead > 0 || summary.failed > 10 ? "degraded" : "healthy",
           summary,
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  /**
+   * GET /api/admin/outbox/dead-letter
+   *
+   * List dead-lettered outbox items (issue #974).
+   */
+  router.get(
+    "/outbox/dead-letter",
+    requireAdminSecret,
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 100;
+        const items = await outboxStore.listByStatus(OutboxStatus.DEAD);
+        res.json({
+          success: true,
+          data: items.slice(0, Math.min(limit, 1000)),
+          total: items.length,
         });
       } catch (error) {
         next(error);
@@ -686,6 +710,9 @@ export function createAdminRouter(
             bedrooms: listing.bedrooms,
             bathrooms: listing.bathrooms,
             annualRentNgn: listing.annualRentNgn,
+            outrightPriceNgn: listing.outrightPriceNgn,
+            installmentBasePriceNgn: listing.installmentBasePriceNgn,
+            negotiatedLandlordRateNgn: listing.negotiatedLandlordRateNgn,
             description: listing.description,
             photos: listing.photos,
             status: listing.status,
@@ -736,6 +763,17 @@ export function createAdminRouter(
               currentStatus: listing.status,
               allowedFrom: ListingStatus.PENDING_REVIEW,
             },
+          );
+        }
+
+        // KYC gate: landlord (whistleblower) must have approved KYC before listing can go live
+        const landlordKyc = await kycRepository.findByUserId(listing.whistleblowerId);
+        if (!landlordKyc || landlordKyc.status !== 'approved') {
+          throw new AppError(
+            ErrorCode.FORBIDDEN,
+            403,
+            'LANDLORD_KYC_REQUIRED',
+            { kycStatus: landlordKyc?.status ?? 'not_submitted' },
           );
         }
 

@@ -5,6 +5,7 @@
 export enum DealStatus {
   DRAFT = 'draft',
   ACTIVE = 'active',
+  AT_RISK = 'at_risk',
   COMPLETED = 'completed',
   DEFAULTED = 'defaulted',
 }
@@ -15,6 +16,8 @@ export enum ScheduleItemStatus {
   PAID = 'paid',
   LATE = 'late',
 }
+
+export type RepaymentMethod = 'self_pay' | 'salary_deduction'
 
 export interface Deal {
   dealId: string
@@ -27,6 +30,10 @@ export interface Deal {
   termMonths: number
   createdAt: Date
   status: DealStatus
+  repaymentMethod: RepaymentMethod
+  employerId?: string
+  employeeId?: string
+  deductionDay?: number
 }
 
 export interface CreateDealInput {
@@ -36,6 +43,10 @@ export interface CreateDealInput {
   annualRentNgn: number
   depositNgn: number
   termMonths: number
+  repaymentMethod?: RepaymentMethod
+  employerId?: string
+  employeeId?: string
+  deductionDay?: number
 }
 
 export interface ScheduleItem {

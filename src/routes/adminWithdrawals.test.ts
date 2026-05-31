@@ -6,6 +6,8 @@ import { NgnWalletService } from '../services/ngnWalletService.js'
 import { sessionStore, userStore } from '../models/authStore.js'
 import { errorHandler } from '../middleware/errorHandler.js'
 
+import { getPool } from '../db.js'
+
 describe('Admin Withdrawals Routes', () => {
   let app: Express
   let ngnWalletService: NgnWalletService
@@ -20,6 +22,17 @@ describe('Admin Withdrawals Routes', () => {
 
     const adminUser = await userStore.getOrCreateByEmail('admin@test.com')
     userId = adminUser.id
+    adminUser.role = 'super_admin' // Legacy/test fallback for in-memory store
+
+    // Grant super_admin role in DB for RBAC check
+    const pool = await getPool()
+    if (pool) {
+      await pool.query(`INSERT INTO roles (name, description) VALUES ('super_admin', 'Super admin role') ON CONFLICT (name) DO NOTHING`)
+      const { rows: roleRows } = await pool.query(`SELECT id FROM roles WHERE name = 'super_admin'`)
+      if (roleRows.length > 0) {
+        await pool.query(`INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [userId, roleRows[0].id])
+      }
+    }
 
     const testToken = `test-token-${Date.now()}`
     const session = await sessionStore.create('admin@test.com', testToken)

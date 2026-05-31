@@ -18,6 +18,9 @@ export interface Listing {
   bedrooms: number
   bathrooms: number
   annualRentNgn: number
+  outrightPriceNgn?: number
+  installmentBasePriceNgn?: number
+  negotiatedLandlordRateNgn?: number
   description?: string
   photos: string[]
   status: ListingStatus
@@ -37,6 +40,9 @@ export interface CreateListingInput {
   bedrooms: number
   bathrooms: number
   annualRentNgn: number
+  outrightPriceNgn?: number
+  installmentBasePriceNgn?: number
+  negotiatedLandlordRateNgn?: number
   description?: string
   photos: string[]
 }

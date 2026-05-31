@@ -9,6 +9,9 @@ import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { TxType } from '../outbox/types.js'
 import { settleFullPaymentIncentive } from '../services/fullPaymentIncentiveSettlement.js'
+import { enqueueDelivery } from '../services/webhookDeliveryService.js'
+import { WebhookEventType } from '../models/webhookSubscription.js'
+
 
 export function createPaymentsRouter(adapter: SorobanAdapter) {
   const router = Router()
@@ -105,6 +108,23 @@ export function createPaymentsRouter(adapter: SorobanAdapter) {
             reporterApplied: payoutBreakdown.reporterApplied,
             requestId: req.requestId,
           })
+        }
+
+        if (txType === TxType.TENANT_REPAYMENT) {
+          await enqueueDelivery(WebhookEventType.PAYMENT_RECEIVED, {
+            dealId,
+            amountUsdc,
+            externalRef,
+            amountNgn,
+            fxRateNgnPerUsdc
+          }).catch(err => logger.error('Failed to enqueue payment.received webhook:', err))
+        } else if (txType === TxType.LANDLORD_PAYOUT) {
+          await enqueueDelivery(WebhookEventType.PAYOUT_DISBURSED, {
+            dealId,
+            amountUsdc,
+            externalRef,
+            amountNgn
+          }).catch(err => logger.error('Failed to enqueue payout.disbursed webhook:', err))
         }
 
         res.status(sent ? 200 : 202).json({

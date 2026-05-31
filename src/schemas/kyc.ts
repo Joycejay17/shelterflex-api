@@ -45,4 +45,5 @@ export interface KycRecord {
   createdAt: Date
   updatedAt: Date
   expiresAt: Date | null
+  attemptCount: number
 }

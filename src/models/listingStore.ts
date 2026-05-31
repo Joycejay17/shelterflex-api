@@ -40,6 +40,9 @@ class InMemoryListingStore implements ListingStorePort {
       bedrooms: input.bedrooms,
       bathrooms: input.bathrooms,
       annualRentNgn: input.annualRentNgn,
+      outrightPriceNgn: input.outrightPriceNgn,
+      installmentBasePriceNgn: input.installmentBasePriceNgn,
+      negotiatedLandlordRateNgn: input.negotiatedLandlordRateNgn,
       description: input.description,
       photos: input.photos,
       status: ListingStatus.PENDING_REVIEW,
@@ -182,6 +185,9 @@ type ListingRow = {
   bedrooms: number
   bathrooms: number
   annual_rent_ngn: string | number
+  outright_price_ngn: string | number | null
+  installment_base_price_ngn: string | number | null
+  negotiated_landlord_rate_ngn: string | number | null
   description: string | null
   photos: unknown
   status: ListingStatus
@@ -219,9 +225,12 @@ class PostgresListingStore implements ListingStorePort {
         bedrooms,
         bathrooms,
         annual_rent_ngn,
+        outright_price_ngn,
+        installment_base_price_ngn,
+        negotiated_landlord_rate_ngn,
         description,
         photos
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
       RETURNING *`,
       [
         listingId,
@@ -232,6 +241,9 @@ class PostgresListingStore implements ListingStorePort {
         input.bedrooms,
         input.bathrooms,
         input.annualRentNgn,
+        input.outrightPriceNgn ?? null,
+        input.installmentBasePriceNgn ?? null,
+        input.negotiatedLandlordRateNgn ?? null,
         input.description ?? null,
         JSON.stringify(input.photos),
       ],
@@ -404,6 +416,9 @@ class PostgresListingStore implements ListingStorePort {
       bedrooms: row.bedrooms,
       bathrooms: row.bathrooms,
       annualRentNgn: toNumber(row.annual_rent_ngn),
+      outrightPriceNgn: row.outright_price_ngn != null ? toNumber(row.outright_price_ngn) : undefined,
+      installmentBasePriceNgn: row.installment_base_price_ngn != null ? toNumber(row.installment_base_price_ngn) : undefined,
+      negotiatedLandlordRateNgn: row.negotiated_landlord_rate_ngn != null ? toNumber(row.negotiated_landlord_rate_ngn) : undefined,
       description: row.description ?? undefined,
       photos,
       status: row.status,

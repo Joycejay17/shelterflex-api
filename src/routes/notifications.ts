@@ -52,6 +52,8 @@ export function createNotificationsRouter() {
         const userId = req.user!.id
         const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '20'), 10) || 20))
         const curRaw = typeof req.query.cursor === 'string' ? req.query.cursor : null
+        const category = typeof req.query.category === 'string' ? req.query.category : null
+        const readFilter = req.query.read
         let tBound: string | null = null
         let idBound: string | null = null
         if (curRaw) {
@@ -68,6 +70,8 @@ export function createNotificationsRouter() {
         if (!pool) {
           let items = _getNotificationMemory()
             .filter((n) => n.userId === userId)
+            .filter((n) => !category || n.category === category)
+            .filter((n) => readFilter === undefined || (readFilter === 'false' ? !n.readAt : !!n.readAt))
             .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
           if (tBound && idBound) {
             items = items.filter((i) => i.createdAt < tBound || (i.createdAt === tBound && i.id < idBound))
@@ -96,15 +100,25 @@ export function createNotificationsRouter() {
         }
 
         const take = limit + 1
-        const params: unknown[] = [userId, take]
+        const params: unknown[] = [userId]
         let sql = `SELECT id, category, title, body, data, read_at, created_at
           FROM user_notifications
           WHERE user_id = $1`
+        let paramIndex = 2
+        if (category) {
+          params.push(category)
+          sql += ` AND category = $${paramIndex++}`
+        }
+        if (readFilter !== undefined) {
+          const isRead = readFilter === 'true'
+          sql += isRead ? ` AND read_at IS NOT NULL` : ` AND read_at IS NULL`
+        }
         if (tBound && idBound) {
           params.push(tBound, idBound)
-          sql += ` AND (created_at, id) < ($3::timestamptz, $4::uuid)`
+          sql += ` AND (created_at, id) < ($${paramIndex++}::timestamptz, $${paramIndex++}::uuid)`
         }
-        sql += ` ORDER BY created_at DESC, id DESC LIMIT $2`
+        params.push(take)
+        sql += ` ORDER BY created_at DESC, id DESC LIMIT $${paramIndex}`
         const { rows } = await pool.query(sql, params)
         const hasMore = rows.length > take - 1
         const outRows = (hasMore ? rows.slice(0, limit) : rows) as {

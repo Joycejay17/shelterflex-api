@@ -1,3 +1,5 @@
+import { redactPiiFields } from './piiRedaction.js'
+
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const LEVELS: Record<LogLevel, number> = {
@@ -31,17 +33,8 @@ function write(level: LogLevel, message: string, fields?: LogFields): void {
           timestamp: new Date().toISOString(),
           level,
           message,
-          ...fields,
+          ...(fields ? (redactPiiFields(fields) as LogFields) : {}),
      };
-
-    // Never leak secrets
-    const REDACTED_KEYS = new Set([
-          'password', 'secret', 'token', 'authorization', 'apiKey', 'api_key',
-          'privateKey', 'private_key', 'accessToken', 'access_token', 'otp',
-     ]);
-     for (const key of REDACTED_KEYS) {
-          if (key in entry) entry[key] = '[REDACTED]';
-     }
 
      process.stdout.write(JSON.stringify(entry) + '\n');
 }

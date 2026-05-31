@@ -6,8 +6,11 @@ import { env } from "./schemas/env.js"
 import { createRequire } from "node:module"
 import { getUsdcTokenAddress } from "./utils/token.js"
 import { runMigrationsIfNeeded } from "./migrations/runMigrations.js"
+import { validateCreditScoringConfig } from "./config/creditScoring.js"
+import { validatePiiEncryptionKey } from "./utils/piiEncryption.js"
 import { startBackupJob } from "./jobs/backupJob.js"
 import { ReconciliationWorker } from "./reconciliation/index.js"
+import { notificationWSS } from "./services/websocket/NotificationWebSocketServer.js"
 
 const require = createRequire(import.meta.url)
 const { version } = require("../package.json") as { version: string }
@@ -34,15 +37,19 @@ if (env.NODE_ENV === 'production') {
 
 async function main() {
   try {
+    validatePiiEncryptionKey(env.ENCRYPTION_KEY, env.NODE_ENV)
+    const { validateLatePaymentConfig } = await import('./config/latePayment.js')
+    validateLatePaymentConfig()
     await runMigrationsIfNeeded()
     startBackupJob()
     const app = createApp()
     maybeStartOutboxWorker()
     const reconciliationWorker = new ReconciliationWorker()
     reconciliationWorker.start()
-    app.listen(env.PORT, () => {
+    const server = app.listen(env.PORT, () => {
       console.log(`[backend] listening on http://localhost:${env.PORT}`)
     })
+    notificationWSS.attach(server)
   } catch (error) {
     console.error(`[backend] Fatal startup error: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
     process.exit(1)

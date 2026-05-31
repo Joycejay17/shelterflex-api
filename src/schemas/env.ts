@@ -59,7 +59,12 @@ export const envSchema = z.object({
   OTEL_EXPORTER_OTLP_HEADERS: z.string().optional(),
   // Metrics (Prometheus)
   PROMETHEUS_PORT: z.coerce.number().default(9464),
+  /** Bearer token for secured GET /metrics (prom-client scrape endpoint). */
+  METRICS_TOKEN: z.string().optional(),
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
+
+  // Rent guarantee insurance provider
+  RENT_GUARANTEE_PROVIDER: z.enum(['mock', 'leatherback', 'heirs']).default('mock'),
 
   // Full-payment incentive payout split (NGN)
   FULL_PAYMENT_SPLIT_VERSION: z.string().default('v1'),

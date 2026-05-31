@@ -19,7 +19,30 @@ export class SlidingWindowLimiter {
      * Check if a request is allowed within the sliding window.
      * LUA script ensures atomicity.
      */
+    private memoryStore = new Map<string, number[]>()
+
     async checkLimit(key: string, limit: number, windowMs: number): Promise<RateLimitResult> {
+        if (typeof (this.redis as any).eval !== 'function') {
+            const now = Date.now()
+            const windowStart = now - windowMs
+            
+            let timestamps = this.memoryStore.get(key) || []
+            timestamps = timestamps.filter(ts => ts > windowStart)
+            
+            const allowed = timestamps.length < limit
+            if (allowed) {
+                timestamps.push(now)
+            }
+            this.memoryStore.set(key, timestamps)
+            
+            return {
+                allowed,
+                remaining: Math.max(0, limit - timestamps.length),
+                total: limit,
+                reset: now + windowMs
+            }
+        }
+
         const now = Date.now()
         const windowStart = now - windowMs
 
@@ -70,6 +93,10 @@ export class SlidingWindowLimiter {
             total,
             reset
         }
+    }
+
+    clear(): void {
+        this.memoryStore.clear()
     }
 }
 

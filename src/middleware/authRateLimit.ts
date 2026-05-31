@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
+import { slidingWindowLimiter } from '../services/SlidingWindowLimiter.js'
 
 type Counter = {
   count: number
@@ -121,6 +122,7 @@ export function _testOnly_clearAuthRateLimits() {
   ipOtpRequestCounters.clear()
   walletChallengeRequestCounters.clear()
   ipWalletChallengeRequestCounters.clear()
+  slidingWindowLimiter.clear()
 }
 
 export function _testOnly_prefillEmailOtpCounter(email: string, count: number) {

@@ -14,6 +14,7 @@
 import type { Request } from 'express'
 import { getPool } from '../db.js'
 import { logger } from './logger.js'
+import { redactPiiFields } from './piiRedaction.js'
 
 /**
  * All audit event types across the system.
@@ -86,6 +87,32 @@ export type AuditEventType =
   // Disputes
   | 'DISPUTE_CREATED'
   | 'DISPUTE_RESOLVED'
+  // Inspector jobs
+  | 'INSPECTOR_JOB_CREATED'
+  | 'INSPECTOR_JOB_CLAIMED'
+  | 'INSPECTOR_REPORT_SUBMITTED'
+  | 'INSPECTOR_REPORT_APPROVED'
+  | 'INSPECTOR_REPORT_REJECTED'
+  // Rent guarantee insurance
+  | 'INSURANCE_QUOTE_REQUESTED'
+  | 'INSURANCE_POLICY_PURCHASED'
+  | 'INSURANCE_CLAIM_FILED'
+  // Tenant document vault
+  | 'DOCUMENT_UPLOAD_URL_ISSUED'
+  | 'DOCUMENT_DOWNLOAD_URL_ISSUED'
+  | 'DOCUMENT_UPLOAD_CONFIRMED'
+  | 'DOCUMENT_PREVIEWED'
+  | 'DOCUMENT_UPLOADED'
+  | 'DOCUMENT_UPDATED'
+  | 'DOCUMENT_DELETED'
+  | 'DOCUMENT_LISTED'
+  | 'DOCUMENT_VIEWED'
+  // Tenant rating card
+  | 'TENANT_RATING_SUBMITTED'
+  | 'TENANT_RATING_SHARE_TOKEN_GENERATED'
+  // Data privacy / erasure
+  | 'USER_ERASURE_REQUESTED'
+  | 'USER_ERASURE_COMPLETED'
   // State-changing operations (auto-generated)
   | 'STATE_CHANGED'
   | 'STATE_DELETED'
@@ -165,36 +192,7 @@ function extractIp(req: Request): string {
  * Sanitize metadata — strips any key whose name suggests it contains a secret.
  */
 function sanitizeMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
-  const SENSITIVE_KEYS = new Set([
-    'password', 'secret', 'token', 'authorization', 'apiKey', 'api_key',
-    'privateKey', 'private_key', 'accessToken', 'access_token', 'secretKey',
-    'secret_key', 'masterKey', 'master_key', 'encryptedSecretKey', 'envelope',
-    'cipherText', 'ciphertext', 'authTag', 'iv', 'key', 'signature', 'seed',
-    'mnemonic', 'passphrase',
-  ])
-
-  const sanitized: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(metadata)) {
-    const lk = k.toLowerCase()
-    if (
-      SENSITIVE_KEYS.has(lk) ||
-      lk.includes('secret') ||
-      lk.includes('password') ||
-      lk.includes('token') ||
-      lk.includes('key') ||
-      lk.includes('private') ||
-      lk.includes('credential')
-    ) {
-      sanitized[k] = '[REDACTED]'
-      continue
-    }
-    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
-      sanitized[k] = sanitizeMetadata(v as Record<string, unknown>)
-    } else {
-      sanitized[k] = v
-    }
-  }
-  return sanitized
+  return redactPiiFields(metadata) as Record<string, unknown>
 }
 
 /**

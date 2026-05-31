@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express"
 import { env } from "../schemas/env.js"
-import { getPoolMetrics } from "../db.js"
+import { getPool, getPoolMetrics } from "../db.js"
 import { getMetricsSnapshot } from "../utils/appMetrics.js"
 import { SorobanAdapter } from "../soroban/adapter.js"
 import { CircuitBreakerAdapter } from "../soroban/circuit-breaker-adapter.js"
@@ -32,10 +32,28 @@ export function buildHealthDetailsPayload({
 export function createHealthRouter(adapter: SorobanAdapter): Router {
   const router = Router()
 
-  router.get("/", (req: Request, res: Response) => {
+  router.get("/", async (req: Request, res: Response) => {
+    let dbLatencyMs = 0
+    const pool = await getPool()
+    if (pool) {
+      const dbStart = Date.now()
+      try {
+        await pool.query("SELECT 1")
+        dbLatencyMs = Date.now() - dbStart
+      } catch {
+        dbLatencyMs = -1
+      }
+    }
+
+    const memory = process.memoryUsage()
+    const uptimeSeconds = Math.floor(process.uptime())
     res.json({
       status: "ok",
-      uptimeSeconds: Math.floor(process.uptime()),
+      uptime: uptimeSeconds,
+      uptimeSeconds,
+      version: env.VERSION,
+      dbLatencyMs,
+      memoryUsageMb: Math.round(memory.heapUsed / 1024 / 1024),
       requestId: req.requestId,
     })
   })

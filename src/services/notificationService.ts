@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { getPool } from '../db.js'
 import { recordKPI } from '../utils/appMetrics.js'
+import { notificationWSS } from './websocket/NotificationWebSocketServer.js'
 
 export type CreateNotificationInput = {
   category: string
@@ -44,6 +45,10 @@ export const notificationService = {
         dedupeKey: input.dedupeKey ?? null,
       })
       recordKPI('notificationCreated')
+      notificationWSS.sendToUser(userId, {
+        type: 'notification',
+        payload: { id, title: input.title, body: input.body, notificationType: input.category, createdAt: now },
+      })
       return id
     }
     if (input.dedupeKey) {
@@ -67,7 +72,12 @@ export const notificationService = {
       ],
     )
     recordKPI('notificationCreated')
-    return (rows[0] as { id: string }).id
+    const id = (rows[0] as { id: string }).id
+    notificationWSS.sendToUser(userId, {
+      type: 'notification',
+      payload: { id, title: input.title, body: input.body, notificationType: input.category, createdAt: new Date().toISOString() },
+    })
+    return id
   },
 }
 

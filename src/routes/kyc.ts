@@ -1,21 +1,17 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import { kycSubmissionSchema, kycStatusSchema } from '../schemas/kyc.js'
-import { kycRepository } from '../repositories/KycRepository.js'
+import { kycRepository, MAX_ATTEMPTS } from '../repositories/KycRepository.js'
 import { createKycProvider } from '../services/kycProvider.js'
 import { authenticateToken } from '../middleware/auth.js'
+import { requirePermission } from '../middleware/rbac.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { auditLog, extractAuditContext, type AuditEventType } from '../utils/auditLogger.js'
+import { verifyHmacSha256 } from '../utils/webhookSignature.js'
 import { emitKycStatusChanged } from '../services/index.js'
 import { logger } from '../utils/logger.js'
-
-function requireAdmin(req: Request): void {
-  const user = (req as any).user
-  if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
-    throw new AppError(ErrorCode.FORBIDDEN, 403, 'Admin access required')
-  }
-}
+import { recordKycSubmission } from '../metrics.js'
 
 const router = Router()
 const kycProvider = createKycProvider()
@@ -40,8 +36,25 @@ router.post(
       if (existing && existing.status === 'in_review') {
         throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'KYC currently in review')
       }
+      if (existing && existing.attemptCount >= MAX_ATTEMPTS) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'KYC_MAX_ATTEMPTS_REACHED', {
+          attemptsRemaining: 0,
+          maxAttempts: MAX_ATTEMPTS,
+        })
+      }
 
-      const record = await kycRepository.create(userId, submission)
+      let record
+      try {
+        record = await kycRepository.create(userId, submission)
+      } catch (err: any) {
+        if (err.message === 'MAX_ATTEMPTS_EXCEEDED') {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'KYC_MAX_ATTEMPTS_REACHED', {
+            attemptsRemaining: 0,
+            maxAttempts: MAX_ATTEMPTS,
+          })
+        }
+        throw err
+      }
 
       try {
         const result = await kycProvider.submit(submission)
@@ -60,9 +73,16 @@ router.post(
       auditLog('KYC_SUBMITTED' as AuditEventType, extractAuditContext(req, 'user'), {
         recordId: record.id,
         documentType: submission.documentType,
+        attemptCount: record.attemptCount,
       })
 
-      res.status(201).json({ success: true, recordId: record.id })
+      recordKycSubmission(record.status)
+
+      res.status(201).json({
+        success: true,
+        recordId: record.id,
+        attemptsRemaining: MAX_ATTEMPTS - record.attemptCount,
+      })
     } catch (error) {
       next(error)
     }
@@ -78,15 +98,17 @@ router.get(
       const record = await kycRepository.findByUserId(userId)
 
       if (!record) {
-        return res.json({ status: 'not_submitted' })
+        return res.json({ status: 'not_submitted', attemptsRemaining: MAX_ATTEMPTS })
       }
 
       res.json({
         status: record.status,
         documentType: record.documentType,
+        rejectionReason: record.rejectionReason,
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
         expiresAt: record.expiresAt,
+        attemptsRemaining: Math.max(0, MAX_ATTEMPTS - record.attemptCount),
       })
     } catch (error) {
       next(error)
@@ -127,7 +149,8 @@ router.post(
 
 router.get(
   '/admin',
-  requireAdmin,
+  authenticateToken,
+  requirePermission('kyc', 'view'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { status, userId, page, pageSize } = req.query
@@ -145,9 +168,30 @@ router.get(
   },
 )
 
+router.get(
+  '/admin/:submissionId',
+  authenticateToken,
+  requirePermission('kyc', 'view'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { submissionId } = req.params
+      const record = await kycRepository.findById(submissionId)
+
+      if (!record) {
+        throw new AppError(ErrorCode.NOT_FOUND, 404, 'KYC record not found')
+      }
+
+      res.json({ success: true, data: record })
+    } catch (error) {
+      next(error)
+    }
+  },
+)
+
 router.post(
   '/admin/:recordId/approve',
-  requireAdmin,
+  authenticateToken,
+  requirePermission('kyc', 'verify'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { recordId } = req.params
@@ -181,7 +225,8 @@ router.post(
 
 router.post(
   '/admin/:recordId/reject',
-  requireAdmin,
+  authenticateToken,
+  requirePermission('kyc', 'verify'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { recordId } = req.params
@@ -216,4 +261,65 @@ router.post(
 
 export function createKycRouter(): Router {
   return router
+}
+
+/**
+ * Standalone router for provider-specific KYC webhooks.
+ * Mount at /api/webhooks/kyc → handles POST /api/webhooks/kyc/:provider
+ */
+export function createKycWebhookRouter(): Router {
+  const webhookRouter = Router()
+  webhookRouter.post('/:provider', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { provider } = req.params
+      const rawBody = JSON.stringify(req.body)
+      const signature = (req.headers['x-signature'] || req.headers['x-webhook-signature']) as string | undefined
+
+      const secret = process.env[`KYC_WEBHOOK_SECRET_${provider.toUpperCase()}`]
+        || process.env.KYC_WEBHOOK_SECRET
+        || ''
+
+      if (secret) {
+        if (!signature) {
+          logger.warn('kyc.provider_webhook_missing_signature', { provider })
+          return res.status(401).json({ error: 'Missing signature' })
+        }
+        if (!verifyHmacSha256(secret, rawBody, signature)) {
+          logger.warn('kyc.provider_webhook_invalid_signature', { provider })
+          return res.status(401).json({ error: 'Invalid signature' })
+        }
+      }
+
+      // Respond 200 immediately; process asynchronously
+      res.json({ received: true })
+
+      const payload = req.body as Record<string, unknown>
+      const id = (payload.id ?? payload.external_id ?? payload.reference) as string | undefined
+      const status = payload.status as string | undefined
+      const reason = payload.reason as string | undefined
+
+      if (!id || !status) {
+        logger.warn('kyc.provider_webhook_missing_fields', { provider, payload })
+        return
+      }
+
+      const record = await kycRepository.findById(id).catch(() => null)
+      if (!record) {
+        logger.warn('kyc.provider_webhook_record_not_found', { provider, id })
+        return
+      }
+
+      const parsed = kycStatusSchema.safeParse(status)
+      if (!parsed.success) {
+        logger.warn('kyc.provider_webhook_unknown_status', { provider, status })
+        return
+      }
+
+      await kycRepository.updateStatus(record.id, parsed.data, provider, undefined, reason)
+      await emitKycStatusChanged(record.userId, parsed.data)
+    } catch (error) {
+      logger.error('kyc.provider_webhook_error', { error })
+    }
+  })
+  return webhookRouter
 }

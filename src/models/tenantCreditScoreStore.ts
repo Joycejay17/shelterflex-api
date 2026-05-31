@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { riskBandSchema } from '../schemas/creditScoring.js'
+import type { TenantCreditScore } from './tenantCreditScore.js'
 import type { RiskBand } from '../schemas/creditScoring.js'
 
 export interface CreditScoreRecord {
@@ -22,6 +22,7 @@ export interface CreditScoreRecord {
 
 class TenantCreditScoreStore {
   private scores: Map<string, CreditScoreRecord> = new Map()
+  private pipelineScores: Map<string, TenantCreditScore> = new Map()
   private config: {
     factorWeights: Array<{ factorName: string; weight: number; normalization: string }>
     riskBandThresholds: { low: number; medium: number; high: number; declined: number }
@@ -103,6 +104,37 @@ class TenantCreditScoreStore {
     record.updatedAt = new Date()
     this.scores.set(id, record)
     return record
+  }
+
+  savePipelineScore(record: Omit<TenantCreditScore, 'id'> & { id?: string }): TenantCreditScore {
+    const id = record.id ?? randomUUID()
+    const saved: TenantCreditScore = { ...record, id }
+    this.pipelineScores.set(record.tenantId, saved)
+    return saved
+  }
+
+  findPipelineByTenantId(tenantId: string): TenantCreditScore | undefined {
+    return this.pipelineScores.get(tenantId)
+  }
+
+  findPipelineByDataVersion(tenantId: string, dataVersion: string): TenantCreditScore | undefined {
+    const existing = this.pipelineScores.get(tenantId)
+    if (existing && existing.dataVersion === dataVersion) return existing
+    return undefined
+  }
+
+  clear(): void {
+    this.scores.clear()
+    this.pipelineScores.clear()
+    this.config = {
+      factorWeights: [
+        { factorName: 'paymentHistory', weight: 35, normalization: 'linear' },
+        { factorName: 'applicationData', weight: 30, normalization: 'linear' },
+        { factorName: 'behavioralSignals', weight: 20, normalization: 'linear' },
+        { factorName: 'rentalHistory', weight: 15, normalization: 'linear' },
+      ],
+      riskBandThresholds: { low: 700, medium: 500, high: 300, declined: 0 },
+    }
   }
 
   search(filters: {
