@@ -88,6 +88,7 @@ import { createUserPreferencesRouter } from "./routes/userPreferences.js"
 import { createUserErasureRouter } from "./routes/userErasure.js"
 import { createAdminErasureRouter } from "./routes/adminErasure.js"
 import { createAdminAuditRouter } from "./routes/adminAudit.js"
+import { createAdminAuditLogsRouter } from "./routes/adminAuditLogs.js"
 import { createAdminUnderwritingRouter } from "./routes/adminUnderwriting.js"
 import { PostgresRewardsDataLayer } from "./services/postgres-rewards-data-layer.js"
 import { createReceiptRepository, createTimelockRepository } from "./indexer/repositoryBootstrap.js"
@@ -719,6 +720,7 @@ export function createApp() {
   app.use("/api/v1/admin/fraud", createAdminFraudRouter());
   app.use("/api/v1/admin/outbox", createAdminOutboxRouter(sorobanAdapter));
   app.use("/api/v1/admin", createAdminAuditRouter());
+  app.use("/api/v1/admin/audit-logs", createAdminAuditLogsRouter());
   app.use("/api/v1/admin/erasure", createAdminErasureRouter());
   app.use("/api/v1/deals", createDealsRouter());
   app.use("/api/v1", createEmployersRouter());
