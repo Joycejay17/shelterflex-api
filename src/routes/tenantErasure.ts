@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { Router, type Response, type NextFunction } from 'express'
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 import { AppError } from '../errors/AppError.js'
@@ -64,7 +63,7 @@ export function createTenantErasureRouter(): Router {
 
         const confirmBy = new Date(Date.now() + ERASURE_CONFIRM_DAYS * 24 * 60 * 60 * 1000)
         const request: TenantErasureRequest = {
-          id: randomUUID(),
+          id: crypto.randomUUID(),
           userId,
           status: 'pending_review',
           createdAt: new Date(),
