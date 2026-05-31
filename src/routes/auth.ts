@@ -3,6 +3,8 @@ import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { validate } from '../middleware/validate.js'
 import { otpRequestRateLimit, walletAuthRateLimit } from '../middleware/authRateLimit.js'
+import { createRateLimiter } from '../middleware/rateLimiter.js'
+import { rateLimitProfiles } from '../config/rateLimitConfig.js'
 import { requestOtpSchema, verifyOtpSchema, walletChallengeSchema, walletVerifySchema } from '../schemas/auth.js'
 import { generateOtp, generateToken } from '../utils/tokens.js'
 import { generateOtpSalt, hashOtp, verifyOtpHash } from '../utils/otp.js'
@@ -35,6 +37,10 @@ const WALLET_MAX_ATTEMPTS = 3
 // Initialize OTP delivery provider
 const otpDeliveryProvider = createOtpDeliveryProvider()
 
+// Redis-backed rate limiters (issue #1046)
+const authLimiter = createRateLimiter(rateLimitProfiles.auth)
+const otpLimiter = createRateLimiter(rateLimitProfiles.otp)
+
 /**
  * POST /api/auth/request-otp
  * Body: { email }
@@ -42,6 +48,8 @@ const otpDeliveryProvider = createOtpDeliveryProvider()
 router.post(
   '/request-otp',
   validate(requestOtpSchema, 'body'),
+  authLimiter,
+  otpLimiter,
   otpRequestRateLimit(),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -75,6 +83,7 @@ router.post(
 router.post(
   '/verify-otp',
   validate(verifyOtpSchema, 'body'),
+  authLimiter,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const email = (req.body.email as string).toLowerCase()

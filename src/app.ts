@@ -11,6 +11,8 @@ import { createHealthRouter } from "./routes/health.js"
 import { createPrometheusMetricsRouter } from "./routes/prometheusMetrics.js"
 import { mountOpenApiDocs } from "./docs/openApiRegistry.js"
 import { createPublicRateLimiter, createAuthRateLimiter, createWalletRateLimiter } from "./middleware/rateLimit.js"
+import { createRateLimiter } from "./middleware/rateLimiter.js"
+import { rateLimitProfiles } from "./config/rateLimitConfig.js"
 import publicRouter from "./routes/publicRoutes.js"
 import { AppError } from "./errors/AppError.js"
 import { ErrorCode } from "./errors/errorCodes.js"
@@ -156,6 +158,9 @@ import { MonthlyDeductionReminderJob } from "./jobs/monthlyDeductionReminderJob.
 
 export function createApp() {
   const app = express();
+
+  // Trust the first proxy hop (Vercel/Render) so req.ip reflects the real client IP
+  app.set('trust proxy', 1);
 
   // Initialize secret rotation service
   if (env.NODE_ENV !== "test") {
@@ -537,6 +542,18 @@ export function createApp() {
 
   // API versioning — applied to all /api routes after rate limiting
   app.use('/api', apiVersioning)
+
+  // Redis-backed rate limiters (issue #1046)
+  // publicSearch: 60 req/min per IP for unauthenticated listing/search endpoints
+  const publicSearchLimiter = createRateLimiter(rateLimitProfiles.publicSearch)
+  // authenticated: 300 req/min per user (JWT sub) for all authenticated API routes
+  const authenticatedLimiter = createRateLimiter(rateLimitProfiles.authenticated)
+
+  // Apply authenticated limiter globally after JWT auth middleware has run
+  app.use('/api/v1', authenticatedLimiter)
+
+  // Apply publicSearch limiter to listing/property search routes
+  app.use('/api/v1/landlord/properties', publicSearchLimiter)
 
   // Mount all API routes under /api/v1/
   app.use("/api/v1/auth", createAuthRateLimiter(env), authRouter)
