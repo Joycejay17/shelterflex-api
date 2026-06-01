@@ -25,6 +25,7 @@ import {
   aiRiskScoringService,
 } from "./aiRiskScoringService.js";
 import type { AiRiskScoreResult } from "./aiRiskScoreProvider.js";
+import { creditScoreService } from "./creditScoreService.js";
 
 export interface UnderwritingEvaluationInput {
   applicationId: string;
@@ -183,6 +184,12 @@ export class UnderwritingService {
       ruleConfigVersion: this.ruleEngine.getConfig().version,
       aiRiskScore: aiEvaluation.aiRiskScore,
       evaluatedAt: result.evaluatedAt,
+    });
+
+    await creditScoreService.recordUnderwritingSnapshot(application.userId, {
+      ...result,
+      decision: finalDecision,
+      decisionReason,
     });
 
     return {

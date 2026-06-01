@@ -149,6 +149,7 @@ import { createInspectorJobsRouter, createAdminInspectorJobsRouter } from "./rou
 import { createRentGuaranteeRouter } from "./routes/rentGuarantee.js";
 import { createTenantRatingCardRouter } from "./routes/tenantRatingCard.js";
 import { createRentGuaranteeProviderFromEnv } from "./services/insurance/rentGuaranteeProviderFactory.js";
+import { createAdminCreditScoreRouter, createCreditScoreRouter } from "./routes/creditScore.js";
 
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
 import { createAdminFraudRouter } from "./routes/adminFraud.js";
@@ -785,29 +786,23 @@ export function createApp() {
     "/api/v1/whistleblower/applications",
     createWhistleblowerApplicationsRouter(),
   );
-  app.use("/api/v1/tenant/payments", createTenantPaymentsRouter());
-  app.use("/api/v1/notifications", createNotificationsRouter());
-  app.use("/api/v1/admin", createSettlementAdminRouter());
-  app.use("/api/v1/admin", createAdminRolesRouter());
-  app.use("/api/v1/apartment-reviews", createApartmentReviewsRouter());
-  app.use("/api/v1/compliance/reports", createComplianceReportRouter());
-  app.use("/api/v1/reports", createWhistleblowerReportsRouter());
-  app.use("/api/v1/tenant/data-export", createTenantDataExportRouter());
-  app.use("/api/v1/tenant/erasure", createTenantErasureRouter());
-  app.use("/api/v1/kyc", createKycRouter());
-  app.use("/api/v1/admin/abuse", createAbuseRouter());
-  app.use("/api/v1/tenant/credit-scoring", createTenantCreditScoringRouter());
-  app.use("/api/v1/tenant/onboarding", createTenantOnboardingRouter());
-  app.use("/api/v1/tenant/vault", createTenantDocumentVaultRouter());
-  app.use("/api/v1/documents", createTenantDocumentsPresignRouter());
-  app.use("/api/v1/tenant/documents", createTenantDocumentsRouter());
-  app.use("/api/v1/tenant/referral", createReferralsRouter());
-  app.use("/api/v1/referrals", createReferralsRouter());
-  app.use("/api/v1/admin", createReferralsRouter());
-  app.use("/api/v1/landlord/payout-schedule", createLandlordPayoutScheduleRouter());
-  app.use("/api/v1/webhooks/kyc", createKycWebhookRouter());
-  app.use("/api/v1/onboarding", createOnboardingRouter());
-  app.use("/api/v1", migrationGuideRouter);
+  app.use("/api/tenant/payments", createTenantPaymentsRouter());
+  app.use("/api/notifications", createNotificationsRouter());
+  app.use("/api/admin", createSettlementAdminRouter());
+  app.use("/api/admin", createAdminRolesRouter());
+  app.use("/api/apartment-reviews", createApartmentReviewsRouter());
+  app.use("/api/compliance/reports", createComplianceReportRouter());
+  app.use("/api/kyc", createKycRouter());
+  app.use("/api/admin/abuse", createAbuseRouter());
+  app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
+  app.use("/api/tenant/onboarding", createTenantOnboardingRouter());
+  app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
+  app.use("/api/credit-score", createCreditScoreRouter());
+  app.use("/api/admin/credit-score", createAdminCreditScoreRouter());
+  app.use("/api/landlord/payout-schedule", createLandlordPayoutScheduleRouter());
+  app.use("/api/webhooks/kyc", createKycWebhookRouter());
+  app.use("/api/onboarding", createOnboardingRouter());
+  app.use("/api", migrationGuideRouter);
 
   // Inspector job routes
   app.use('/api/v1/inspector', authenticateToken, createInspectorJobsRouter())
