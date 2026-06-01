@@ -13,6 +13,9 @@ export type AdminOperation =
   | 'init'
   | 'execute'
   | 'cancel'
+  | 'activate_deal'
+  | 'complete_deal'
+  | 'default_deal'
 
 /**
  * Parameters for admin operations
@@ -95,7 +98,17 @@ export class AdminSigningService {
     }
 
     // Validate operation is in whitelist
-    const allowedOperations: AdminOperation[] = ['pause', 'unpause', 'set_operator', 'init', 'execute', 'cancel']
+    const allowedOperations: AdminOperation[] = [
+      'pause',
+      'unpause',
+      'set_operator',
+      'init',
+      'execute',
+      'cancel',
+      'activate_deal',
+      'complete_deal',
+      'default_deal',
+    ]
     if (!allowedOperations.includes(params.operation)) {
       throw new ConfigurationError(
         `Operation "${params.operation}" is not in the admin operations whitelist. ` +

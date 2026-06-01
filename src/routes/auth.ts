@@ -3,6 +3,8 @@ import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { validate } from '../middleware/validate.js'
 import { otpRequestRateLimit, walletAuthRateLimit } from '../middleware/authRateLimit.js'
+import { createRateLimiter } from '../middleware/rateLimiter.js'
+import { rateLimitProfiles } from '../config/rateLimitConfig.js'
 import { requestOtpSchema, verifyOtpSchema, walletChallengeSchema, walletVerifySchema } from '../schemas/auth.js'
 import { randomUUID } from 'node:crypto'
 import { generateOtp, generateToken } from '../utils/tokens.js'
@@ -20,6 +22,7 @@ import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth
 import { PostgresLinkedAddressStore } from '../models/linkedAddressStore.js'
 import { createOtpDeliveryProvider } from '../services/otpDeliveryFactory.js'
 import { detectCredentialStuffing } from '../services/abuseDetectionService.js'
+import { referralService } from '../services/referralService.js'
 import {
   auditAuthOtpRequested,
   auditAuthLoginSuccess,
@@ -100,6 +103,8 @@ async function issueSessionPair(
 router.post(
   '/request-otp',
   validate(requestOtpSchema, 'body'),
+  authLimiter,
+  otpLimiter,
   otpRequestRateLimit(),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -133,6 +138,7 @@ router.post(
 router.post(
   '/verify-otp',
   validate(verifyOtpSchema, 'body'),
+  authLimiter,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const email = (req.body.email as string).toLowerCase()
@@ -169,12 +175,37 @@ router.post(
 
       await otpChallengeStore.deleteByEmail(email)
 
+      // Check if user exists before creation
+      const existingUser = await userStore.getByEmail(email)
+      const isNewUser = !existingUser
+
       const user = await userStore.getOrCreateByEmail(email)
       const token = await issueSessionPair(
         res,
         user,
         { ip: req.ip, userAgent: req.get('User-Agent') },
       )
+
+      // Generate referral code for new tenants
+      if (isNewUser && user.role === 'tenant') {
+        try {
+          await referralService.generateReferralCode(user.id)
+        } catch (error) {
+          // Log error but don't fail registration if referral code generation fails
+          console.error('Failed to generate referral code:', error)
+        }
+      }
+
+      // Apply referral code if provided (only for new users)
+      const referralCode = (req.body as any).referralCode
+      if (isNewUser && referralCode && user.role === 'tenant') {
+        try {
+          await referralService.applyReferralCode(referralCode, user.id)
+        } catch (error) {
+          // Log error but don't fail registration if referral code application fails
+          console.error('Failed to apply referral code:', error)
+        }
+      }
 
       auditAuthLoginSuccess(req, { userId: user.id, email: user.email })
 

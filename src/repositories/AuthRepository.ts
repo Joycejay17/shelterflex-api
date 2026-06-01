@@ -25,6 +25,8 @@ export interface LandlordProfile {
   bankName?: string
   accountNumber?: string
   accountName?: string
+  verificationLevel?: 'unverified' | 'id_verified' | 'id_and_property_verified' | 'premium'
+  verifiedAt?: Date | null
   notificationPreferences: {
     newInquiries: boolean
     paymentUpdates: boolean
