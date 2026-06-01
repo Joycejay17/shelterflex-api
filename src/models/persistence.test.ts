@@ -172,7 +172,7 @@ describe('Postgres-backed stores', () => {
     expect(count).toBe(2)
     expect(await listingStore.hasReachedMonthlyLimit(first.whistleblowerId)).toBe(true)
 
-    const results = await listingStore.list({ query: 'Lagos', page: 1, pageSize: 1 })
+    const results = await listingStore.list({ lga: 'Victoria Island', page: 1, pageSize: 1 })
     expect(results.total).toBe(2)
     expect(results.listings[0].address).toContain('Lagos')
 
