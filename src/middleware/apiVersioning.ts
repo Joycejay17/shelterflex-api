@@ -5,38 +5,32 @@ import type { Request, Response, NextFunction } from 'express'
  * Add new versions to this array as the API evolves.
  * Versions are resolved in order: URL path > Accept-Version header > default.
  */
-export const SUPPORTED_VERSIONS = ['v1', 'v2'] as const
+export const SUPPORTED_VERSIONS = ['v1'] as const
 export type ApiVersion = typeof SUPPORTED_VERSIONS[number]
 
 /**
  * The current (latest) API version.
  */
-export const CURRENT_VERSION: ApiVersion = 'v2'
+export const CURRENT_VERSION: ApiVersion = 'v1'
 
 /**
  * Deprecated versions that still work but emit warnings.
  * Move versions here before full removal to give clients a migration window.
  */
-export const DEPRECATED_VERSIONS: ReadonlySet<string> = new Set([
-  'v1', // v1 deprecated — migrate to v2 before 2027-01-01
-])
+export const DEPRECATED_VERSIONS: ReadonlySet<string> = new Set([])
 
 /**
  * Sunset dates for deprecated versions (ISO 8601 date strings).
  * After this date the version may be removed entirely.
  */
-export const SUNSET_DATES: Record<string, string> = {
-  v1: '2027-01-01',
-}
+export const SUNSET_DATES: Record<string, string> = {}
 
 /**
  * Breaking changes per version — used to generate migration guides.
  */
 export const VERSION_CHANGELOG: Record<string, string[]> = {
-  v2: [
-    'Pagination shape changed: { data, meta } instead of flat array',
-    'Error responses now include a `classification` field',
-    'Timestamps are ISO 8601 strings (previously Unix ms integers)',
+  v1: [
+    'Initial API version',
   ],
 }
 
@@ -82,7 +76,7 @@ export function apiVersioning(req: Request, res: Response, next: NextFunction): 
   let version: string | undefined
 
   // 1. Try URL path — match /api/v{N}
-  const pathMatch = req.path.match(/^\/v(\d+)(\/|$)/)
+  const pathMatch = req.path.match(/^\/api\/v(\d+)(\/|$)/)
   if (pathMatch) {
     version = `v${pathMatch[1]}`
   }

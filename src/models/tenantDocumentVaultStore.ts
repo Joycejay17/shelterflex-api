@@ -10,11 +10,19 @@ import {
   type DocumentStatus,
   type CreateDocumentRequest,
   type UpdateDocumentRequest,
+  type PendingUploadInput,
+  type ConfirmUploadInput,
   computeDocumentStatus,
 } from '../schemas/tenantDocumentVault.js'
 
 export interface TenantDocumentVaultStore {
   create(userId: string, data: CreateDocumentRequest): Promise<TenantDocument>
+  createPendingUpload(userId: string, data: PendingUploadInput): Promise<TenantDocument>
+  confirmUpload(
+    documentId: string,
+    userId: string,
+    data: ConfirmUploadInput,
+  ): Promise<TenantDocument | null>
   findById(documentId: string, userId: string): Promise<TenantDocument | null>
   list(
     userId: string,
@@ -31,17 +39,33 @@ export interface TenantDocumentVaultStore {
   delete(documentId: string, userId: string): Promise<boolean>
 }
 
+function docTypeToCategory(docType: string): DocumentCategory {
+  const map: Record<string, DocumentCategory> = {
+    id_card: 'identification',
+    passport: 'identification',
+    employment_letter: 'agreement',
+    bank_statement: 'receipt',
+    utility_bill: 'utility',
+    proof_of_address: 'utility',
+  }
+  return map[docType] ?? 'other'
+}
+
 function mapRowToDocument(row: Record<string, unknown>): TenantDocument {
   const tags = typeof row.tags === 'string' ? JSON.parse(row.tags as string) : (row.tags as string[]) || []
   const expiresAt = row.expires_at as string | null
+  const docType = (row.doc_type as string | null) ?? null
   return {
     id: row.id as string,
     userId: row.user_id as string,
-    fileName: row.file_name as string,
-    fileFormat: row.file_format as TenantDocument['fileFormat'],
-    fileSizeBytes: row.file_size_bytes as number,
+    fileName: (row.file_name as string | null) ?? '',
+    fileFormat: (row.file_format as TenantDocument['fileFormat']) ?? 'pdf',
+    fileSizeBytes: (row.file_size_bytes as number | null) ?? 0,
     storageKey: row.storage_key as string,
-    category: row.category as DocumentCategory,
+    category: (row.category as DocumentCategory) ?? (docType ? docTypeToCategory(docType) : 'other'),
+    docType,
+    contentType: (row.content_type as string | null) ?? null,
+    uploadStatus: ((row.upload_status as string) ?? 'confirmed') as TenantDocument['uploadStatus'],
     tags,
     status: computeDocumentStatus(expiresAt),
     expiresAt,
@@ -66,6 +90,9 @@ export class InMemoryTenantDocumentVaultStore implements TenantDocumentVaultStor
       fileSizeBytes: data.fileSizeBytes,
       storageKey: data.storageKey,
       category: data.category,
+      docType: null,
+      contentType: null,
+      uploadStatus: 'confirmed',
       tags: data.tags ?? [],
       status: computeDocumentStatus(data.expiresAt ?? null),
       expiresAt: data.expiresAt ?? null,
@@ -75,6 +102,52 @@ export class InMemoryTenantDocumentVaultStore implements TenantDocumentVaultStor
     }
     this.documents.set(id, doc)
     return doc
+  }
+
+  async createPendingUpload(userId: string, data: PendingUploadInput): Promise<TenantDocument> {
+    const id = `DOC-${Date.now()}-${this.counter++}`
+    const now = new Date().toISOString()
+    const category = docTypeToCategory(data.docType)
+    const doc: TenantDocument = {
+      id,
+      userId,
+      fileName: '',
+      fileFormat: 'pdf',
+      fileSizeBytes: 0,
+      storageKey: data.objectKey,
+      category,
+      docType: data.docType,
+      contentType: data.contentType,
+      uploadStatus: 'pending',
+      tags: [],
+      status: 'active',
+      expiresAt: null,
+      description: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.documents.set(id, doc)
+    return doc
+  }
+
+  async confirmUpload(
+    documentId: string,
+    userId: string,
+    data: ConfirmUploadInput,
+  ): Promise<TenantDocument | null> {
+    const doc = this.documents.get(documentId)
+    if (!doc || doc.userId !== userId || doc.uploadStatus !== 'pending') return null
+
+    const updated: TenantDocument = {
+      ...doc,
+      fileName: data.fileName,
+      fileFormat: data.fileFormat,
+      fileSizeBytes: data.fileSizeBytes,
+      uploadStatus: 'confirmed',
+      updatedAt: new Date().toISOString(),
+    }
+    this.documents.set(documentId, updated)
+    return updated
   }
 
   async findById(documentId: string, userId: string): Promise<TenantDocument | null> {
@@ -175,6 +248,46 @@ export class PostgresTenantDocumentVaultStore implements TenantDocumentVaultStor
         data.description ?? null,
       ],
     )
+    return mapRowToDocument(rows[0])
+  }
+
+  async createPendingUpload(userId: string, data: PendingUploadInput): Promise<TenantDocument> {
+    const pool = await getPool()
+    if (!pool) throw new Error('Database not configured')
+
+    const category = docTypeToCategory(data.docType)
+    const { rows } = await pool.query(
+      `INSERT INTO tenant_documents (
+         user_id, storage_key, category, doc_type, content_type, upload_status,
+         file_name, file_format, file_size_bytes, tags
+       )
+       VALUES ($1, $2, $3, $4, $5, 'pending', '', 'pdf', NULL, '[]')
+       RETURNING *`,
+      [userId, data.objectKey, category, data.docType, data.contentType],
+    )
+    return mapRowToDocument(rows[0])
+  }
+
+  async confirmUpload(
+    documentId: string,
+    userId: string,
+    data: ConfirmUploadInput,
+  ): Promise<TenantDocument | null> {
+    const pool = await getPool()
+    if (!pool) throw new Error('Database not configured')
+
+    const { rows } = await pool.query(
+      `UPDATE tenant_documents
+       SET upload_status = 'confirmed',
+           file_name = $1,
+           file_format = $2,
+           file_size_bytes = $3,
+           updated_at = NOW()
+       WHERE id = $4 AND user_id = $5 AND upload_status = 'pending'
+       RETURNING *`,
+      [data.fileName, data.fileFormat, data.fileSizeBytes, documentId, userId],
+    )
+    if (rows.length === 0) return null
     return mapRowToDocument(rows[0])
   }
 
