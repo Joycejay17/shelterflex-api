@@ -138,6 +138,7 @@ import { createInspectorJobsRouter, createAdminInspectorJobsRouter } from "./rou
 import { createRentGuaranteeRouter } from "./routes/rentGuarantee.js";
 import { createTenantRatingCardRouter } from "./routes/tenantRatingCard.js";
 import { createRentGuaranteeProviderFromEnv } from "./services/insurance/rentGuaranteeProviderFactory.js";
+import { createAdminCreditScoreRouter, createCreditScoreRouter } from "./routes/creditScore.js";
 
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
 import { createAdminFraudRouter } from "./routes/adminFraud.js";
@@ -640,6 +641,8 @@ export function createApp() {
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
   app.use("/api/tenant/onboarding", createTenantOnboardingRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
+  app.use("/api/credit-score", createCreditScoreRouter());
+  app.use("/api/admin/credit-score", createAdminCreditScoreRouter());
   app.use("/api/landlord/payout-schedule", createLandlordPayoutScheduleRouter());
   app.use("/api/webhooks/kyc", createKycWebhookRouter());
   app.use("/api/onboarding", createOnboardingRouter());
