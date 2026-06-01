@@ -12,9 +12,6 @@ function buildApp() {
   apiRouter.get('/v1/test', (req: Request, res: Response) => {
     res.json({ version: req.apiVersion, ok: true })
   })
-  apiRouter.get('/v2/test', (req: Request, res: Response) => {
-    res.json({ version: req.apiVersion, ok: true })
-  })
   apiRouter.get('/test', (req: Request, res: Response) => {
     res.json({ version: req.apiVersion, ok: true })
   })
@@ -32,30 +29,22 @@ describe('apiVersioning middleware', () => {
     expect(res.headers['x-api-version']).toBe(CURRENT_VERSION)
   })
 
-  it('extracts version from URL path /api/v2/...', async () => {
-    const app = buildApp()
-    const res = await supertest(app).get('/api/v2/test')
-    expect(res.status).toBe(200)
-    expect(res.body.version).toBe('v2')
-    expect(res.headers['x-api-version']).toBe('v2')
-  })
-
-  it('extracts version from URL path /api/v1/... (deprecated)', async () => {
+  it('extracts version from URL path /api/v1/...', async () => {
     const app = buildApp()
     const res = await supertest(app).get('/api/v1/test')
     expect(res.status).toBe(200)
     expect(res.body.version).toBe('v1')
-    expect(res.headers['deprecation']).toBe('true')
-    expect(res.headers['sunset']).toBe('2027-01-01')
+    expect(res.headers['x-api-version']).toBe('v1')
+    expect(res.headers['deprecation']).toBeUndefined()
   })
 
   it('extracts version from Accept-Version header', async () => {
     const app = buildApp()
     const res = await supertest(app)
       .get('/api/test')
-      .set('Accept-Version', 'v2')
+      .set('Accept-Version', 'v1')
     expect(res.status).toBe(200)
-    expect(res.body.version).toBe('v2')
+    expect(res.body.version).toBe('v1')
   })
 
   it('rejects unsupported versions', async () => {
@@ -68,19 +57,17 @@ describe('apiVersioning middleware', () => {
     expect(res.body.error.message).toContain('v99')
   })
 
-  it('SUPPORTED_VERSIONS includes v1 and v2', () => {
+  it('SUPPORTED_VERSIONS includes v1', () => {
     expect(SUPPORTED_VERSIONS).toContain('v1')
-    expect(SUPPORTED_VERSIONS).toContain('v2')
   })
 
-  it('CURRENT_VERSION is v2', () => {
-    expect(CURRENT_VERSION).toBe('v2')
+  it('CURRENT_VERSION is v1', () => {
+    expect(CURRENT_VERSION).toBe('v1')
   })
 
-  it('getMigrationGuide returns guide for v1', () => {
+  it('getMigrationGuide returns guide for deprecated version', () => {
     const guide = getMigrationGuide('v1')
     expect(guide).toContain('v1')
-    expect(guide).toContain('v2')
-    expect(guide).toContain('2027-01-01')
+    expect(guide).toContain('TBD')
   })
 })
