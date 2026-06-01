@@ -1,5 +1,4 @@
 import request from 'supertest'
-import { randomUUID } from 'node:crypto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../app.js'
 import { ListingStatus, type CreateListingInput } from '../models/listing.js'
@@ -7,14 +6,17 @@ import { listingStore } from '../models/listingStore.js'
 
 describe('Public Listings Search API', () => {
   const app = createApp()
+  let whistleblowerSequence = 0
 
   beforeEach(async () => {
+    whistleblowerSequence = 0
     await listingStore.clear()
   })
 
   async function createApprovedListing(input: Partial<CreateListingInput> = {}) {
+    whistleblowerSequence += 1
     const listing = await listingStore.create({
-      whistleblowerId: input.whistleblowerId ?? `wb-${randomUUID()}`,
+      whistleblowerId: input.whistleblowerId ?? `wb-${whistleblowerSequence}`,
       address: input.address ?? '12 Admiralty Way, Lekki Phase 1',
       city: input.city ?? 'Lagos',
       area: input.area ?? 'Lekki',
