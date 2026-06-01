@@ -150,6 +150,7 @@ import { createInspectorJobsRouter, createAdminInspectorJobsRouter } from "./rou
 import { createRentGuaranteeRouter } from "./routes/rentGuarantee.js";
 import { createTenantRatingCardRouter } from "./routes/tenantRatingCard.js";
 import { createRentGuaranteeProviderFromEnv } from "./services/insurance/rentGuaranteeProviderFactory.js";
+import { createAdminCreditScoreRouter, createCreditScoreRouter } from "./routes/creditScore.js";
 
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
 import { createAdminFraudRouter } from "./routes/adminFraud.js";
