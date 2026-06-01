@@ -386,6 +386,21 @@ export class PostgresSessionRepository {
     }
   }
 
+  async getTokenState(token: string): Promise<'active' | 'expired' | 'invalid'> {
+    const pool = await this.pool()
+    const tokenHash = this.hashToken(token)
+
+    const { rows } = await pool.query(
+      `SELECT expires_at, revoked_at
+       FROM sessions
+       WHERE token_hash = $1`,
+      [tokenHash],
+    )
+
+    if (rows.length === 0 || rows[0].revoked_at) return 'invalid'
+    return new Date(rows[0].expires_at).getTime() < Date.now() ? 'expired' : 'active'
+  }
+
   async revokeByToken(token: string): Promise<void> {
     const pool = await this.pool()
     const tokenHash = this.hashToken(token)

@@ -34,7 +34,19 @@ export async function authenticateToken(
       return
     }
 
-    const session = await sessionStore.getByToken(token)
+    const tokenState = await sessionStore.getTokenState(token)
+    if (tokenState === 'expired') {
+      logger.warn('Unauthorized access attempt - expired token', {
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+        requestId: req.requestId,
+        path: req.path,
+      })
+      next(new AppError(ErrorCode.TOKEN_EXPIRED, 401, 'Access token expired'))
+      return
+    }
+
+    const session = tokenState === 'active' ? await sessionStore.getByToken(token) : undefined
     if (!session) {
       logger.warn('Unauthorized access attempt - invalid or expired token', {
         ip: req.ip,
@@ -43,7 +55,7 @@ export async function authenticateToken(
         path: req.path,
         token: token.substring(0, 8) + '...',
       })
-      next(new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid or expired token'))
+      next(new AppError(ErrorCode.INVALID_TOKEN, 401, 'Invalid token'))
       return
     }
 

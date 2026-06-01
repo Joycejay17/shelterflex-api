@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   PostgresUserRepository,
   PostgresSessionRepository,
@@ -14,7 +14,23 @@ import {
 
 export type { UserRole, User, OtpChallenge, Session, WalletChallenge, LandlordProfile }
 
-export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+export const SESSION_TTL_MS = 15 * 60 * 1000 // 15 minutes
+export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
+
+export interface RefreshTokenRecord {
+  id: string
+  userId: string
+  email: string
+  tokenHash: string
+  family: string
+  usedAt: Date | null
+  expiresAt: Date
+  createdAt: Date
+}
+
+function hashRefreshToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
 
 class UserStore {
   private postgresRepo = new PostgresUserRepository()
@@ -27,6 +43,19 @@ class UserStore {
     } catch (error) {
       console.warn('Postgres user lookup failed, using fallback cache:', error)
       return this.fallbackCache.get(email)
+    }
+  }
+
+  async getById(userId: string): Promise<User | undefined> {
+    try {
+      const result = await this.postgresRepo.getById(userId)
+      return result || undefined
+    } catch (error) {
+      console.warn('Postgres user lookup by id failed, using fallback cache:', error)
+      for (const user of this.fallbackCache.values()) {
+        if (user.id === userId) return user
+      }
+      return undefined
     }
   }
 
@@ -269,7 +298,7 @@ class SessionStore {
     }
 
     try {
-      await this.postgresRepo.create(email, token, undefined, auditInfo)
+      await this.postgresRepo.create(email, token, session.expiresAt, auditInfo)
     } catch (error) {
       console.warn('Postgres session creation failed, using fallback cache:', error)
     }
@@ -305,6 +334,21 @@ class SessionStore {
     }
 
     return session
+  }
+
+  async getTokenState(token: string): Promise<'active' | 'expired' | 'invalid'> {
+    const fallback = this.fallbackCache.get(token) as (Session & { expiresAt?: Date }) | undefined
+    if (fallback) {
+      const expiresAt = fallback.expiresAt ?? new Date(fallback.createdAt.getTime() + SESSION_TTL_MS)
+      return expiresAt.getTime() < Date.now() ? 'expired' : 'active'
+    }
+
+    try {
+      return await this.postgresRepo.getTokenState(token)
+    } catch (error) {
+      console.warn('Postgres token state lookup failed:', error)
+      return 'invalid'
+    }
   }
 
   async deleteByToken(token: string): Promise<void> {
@@ -354,7 +398,72 @@ class SessionStore {
   }
 }
 
+class RefreshTokenStore {
+  private records = new Map<string, RefreshTokenRecord>()
+
+  async create(input: {
+    userId: string
+    email: string
+    rawToken: string
+    family: string
+    expiresAt?: Date
+  }): Promise<RefreshTokenRecord> {
+    const now = new Date()
+    const record: RefreshTokenRecord = {
+      id: randomUUID(),
+      userId: input.userId,
+      email: input.email,
+      tokenHash: hashRefreshToken(input.rawToken),
+      family: input.family,
+      usedAt: null,
+      expiresAt: input.expiresAt ?? new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
+      createdAt: now,
+    }
+    this.records.set(record.tokenHash, record)
+    return record
+  }
+
+  async findByRawToken(rawToken: string): Promise<RefreshTokenRecord | undefined> {
+    return this.records.get(hashRefreshToken(rawToken))
+  }
+
+  async markUsed(rawToken: string): Promise<void> {
+    const record = await this.findByRawToken(rawToken)
+    if (record) {
+      record.usedAt = new Date()
+      this.records.set(record.tokenHash, record)
+    }
+  }
+
+  async invalidateFamily(family: string): Promise<number> {
+    let count = 0
+    for (const record of this.records.values()) {
+      if (record.family === family && record.usedAt === null) {
+        record.usedAt = new Date()
+        count++
+      }
+    }
+    return count
+  }
+
+  async invalidateAllByUserId(userId: string): Promise<number> {
+    let count = 0
+    for (const record of this.records.values()) {
+      if (record.userId === userId && record.usedAt === null) {
+        record.usedAt = new Date()
+        count++
+      }
+    }
+    return count
+  }
+
+  clear(): void {
+    this.records.clear()
+  }
+}
+
 export const userStore = new UserStore()
 export const otpChallengeStore = new OtpChallengeStore()
 export const walletChallengeStore = new WalletChallengeStore()
 export const sessionStore = new SessionStore()
+export const refreshTokenStore = new RefreshTokenStore()
