@@ -466,6 +466,27 @@ export class NgnWalletService {
   }
 
   async rejectWithdrawal(withdrawalId: string, reason: string): Promise<WithdrawalResponse> {
-    return this.failWithdrawal(withdrawalId, reason)
+    const withdrawal = this.withdrawals.find(w => w.id === withdrawalId)
+    if (!withdrawal) throw new AppError(ErrorCode.NOT_FOUND, 404, 'Withdrawal not found')
+    if (withdrawal.status === 'rejected') return withdrawal
+
+    const userId = this.withdrawalUserIds.get(withdrawalId)!
+    const wallet = await this.getOrCreateWallet(userId)
+    const release = await ngnWalletStore.acquireLock(wallet.walletId)
+    try {
+      await ngnWalletStore.createLedgerEntry({
+        walletId: wallet.walletId,
+        type: 'WITHDRAWAL_FAILED',
+        amountNgn: withdrawal.amountNgn,
+        referenceType: 'withdrawal',
+        referenceId: withdrawalId
+      })
+      withdrawal.status = 'rejected'
+      withdrawal.processedAt = new Date().toISOString()
+      withdrawal.failureReason = reason
+      return withdrawal
+    } finally {
+      await release()
+    }
   }
 }
