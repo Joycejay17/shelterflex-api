@@ -86,6 +86,7 @@ export enum ErrorCode {
 
   // Idempotency
   DUPLICATE_REQUEST = "DUPLICATE_REQUEST",
+  REQUEST_IN_FLIGHT = "REQUEST_IN_FLIGHT",
 
   // Deprecation
   API_VERSION_DEPRECATED = "API_VERSION_DEPRECATED",
@@ -111,6 +112,7 @@ export const ERROR_CLASSIFICATION: Record<string, ErrorClassification> = {
   [ErrorCode.ACCOUNT_FROZEN]: "permanent",
   [ErrorCode.SERVICE_UNAVAILABLE]: "transient",
   [ErrorCode.DUPLICATE_REQUEST]: "permanent",
+  [ErrorCode.REQUEST_IN_FLIGHT]: "transient",
   [ErrorCode.API_VERSION_DEPRECATED]: "permanent",
 };
 
