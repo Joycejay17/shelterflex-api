@@ -12,6 +12,10 @@ describe('Integration Tests', () => {
       expect(response.body).toHaveProperty('status', 'ok')
       expect(response.body).toHaveProperty('uptimeSeconds')
       expect(typeof response.body.uptimeSeconds).toBe('number')
+      expect(response.body).toHaveProperty('uptime')
+      expect(response.body).toHaveProperty('version')
+      expect(response.body).toHaveProperty('dbLatencyMs')
+      expect(response.body).toHaveProperty('memoryUsageMb')
       expect(response.body).toHaveProperty('requestId')
       expect(typeof response.body.requestId).toBe('string')
     })
@@ -43,10 +47,10 @@ describe('Integration Tests', () => {
       expect(typeof response.body.version).toBe('string')
       expect(response.body).toHaveProperty('nodeEnv')
       expect(typeof response.body.nodeEnv).toBe('string')
-      expect(response.body).toHaveProperty('sorobanAdapterMode')
-      expect(['stub', 'real']).toContain(response.body.sorobanAdapterMode)
-      expect(response.body).toHaveProperty('databaseEnabled')
-      expect(typeof response.body.databaseEnabled).toBe('boolean')
+      expect(response.body).toHaveProperty('uptimeSeconds')
+      expect(typeof response.body.uptimeSeconds).toBe('number')
+      expect(response.body).toHaveProperty('dbConnected')
+      expect(typeof response.body.dbConnected).toBe('boolean')
       expect(response.body).toHaveProperty('requestId')
       expect(typeof response.body.requestId).toBe('string')
     })
@@ -55,6 +59,17 @@ describe('Integration Tests', () => {
       const response = await request.get('/health/details')
 
       expectRequestId(response)
+    })
+
+    it('should not expose forbidden diagnostic fields', async () => {
+      const response = await request.get('/health/details')
+
+      expect(response.status).toBe(200)
+      expect(response.body).not.toHaveProperty('process.env')
+      expect(response.body).not.toHaveProperty('DATABASE_URL')
+      expect(response.body).not.toHaveProperty('databaseEnabled')
+      expect(response.body).not.toHaveProperty('databasePool')
+      expect(response.body).not.toHaveProperty('sorobanAdapterMode')
     })
   })
 

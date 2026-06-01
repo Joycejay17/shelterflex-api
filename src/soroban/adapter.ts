@@ -17,6 +17,15 @@ export interface RecordReceiptParams {
   metadataHash?: string
 }
 
+export type DealSyncStatus = 'active' | 'completed' | 'defaulted'
+
+export interface SyncDealStatusParams {
+  dealId: string
+  contractDealId: string
+  newStatus: DealSyncStatus
+  actor: string
+}
+
 export interface SorobanAdapter {
   getBalance(account: string): Promise<bigint>
   credit(account: string, amount: bigint): Promise<void>
@@ -26,10 +35,14 @@ export interface SorobanAdapter {
   recordReceipt(params: RecordReceiptParams): Promise<void>
   getConfig(): SorobanConfig
   getReceiptEvents(fromLedger: number | null): Promise<RawReceiptEvent[]>
-  
+  getTimelockEvents(fromLedger: number | null): Promise<any[]>
+  executeTimelock(txHash: string, target: string, functionName: string, args: any[], eta: number): Promise<string>
+  cancelTimelock(txHash: string): Promise<string>
+
   // Admin operations (require SOROBAN_ADMIN_SIGNING_ENABLED=true)
   pause?(contractId: string): Promise<string>
   unpause?(contractId: string): Promise<string>
   setOperator?(contractId: string, operatorAddress: string | null): Promise<string>
   init?(contractId: string, adminAddress: string, operatorAddress?: string): Promise<string>
+  syncDealStatus?(params: SyncDealStatusParams): Promise<void>
 }

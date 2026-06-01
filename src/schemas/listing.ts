@@ -15,12 +15,49 @@ export const createListingSchema = z.object({
     .number()
     .positive('Annual rent must be greater than 0')
     .int('Annual rent must be a whole number'),
+  outrightPriceNgn: z
+    .number()
+    .positive('Outright price must be greater than 0')
+    .int('Outright price must be a whole number')
+    .optional(),
+  installmentBasePriceNgn: z
+    .number()
+    .positive('Installment base price must be greater than 0')
+    .int('Installment base price must be a whole number')
+    .optional(),
+  negotiatedLandlordRateNgn: z
+    .number()
+    .positive('Negotiated landlord rate must be greater than 0')
+    .int('Negotiated landlord rate must be a whole number')
+    .optional(),
   description: z.string().optional(),
   photos: z
     .array(z.string().url('Each photo must be a valid URL'))
     .min(3, 'At least 3 photos are required')
     .max(20, 'Maximum 20 photos allowed'),
-})
+}).refine(
+  (data) => {
+    if (data.negotiatedLandlordRateNgn != null && data.outrightPriceNgn != null) {
+      return data.negotiatedLandlordRateNgn < data.outrightPriceNgn
+    }
+    return true
+  },
+  {
+    message: 'negotiatedLandlordRateNgn must be less than outrightPriceNgn',
+    path: ['negotiatedLandlordRateNgn'],
+  },
+).refine(
+  (data) => {
+    if (data.outrightPriceNgn != null && data.installmentBasePriceNgn != null) {
+      return data.outrightPriceNgn <= data.installmentBasePriceNgn
+    }
+    return true
+  },
+  {
+    message: 'outrightPriceNgn must be less than or equal to installmentBasePriceNgn',
+    path: ['outrightPriceNgn'],
+  },
+)
 
 export type CreateListingRequest = z.infer<typeof createListingSchema>
 

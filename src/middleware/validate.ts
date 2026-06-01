@@ -1,7 +1,8 @@
 import { ZodSchema } from 'zod'
 import { Request, Response, NextFunction } from 'express'
-import { ErrorCode, type ErrorResponse } from '../errors/index.js'
+import { ErrorCode, classifyError } from '../errors/index.js'
 import { formatZodIssues } from '../errors/utils.js'
+import { logger } from '../utils/logger.js'
 
 type ValidateTarget = 'body' | 'query' | 'params'
 
@@ -11,13 +12,30 @@ export const validate =
     const result = schema.safeParse(req[target])
 
     if (!result.success) {
-      const body: ErrorResponse = {
+      const requestId = req.requestId ?? (req as any).id ?? 'unknown'
+      const issues = formatZodIssues(result.error.issues, target)
+      const classification = classifyError(ErrorCode.VALIDATION_ERROR)
+
+      // Log validation failures with structured context
+      logger.warn(`Request validation failed`, {
+        requestId,
+        path: req.path,
+        method: req.method,
+        target,
+        endpoint: `${req.method} ${req.path}`,
+        validationErrors: issues,
+      })
+
+      const body = {
         error: {
           code: ErrorCode.VALIDATION_ERROR,
           message: 'Invalid request data',
-          details: formatZodIssues(result.error.issues, target),
+          details: issues,
+          classification,
+          retryable: false,
         },
       }
+      res.setHeader('x-request-id', requestId)
       return res.status(400).json(body)
     }
 

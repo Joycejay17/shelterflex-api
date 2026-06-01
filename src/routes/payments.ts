@@ -7,6 +7,11 @@ import { logger } from '../utils/logger.js'
 import { auditWalletSigningUsed } from '../utils/auditLogger.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
+import { TxType } from '../outbox/types.js'
+import { settleFullPaymentIncentive } from '../services/fullPaymentIncentiveSettlement.js'
+import { enqueueDelivery } from '../services/webhookDeliveryService.js'
+import { WebhookEventType } from '../models/webhookSubscription.js'
+
 
 export function createPaymentsRouter(adapter: SorobanAdapter) {
   const router = Router()
@@ -91,11 +96,51 @@ export function createPaymentsRouter(adapter: SorobanAdapter) {
           )
         }
 
+        const payoutBreakdown =
+          txType === TxType.TENANT_REPAYMENT && typeof amountNgn === 'number' && amountNgn > 0
+            ? await settleFullPaymentIncentive({ dealId, grossAmountNgn: amountNgn })
+            : null
+
+        if (payoutBreakdown) {
+          logger.info('full_payment_incentive.split_applied', {
+            dealId,
+            splitConfigVersion: payoutBreakdown.splitConfigVersion,
+            reporterApplied: payoutBreakdown.reporterApplied,
+            requestId: req.requestId,
+          })
+        }
+
+        if (txType === TxType.TENANT_REPAYMENT) {
+          await enqueueDelivery(WebhookEventType.PAYMENT_RECEIVED, {
+            dealId,
+            amountUsdc,
+            externalRef,
+            amountNgn,
+            fxRateNgnPerUsdc
+          }).catch(err => logger.error('Failed to enqueue payment.received webhook:', err))
+        } else if (txType === TxType.LANDLORD_PAYOUT) {
+          await enqueueDelivery(WebhookEventType.PAYOUT_DISBURSED, {
+            dealId,
+            amountUsdc,
+            externalRef,
+            amountNgn
+          }).catch(err => logger.error('Failed to enqueue payout.disbursed webhook:', err))
+        }
+
         res.status(sent ? 200 : 202).json({
           success: true,
           outboxId: updatedItem.id,
           txId: updatedItem.txId,
           status: updatedItem.status,
+          payoutBreakdown: payoutBreakdown
+            ? {
+                platformAmountNgn: payoutBreakdown.platformAmountNgn,
+                reporterAmountNgn: payoutBreakdown.reporterAmountNgn,
+                landlordNetAmountNgn: payoutBreakdown.landlordNetAmountNgn,
+                splitConfigVersion: payoutBreakdown.splitConfigVersion,
+                reporterApplied: payoutBreakdown.reporterApplied,
+              }
+            : null,
           message: sent
             ? 'Payment confirmed and USDC receipt written to chain'
             : 'Payment confirmed, USDC receipt queued for retry',

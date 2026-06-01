@@ -21,8 +21,17 @@ import { ErrorCode } from '../errors/errorCodes.js'
 import { outboxStore } from '../outbox/index.js'
 import { TxType } from '../outbox/types.js'
 import { computeDealProgress } from '../services/dealProgress.js'
+import { detectDuplicateDealSpam } from '../services/abuseDetectionService.js'
+import { enqueueDelivery } from '../services/webhookDeliveryService.js'
+import { WebhookEventType } from '../models/webhookSubscription.js'
+import { logger } from '../utils/logger.js'
+import { recordDealActivationDuration } from '../metrics.js'
+import { applyDealRepaymentMethod } from '../services/salaryDeductionService.js'
+import { updateDealRepaymentSchema } from '../schemas/employer.js'
 
 const router = Router()
+
+
 
 /**
  * POST /api/deals
@@ -46,6 +55,19 @@ const router = Router()
 router.post('/', async (req: Request, res: Response, next) => {
   try {
     const validatedData: CreateDealRequest = createDealSchema.parse(req.body)
+
+    const userId = req.headers['x-user-id'] || (req as any).user?.id
+    if (userId && validatedData.listingId) {
+      const flagged = await detectDuplicateDealSpam(String(userId), validatedData.listingId)
+      if (flagged) {
+        throw new AppError(
+          ErrorCode.TOO_MANY_REQUESTS,
+          429,
+          'Your account is temporarily blocked from submitting deal applications.'
+        )
+      }
+    }
+
     
     // Validate listing if listingId is provided
     if (validatedData.listingId) {
@@ -89,15 +111,25 @@ router.post('/', async (req: Request, res: Response, next) => {
     }
     
     const deal = await dealStore.create(validatedData as any)
+
+    if (validatedData.repaymentMethod === 'salary_deduction') {
+      await applyDealRepaymentMethod(deal.dealId, 'salary_deduction', {
+        employerId: validatedData.employerId,
+        employeeId: validatedData.employeeId,
+        deductionDay: validatedData.deductionDay,
+      })
+    }
     
     // Lock listing to deal if listingId is provided
     if (validatedData.listingId) {
       await listingStore.lockToDeal(validatedData.listingId, deal.dealId)
     }
+
+    const responseDeal = await dealStore.findById(deal.dealId)
     
     res.status(201).json({
       success: true,
-      data: deal
+      data: responseDeal ?? deal
     })
   } catch (error) {
     if (error instanceof Error && error.name === 'ZodError') {
@@ -201,12 +233,81 @@ router.patch('/:dealId/status', async (req: Request, res: Response, next) => {
   
   try {
     const validatedData: UpdateDealStatusRequest = updateDealStatusSchema.parse(req.body)
+    const activationStart =
+      validatedData.status === 'active' ? Date.now() : null
     
     const deal = await dealStore.updateStatus(dealId, validatedData.status)
     
     if (!deal) {
       throw new AppError(ErrorCode.NOT_FOUND, 404, `Deal with ID ${dealId} not found`)
     }
+
+    if (deal) {
+      let eventType: WebhookEventType | undefined
+      if (validatedData.status === 'active') {
+        if (activationStart !== null) {
+          recordDealActivationDuration(Date.now() - activationStart)
+        }
+        eventType = WebhookEventType.DEAL_ACTIVATED
+
+        // Generate and save repayment schedule on activation
+        try {
+          const { generateSchedule, saveSchedule } = await import('../services/repaymentScheduleService.js')
+          
+          // Determine plan based on term months
+          const planMap: Record<number, '3m' | '6m' | '12m' | 'outright'> = {
+            3: '3m',
+            6: '6m',
+            12: '12m',
+          }
+          const plan = planMap[deal.termMonths] || '12m'
+          
+          const schedule = generateSchedule({
+            dealId: deal.dealId,
+            startDate: deal.createdAt,
+            plan,
+            installmentBasePriceNgn: deal.annualRentNgn,
+            depositPct: Math.round((deal.depositNgn / deal.annualRentNgn) * 100),
+          })
+          
+          await saveSchedule(
+            deal.dealId,
+            schedule.schedule,
+            schedule.depositAmountNgn,
+            schedule.financedBalanceNgn,
+            schedule.interestAmountNgn,
+            schedule.totalRepaymentNgn
+          )
+          
+          logger.info('Repayment schedule generated and saved on deal activation', {
+            dealId: deal.dealId,
+            plan,
+            totalRepaymentNgn: schedule.totalRepaymentNgn,
+          })
+        } catch (scheduleError) {
+          logger.error('Failed to generate repayment schedule on activation', {
+            dealId: deal.dealId,
+            error: scheduleError,
+          })
+        }
+      } else if (validatedData.status === 'completed') {
+        eventType = WebhookEventType.DEAL_COMPLETED
+      } else if (validatedData.status === 'defaulted') {
+        eventType = WebhookEventType.DEAL_DEFAULTED
+      }
+
+      if (eventType) {
+        await enqueueDelivery(eventType, {
+          dealId: deal.dealId,
+          status: deal.status,
+          listingId: deal.listingId,
+          tenantId: deal.tenantId,
+          landlordId: deal.landlordId,
+          totalFinancedAmount: deal.financedAmountNgn
+        }).catch(err => logger.error('Failed to enqueue deal webhook:', err))
+      }
+    }
+
     
     res.json({
       success: true,
@@ -256,6 +357,74 @@ router.patch('/:dealId/schedule/:period', async (req: Request, res: Response, ne
     if (error instanceof Error && error.name === 'ZodError') {
       return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, error.message))
     }
+    next(error)
+  }
+})
+
+/**
+ * PATCH /api/deals/:dealId/repayment
+ * Update repayment method and salary deduction linkage
+ */
+router.patch('/:dealId/repayment', async (req: Request, res: Response, next) => {
+  const { dealId } = req.params
+  if (!dealId) {
+    return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Deal ID is required'))
+  }
+  try {
+    const body = updateDealRepaymentSchema.parse(req.body)
+    await applyDealRepaymentMethod(dealId, body.repaymentMethod, {
+      employerId: body.employerId,
+      employeeId: body.employeeId,
+      deductionDay: body.deductionDay,
+    })
+    const deal = await dealStore.findById(dealId)
+    res.json({ success: true, data: deal })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'ZodError') {
+      return next(new AppError(ErrorCode.VALIDATION_ERROR, 400, error.message))
+    }
+    next(error)
+  }
+})
+
+/**
+ * GET /api/deals/:dealId/schedule
+ * Get repayment schedule for a deal
+ * Authenticated; tenant or landlord of the deal can view
+ */
+router.get('/:dealId/schedule', async (req: Request, res: Response, next) => {
+  try {
+    const { dealId } = req.params
+    
+    if (!dealId) {
+      throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'Deal ID is required')
+    }
+    
+    const deal = await dealStore.findById(dealId)
+    
+    if (!deal) {
+      throw new AppError(ErrorCode.NOT_FOUND, 404, `Deal with ID ${dealId} not found`)
+    }
+    
+    const userId = req.headers['x-user-id'] || (req as any).user?.id
+    
+    // Check if user is tenant or landlord
+    if (userId && userId !== deal.tenantId && userId !== deal.landlordId) {
+      throw new AppError(ErrorCode.FORBIDDEN, 403, 'You are not authorized to view this schedule')
+    }
+    
+    const { getSchedule } = await import('../services/repaymentScheduleService.js')
+    const schedule = await getSchedule(dealId)
+    
+    if (!schedule) {
+      throw new AppError(ErrorCode.NOT_FOUND, 404, `Repayment schedule not found for deal ${dealId}`)
+    }
+    
+    res.json({
+      success: true,
+      data: schedule
+    })
+  } catch (error) {
     next(error)
   }
 })

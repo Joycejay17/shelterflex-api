@@ -1,17 +1,18 @@
 import { randomUUID } from 'node:crypto'
-import { 
-  PostgresUserRepository, 
-  PostgresSessionRepository, 
-  PostgresOtpChallengeRepository, 
+import {
+  PostgresUserRepository,
+  PostgresSessionRepository,
+  PostgresOtpChallengeRepository,
   PostgresWalletChallengeRepository,
   type User,
   type OtpChallenge,
   type Session,
   type WalletChallenge,
-  type UserRole
+  type UserRole,
+  type LandlordProfile
 } from '../repositories/AuthRepository.js'
 
-export type { UserRole, User, OtpChallenge, Session, WalletChallenge }
+export type { UserRole, User, OtpChallenge, Session, WalletChallenge, LandlordProfile }
 
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
@@ -37,7 +38,7 @@ class UserStore {
       return user
     } catch (error) {
       console.warn('Postgres user creation failed, using fallback cache:', error)
-      
+
       const existing = this.fallbackCache.get(email)
       if (existing) return existing
 
@@ -48,10 +49,30 @@ class UserStore {
         createdAt: now,
         name: email.split('@')[0] ?? email,
         role: 'tenant',
+        tier: 'free',
+        planQuota: 100,
+        displayCurrency: 'NGN',
       }
 
       this.fallbackCache.set(email, user)
       return user
+    }
+  }
+
+  async updateDisplayCurrency(email: string, displayCurrency: 'NGN' | 'USDC'): Promise<User> {
+    try {
+      const user = await this.postgresRepo.updateDisplayCurrency(email, displayCurrency)
+      this.fallbackCache.set(email, user)
+      return user
+    } catch (error) {
+      console.warn('Postgres display currency update failed, using fallback cache:', error)
+      const user = this.fallbackCache.get(email)
+      if (user) {
+        user.displayCurrency = displayCurrency
+        this.fallbackCache.set(email, user)
+        return user
+      }
+      throw new Error('User not found for preference update')
     }
   }
 
@@ -85,6 +106,33 @@ class UserStore {
         return user
       }
       throw new Error('User not found for wallet linking')
+    }
+  }
+
+  async getLandlordProfile(userId: string): Promise<LandlordProfile | null> {
+    try {
+      return await this.postgresRepo.getLandlordProfile(userId)
+    } catch (error) {
+      console.warn('Postgres landlord profile lookup failed:', error)
+      return null
+    }
+  }
+
+  async updateLandlordProfile(userId: string, profile: Partial<LandlordProfile>): Promise<void> {
+    try {
+      await this.postgresRepo.updateLandlordProfile(userId, profile)
+    } catch (error) {
+      console.warn('Postgres landlord profile update failed:', error)
+      throw error
+    }
+  }
+
+  async updateName(userId: string, name: string): Promise<void> {
+    try {
+      await this.postgresRepo.updateName(userId, name)
+    } catch (error) {
+      console.warn('Postgres user name update failed:', error)
+      throw error
     }
   }
 
@@ -212,36 +260,51 @@ class SessionStore {
     token: string,
     auditInfo?: { ip?: string; userAgent?: string },
   ): Promise<Session> {
-    const session: Session = {
+    const session: Session & { expiresAt?: Date; userAgent?: string } = {
       token,
       email,
       createdAt: new Date(),
+      expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+      userAgent: auditInfo?.userAgent,
     }
 
     try {
       await this.postgresRepo.create(email, token, undefined, auditInfo)
     } catch (error) {
       console.warn('Postgres session creation failed, using fallback cache:', error)
-      this.fallbackCache.set(token, session)
     }
 
-    return session
+    this.fallbackCache.set(token, session as any)
+    return session as any
   }
 
   async getByToken(token: string): Promise<Session | undefined> {
+    let session: (Session & { expiresAt?: Date; userAgent?: string }) | undefined
     try {
-      const session = await this.postgresRepo.getByToken(token)
-      if (!session) return undefined
-
-      return {
-        token: session.token,
-        email: session.email,
-        createdAt: session.createdAt,
+      const dbSession = await this.postgresRepo.getByToken(token)
+      if (dbSession) {
+        session = {
+          token: dbSession.token,
+          email: dbSession.email,
+          createdAt: dbSession.createdAt,
+          expiresAt: (dbSession as any).expiresAt,
+          userAgent: (dbSession as any).userAgent,
+        }
       }
     } catch (error) {
       console.warn('Postgres session lookup failed, using fallback cache:', error)
-      return this.fallbackCache.get(token)
+      session = this.fallbackCache.get(token) as any
     }
+
+    if (!session) return undefined
+
+    const expiresAtTime = session.expiresAt ? session.expiresAt.getTime() : session.createdAt.getTime() + SESSION_TTL_MS
+    if (expiresAtTime < Date.now()) {
+      await this.deleteByToken(token)
+      return undefined
+    }
+
+    return session
   }
 
   async deleteByToken(token: string): Promise<void> {
@@ -249,13 +312,33 @@ class SessionStore {
       await this.postgresRepo.revokeByToken(token)
     } catch (error) {
       console.warn('Postgres session deletion failed, using fallback cache:', error)
-      this.fallbackCache.delete(token)
     }
+    this.fallbackCache.delete(token)
+  }
+
+  revokeByToken(token: string): void {
+    this.fallbackCache.delete(token)
+    this.postgresRepo.revokeByToken(token).catch(err => {
+      console.warn('Postgres session revocation failed:', err)
+    })
+  }
+
+  getActiveSessionsByEmail(email: string): Session[] {
+    const now = Date.now()
+    const sessions: Session[] = []
+    for (const session of this.fallbackCache.values()) {
+      const expiresAt = (session as any).expiresAt || new Date(session.createdAt.getTime() + SESSION_TTL_MS)
+      if (session.email === email && expiresAt.getTime() > now) {
+        sessions.push({
+          ...session,
+          expiresAt,
+        } as any)
+      }
+    }
+    return sessions
   }
 
   revokeAllByEmail(email: string): number {
-    // Postgres-backed session revocation-by-user would require userId, not email.
-    // This fallback implementation only affects in-memory sessions.
     let count = 0
     for (const [token, session] of this.fallbackCache.entries()) {
       if (session.email === email) {

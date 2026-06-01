@@ -138,6 +138,7 @@ describe('NGN Wallet Routes', () => {
       const response = await request(app)
         .post('/api/wallet/ngn/topup/initiate')
         .set('Authorization', `Bearer ${token}`)
+        .set('x-idempotency-key', '9a1b2c3d-4e5f-6789-abcd-ef0123456789')
         .send({ amountNgn: 1500, rail: 'paystack' })
         .expect(201)
 
@@ -154,16 +155,17 @@ describe('NGN Wallet Routes', () => {
       const first = await request(app)
         .post('/api/wallet/ngn/topup/initiate')
         .set('Authorization', `Bearer ${token}`)
-        .set('Idempotency-Key', key)
+        .set('x-idempotency-key', key)
         .send({ amountNgn: 1500, rail: 'paystack' })
         .expect(201)
 
       const second = await request(app)
         .post('/api/wallet/ngn/topup/initiate')
         .set('Authorization', `Bearer ${token}`)
-        .set('Idempotency-Key', key)
+        .set('x-idempotency-key', key)
         .send({ amountNgn: 1500, rail: 'paystack' })
-        .expect(200)
+        .expect(201)
+      expect(second.headers['x-idempotent-replay']).toBe('true')
 
       expect(second.body.depositId).toBe(first.body.depositId)
       expect(second.body.externalRef).toBe(first.body.externalRef)

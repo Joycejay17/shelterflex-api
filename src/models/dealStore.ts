@@ -14,8 +14,13 @@ import {
   PaginatedDeals,
   DealStatus,
   ScheduleItemStatus,
+  RepaymentMethod,
 } from './deal.js'
 import { generateRepaymentSchedule } from '../utils/scheduleGenerator.js'
+import {
+  enqueueSettlementSideEffectsInTransaction,
+  enqueueSettlementSideEffectsMemory,
+} from '../settlement/enqueueSideEffects.js'
 
 export interface StoredDeal extends Deal {
   schedule: ScheduleItem[]
@@ -25,11 +30,19 @@ interface DealStorePort {
   create(input: CreateDealInput): Promise<DealWithSchedule>
   findById(dealId: string): Promise<DealWithSchedule | null>
   findMany(filters?: DealFilters): Promise<PaginatedDeals>
+  listActiveDealsWithSchedules(): Promise<DealWithSchedule[]>
   updateStatus(dealId: string, status: DealStatus): Promise<DealWithSchedule | null>
   updateScheduleItemStatus(
     dealId: string,
     period: number,
     status: ScheduleItemStatus,
+  ): Promise<DealWithSchedule | null>
+  /** Test helper: override instalment due date (in-memory adapter only). */
+  setScheduleDueDateForTest(dealId: string, period: number, dueDateIso: string): Promise<void>
+  updateRepaymentMethod(
+    dealId: string,
+    repaymentMethod: RepaymentMethod,
+    options?: { employerId?: string; employeeId?: string; deductionDay?: number },
   ): Promise<DealWithSchedule | null>
   clear(): Promise<void>
 }
@@ -82,6 +95,10 @@ class InMemoryDealStore implements DealStorePort {
       termMonths: input.termMonths,
       createdAt: now,
       status: DealStatus.DRAFT,
+      repaymentMethod: input.repaymentMethod ?? 'self_pay',
+      employerId: input.employerId,
+      employeeId: input.employeeId,
+      deductionDay: input.deductionDay,
       schedule,
     }
 
@@ -101,6 +118,15 @@ class InMemoryDealStore implements DealStorePort {
       ...deal,
       schedule: [...deal.schedule],
     }
+  }
+
+  async listActiveDealsWithSchedules(): Promise<DealWithSchedule[]> {
+    return Array.from(this.deals.values())
+      .filter((d) => d.status === DealStatus.ACTIVE || d.status === DealStatus.AT_RISK)
+      .map((deal) => ({
+        ...deal,
+        schedule: [...deal.schedule],
+      }))
   }
 
   async findMany(filters: DealFilters = {}): Promise<PaginatedDeals> {
@@ -137,6 +163,10 @@ class InMemoryDealStore implements DealStorePort {
         termMonths: deal.termMonths,
         createdAt: deal.createdAt,
         status: deal.status,
+        repaymentMethod: deal.repaymentMethod,
+        employerId: deal.employerId,
+        employeeId: deal.employeeId,
+        deductionDay: deal.deductionDay,
       })),
       total: filteredDeals.length,
       page,
@@ -168,7 +198,54 @@ class InMemoryDealStore implements DealStorePort {
     const scheduleItem = deal.schedule.find((item) => item.period === period)
     if (!scheduleItem) return null
 
+    const oldStatus = scheduleItem.status
     scheduleItem.status = status
+    if (status === ScheduleItemStatus.PAID && oldStatus !== ScheduleItemStatus.PAID) {
+      enqueueSettlementSideEffectsMemory({
+        dealId,
+        period,
+        tenantId: deal.tenantId,
+        landlordId: deal.landlordId,
+        amountNgn: scheduleItem.amountNgn,
+      })
+    }
+
+    return {
+      ...deal,
+      schedule: [...deal.schedule],
+    }
+  }
+
+  async setScheduleDueDateForTest(
+    dealId: string,
+    period: number,
+    dueDateIso: string,
+  ): Promise<void> {
+    const deal = this.deals.get(dealId)
+    if (!deal) throw new Error(`Deal ${dealId} not found`)
+    const item = deal.schedule.find((s) => s.period === period)
+    if (!item) throw new Error(`Period ${period} not found`)
+    item.dueDate = dueDateIso
+  }
+
+  async updateRepaymentMethod(
+    dealId: string,
+    repaymentMethod: RepaymentMethod,
+    options?: { employerId?: string; employeeId?: string; deductionDay?: number },
+  ): Promise<DealWithSchedule | null> {
+    const deal = this.deals.get(dealId)
+    if (!deal) return null
+
+    deal.repaymentMethod = repaymentMethod
+    if (repaymentMethod === 'salary_deduction') {
+      deal.employerId = options?.employerId
+      deal.employeeId = options?.employeeId
+      deal.deductionDay = options?.deductionDay
+    } else {
+      deal.employerId = undefined
+      deal.employeeId = undefined
+      deal.deductionDay = undefined
+    }
 
     return {
       ...deal,
@@ -292,6 +369,42 @@ class PostgresDealStore implements DealStorePort {
     return this.fetchDealWithSchedule(pool, dealId)
   }
 
+  async listActiveDealsWithSchedules(): Promise<DealWithSchedule[]> {
+    const pool = await this.pool()
+    const { rows } = await pool.query(
+      `SELECT
+        td.deal_id, td.tenant_id, td.landlord_id, td.listing_id,
+        td.annual_rent_ngn, td.deposit_ngn, td.financed_amount_ngn,
+        td.term_months, td.status AS deal_status, td.created_at, td.updated_at,
+        tds.period, tds.due_date, tds.amount_ngn, tds.status AS schedule_status
+      FROM tenant_deals td
+      LEFT JOIN tenant_deal_schedules tds ON tds.deal_id = td.deal_id
+      WHERE td.status IN ('active', 'at_risk')
+      ORDER BY td.deal_id, tds.period ASC`,
+    )
+
+    const dealMap = new Map<string, DealWithSchedule>()
+    for (const row of rows as Array<Record<string, unknown>>) {
+      const dealId = row.deal_id as string
+      if (!dealMap.has(dealId)) {
+        dealMap.set(dealId, {
+          ...this.mapDeal({ ...row, status: row.deal_status } as DealRow),
+          schedule: [],
+        })
+      }
+      if (row.period != null) {
+        const entry = dealMap.get(dealId)!
+        entry.schedule.push({
+          period: row.period as number,
+          dueDate: new Date(row.due_date as string).toISOString(),
+          amountNgn: toNumber(row.amount_ngn as string | number),
+          status: row.schedule_status as ScheduleItemStatus,
+        })
+      }
+    }
+    return Array.from(dealMap.values())
+  }
+
   async findMany(filters: DealFilters = {}): Promise<PaginatedDeals> {
     const pool = await this.pool()
     const where: string[] = []
@@ -365,18 +478,74 @@ class PostgresDealStore implements DealStorePort {
     status: ScheduleItemStatus,
   ): Promise<DealWithSchedule | null> {
     const pool = await this.pool()
-    const result = await pool.query(
-      `UPDATE tenant_deal_schedules
-       SET status = $3, updated_at = NOW()
-       WHERE deal_id = $1 AND period = $2`,
-      [dealId, period, status],
-    )
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      const { rows: cur } = await client.query(
+        `SELECT status, amount_ngn
+         FROM tenant_deal_schedules
+         WHERE deal_id = $1 AND period = $2
+         FOR UPDATE`,
+        [dealId, period],
+      )
+      if (cur.length === 0) {
+        await client.query('ROLLBACK')
+        return null
+      }
+      const row0 = cur[0] as {
+        status: string
+        amount_ngn: string | number
+      }
+      const oldStatus = row0.status
+      const amountNgn = toNumber(row0.amount_ngn)
+      const { rows: trows } = await client.query(
+        `SELECT tenant_id, landlord_id FROM tenant_deals WHERE deal_id = $1 FOR UPDATE`,
+        [dealId],
+      )
+      if (trows.length === 0) {
+        await client.query('ROLLBACK')
+        return null
+      }
+      const t0 = trows[0] as { tenant_id: string; landlord_id: string }
 
-    if (result.rowCount === 0) {
-      return null
+      await client.query(
+        `UPDATE tenant_deal_schedules
+         SET status = $3, updated_at = NOW()
+         WHERE deal_id = $1 AND period = $2`,
+        [dealId, period, status],
+      )
+
+      if (status === ScheduleItemStatus.PAID && oldStatus !== ScheduleItemStatus.PAID) {
+        await enqueueSettlementSideEffectsInTransaction(client, {
+          dealId,
+          period,
+          tenantId: t0.tenant_id,
+          landlordId: t0.landlord_id,
+          amountNgn,
+        })
+      }
+      await client.query('COMMIT')
+    } catch (e) {
+      await client.query('ROLLBACK')
+      throw e
+    } finally {
+      client.release()
     }
 
     return this.fetchDealWithSchedule(pool, dealId)
+  }
+
+  async setScheduleDueDateForTest(
+    dealId: string,
+    period: number,
+    dueDateIso: string,
+  ): Promise<void> {
+    const pool = await this.pool()
+    await pool.query(
+      `UPDATE tenant_deal_schedules SET due_date = $3, updated_at = NOW()
+       WHERE deal_id = $1 AND period = $2`,
+      [dealId, period, new Date(dueDateIso)],
+    )
   }
 
   async clear(): Promise<void> {
@@ -386,6 +555,16 @@ class PostgresDealStore implements DealStorePort {
     }
     await pool.query('TRUNCATE tenant_deal_schedules RESTART IDENTITY CASCADE')
     await pool.query('TRUNCATE tenant_deals RESTART IDENTITY CASCADE')
+  }
+
+  async updateRepaymentMethod(
+    dealId: string,
+    repaymentMethod: RepaymentMethod,
+    options?: { employerId?: string; employeeId?: string; deductionDay?: number },
+  ): Promise<DealWithSchedule | null> {
+    void repaymentMethod
+    void options
+    return this.findById(dealId)
   }
 
   private mapDeal(row: DealRow): Deal {
@@ -400,6 +579,7 @@ class PostgresDealStore implements DealStorePort {
       termMonths: row.term_months,
       createdAt: new Date(row.created_at),
       status: row.status,
+      repaymentMethod: 'self_pay',
     }
   }
 
@@ -463,6 +643,11 @@ class HybridDealStore implements DealStorePort {
     return adapter.findMany(filters)
   }
 
+  async listActiveDealsWithSchedules(): Promise<DealWithSchedule[]> {
+    const adapter = await this.adapter()
+    return adapter.listActiveDealsWithSchedules()
+  }
+
   async updateStatus(dealId: string, status: DealStatus): Promise<DealWithSchedule | null> {
     const adapter = await this.adapter()
     return adapter.updateStatus(dealId, status)
@@ -475,6 +660,24 @@ class HybridDealStore implements DealStorePort {
   ): Promise<DealWithSchedule | null> {
     const adapter = await this.adapter()
     return adapter.updateScheduleItemStatus(dealId, period, status)
+  }
+
+  async setScheduleDueDateForTest(
+    dealId: string,
+    period: number,
+    dueDateIso: string,
+  ): Promise<void> {
+    const adapter = await this.adapter()
+    return adapter.setScheduleDueDateForTest(dealId, period, dueDateIso)
+  }
+
+  async updateRepaymentMethod(
+    dealId: string,
+    repaymentMethod: RepaymentMethod,
+    options?: { employerId?: string; employeeId?: string; deductionDay?: number },
+  ): Promise<DealWithSchedule | null> {
+    const adapter = await this.adapter()
+    return adapter.updateRepaymentMethod(dealId, repaymentMethod, options)
   }
 
   async clear(): Promise<void> {

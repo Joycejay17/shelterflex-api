@@ -14,7 +14,7 @@ import { TxType } from '../outbox/types.js'
 // Mock @stellar/stellar-sdk
 vi.mock('@stellar/stellar-sdk', async () => {
   const actual = await vi.importActual('@stellar/stellar-sdk')
-  
+
   // Create a mock class for rpc.Server
   class MockServer {
     constructor(url: string) {
@@ -28,7 +28,7 @@ vi.mock('@stellar/stellar-sdk', async () => {
     sendTransaction = vi.fn()
     getTransaction = vi.fn()
   }
-  
+
   return {
     ...actual,
     rpc: {
@@ -38,11 +38,18 @@ vi.mock('@stellar/stellar-sdk', async () => {
         isSimulationRestore: vi.fn(),
       },
     },
-    Address: {
-      fromString: vi.fn().mockReturnValue({
+    Address: (() => {
+      const makeAddress = (val: string) => ({
         toScAddress: vi.fn().mockReturnValue({}),
-      }),
-    },
+        toString: () => val || 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      })
+      function AddressMock(this: any, val: string) {
+        return makeAddress(val)
+      }
+      AddressMock.fromString = vi.fn().mockImplementation((val: string) => makeAddress(val))
+      return AddressMock
+    })(),
+    nativeToScVal: vi.fn().mockImplementation((val) => val),
     scValToNative: vi.fn().mockImplementation((val) => {
       // Return the value if it has a value() method, otherwise return the val itself
       if (val && typeof val.value === 'function') {
@@ -50,6 +57,28 @@ vi.mock('@stellar/stellar-sdk', async () => {
       }
       return 1000000n
     }), // Mock default return value
+    Account: vi.fn().mockImplementation(function (address, sequence) {
+      return {
+        accountId: () => address,
+        sequenceNumber: () => sequence,
+      }
+    }),
+    TransactionBuilder: vi.fn().mockImplementation(function () {
+      return {
+        addOperation: vi.fn().mockReturnThis(),
+        setTimeout: vi.fn().mockReturnThis(),
+        build: vi.fn().mockReturnValue({}),
+        sign: vi.fn().mockReturnThis(),
+      }
+    }),
+    Operation: {
+      invokeHostFunction: vi.fn().mockReturnValue({}),
+    },
+    Keypair: {
+      fromSecret: vi.fn().mockReturnValue({
+        publicKey: () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      }),
+    },
   }
 })
 
@@ -111,7 +140,7 @@ describe('RealSorobanAdapter', () => {
       // Mock successful simulation
       vi.mocked(rpc.Api.isSimulationSuccess).mockReturnValue(true)
       mockServer.simulateTransaction.mockResolvedValue({
-        result: { 
+        result: {
           retval: { // Mock ScVal object
             value: () => 1000000n,
             switch: () => ({ value: () => 'i128' })
@@ -120,7 +149,7 @@ describe('RealSorobanAdapter', () => {
       })
 
       const balance = await adapter.getBalance('GABC123')
-      
+
       expect(mockServer.simulateTransaction).toHaveBeenCalled()
       expect(balance).toBe(1000000n)
     })
@@ -153,7 +182,7 @@ describe('RealSorobanAdapter', () => {
 
       vi.mocked(rpc.Api.isSimulationSuccess).mockReturnValue(true)
       mockServer.simulateTransaction.mockResolvedValue({
-        result: { 
+        result: {
           retval: { // Mock ScVal object
             value: () => 5000000000n,
             switch: () => ({ value: () => 'i128' })
@@ -162,7 +191,7 @@ describe('RealSorobanAdapter', () => {
       })
 
       const balance = await adapter.getStakedBalance('GABC123')
-      
+
       expect(mockServer.simulateTransaction).toHaveBeenCalled()
       expect(balance).toBe(5000000000n)
     })
@@ -183,7 +212,7 @@ describe('RealSorobanAdapter', () => {
 
       vi.mocked(rpc.Api.isSimulationSuccess).mockReturnValue(true)
       mockServer.simulateTransaction.mockResolvedValue({
-        result: { 
+        result: {
           retval: { // Mock ScVal object
             value: () => 250000000n,
             switch: () => ({ value: () => 'i128' })
@@ -192,7 +221,7 @@ describe('RealSorobanAdapter', () => {
       })
 
       const rewards = await adapter.getClaimableRewards('GABC123')
-      
+
       expect(mockServer.simulateTransaction).toHaveBeenCalled()
       expect(rewards).toBe(250000000n)
     })
@@ -233,31 +262,115 @@ describe('RealSorobanAdapter', () => {
       ).rejects.toThrow(ConfigurationError)
     })
 
-    it('should handle duplicate receipt as idempotent success', async () => {
-      // Mock getAccount
-      mockServer.getAccount.mockResolvedValue({
-        accountId: () => 'GADMIN...',
-        sequence: '123456',
+    it('should invoke record_receipt on the configured contract', async () => {
+      const invokeSpy = vi
+        .spyOn(adapter as any, 'invokeTransaction')
+        .mockResolvedValue(undefined)
+
+      await adapter.recordReceipt({
+        txId: 'abc123def456',
+        txType: TxType.TENANT_REPAYMENT,
+        amountUsdc: '100.00',
+        tokenAddress: 'CDUSDC...',
+        dealId: 'deal-123',
+        listingId: 'listing-1',
+        from: 'GFROM',
+        to: 'GTO',
+        amountNgn: 150_000,
+        fxRate: 1500.5,
+        fxProvider: 'manual',
+        metadataHash: 'cafe',
       })
 
-      // Mock sendTransaction to return error indicating duplicate
-      mockServer.sendTransaction.mockResolvedValue({
-        status: 'ERROR',
-        hash: 'txhash123',
-        errorResultXdr: 'AAAA...', // Would contain error info
-      })
+      expect(invokeSpy).toHaveBeenCalledTimes(1)
+      const [contractId, method, args] = invokeSpy.mock.calls[0]
+      expect(contractId).toBe(mockConfig.contractId)
+      expect(method).toBe('record_receipt')
+      expect(Array.isArray(args)).toBe(true)
+      expect(args.length).toBe(1)
+    })
 
-      // Since we can't easily mock XDR parsing, we test the error detection logic separately
-      // This test verifies the flow reaches the error handling
+    it('should treat duplicate receipt errors as idempotent success', async () => {
+      vi.spyOn(adapter as any, 'invokeTransaction').mockRejectedValue(
+        new Error('Receipt already exists for tx_id abc123')
+      )
+
       await expect(
         adapter.recordReceipt({
-          txId: 'abc123def456',
+          txId: 'abc123',
           txType: TxType.TENANT_REPAYMENT,
           amountUsdc: '100.00',
           tokenAddress: 'CDUSDC...',
           dealId: 'deal-123',
         })
-      ).rejects.toThrow() // Will throw because we can't fully mock XDR
+      ).resolves.toBeUndefined()
+    })
+
+    it('should treat DuplicateReceiptError as idempotent success', async () => {
+      vi.spyOn(adapter as any, 'invokeTransaction').mockRejectedValue(
+        new DuplicateReceiptError('abc123')
+      )
+
+      await expect(
+        adapter.recordReceipt({
+          txId: 'abc123',
+          txType: TxType.TENANT_REPAYMENT,
+          amountUsdc: '100.00',
+          tokenAddress: 'CDUSDC...',
+          dealId: 'deal-123',
+        })
+      ).resolves.toBeUndefined()
+    })
+
+    it('should re-throw SorobanError types unchanged', async () => {
+      const contractErr = new ContractError(
+        'simulation failed',
+        mockConfig.contractId!,
+        'record_receipt'
+      )
+      vi.spyOn(adapter as any, 'invokeTransaction').mockRejectedValue(contractErr)
+
+      await expect(
+        adapter.recordReceipt({
+          txId: 'abc123',
+          txType: TxType.TENANT_REPAYMENT,
+          amountUsdc: '100.00',
+          tokenAddress: 'CDUSDC...',
+          dealId: 'deal-123',
+        })
+      ).rejects.toBe(contractErr)
+    })
+
+    it('should wrap non-duplicate plain errors in TransactionError', async () => {
+      vi.spyOn(adapter as any, 'invokeTransaction').mockRejectedValue(
+        new Error('network blew up')
+      )
+
+      await expect(
+        adapter.recordReceipt({
+          txId: 'abc123',
+          txType: TxType.TENANT_REPAYMENT,
+          amountUsdc: '100.00',
+          tokenAddress: 'CDUSDC...',
+          dealId: 'deal-123',
+        })
+      ).rejects.toThrow(TransactionError)
+    })
+
+    it('should not silently succeed on unexpected errors', async () => {
+      vi.spyOn(adapter as any, 'invokeTransaction').mockRejectedValue(
+        new Error('network blew up')
+      )
+
+      await expect(
+        adapter.recordReceipt({
+          txId: 'abc123',
+          txType: TxType.TENANT_REPAYMENT,
+          amountUsdc: '100.00',
+          tokenAddress: 'CDUSDC...',
+          dealId: 'deal-123',
+        })
+      ).rejects.toThrow(/record receipt/i)
     })
   })
 

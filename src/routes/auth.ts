@@ -3,6 +3,8 @@ import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { validate } from '../middleware/validate.js'
 import { otpRequestRateLimit, walletAuthRateLimit } from '../middleware/authRateLimit.js'
+import { createRateLimiter } from '../middleware/rateLimiter.js'
+import { rateLimitProfiles } from '../config/rateLimitConfig.js'
 import { requestOtpSchema, verifyOtpSchema, walletChallengeSchema, walletVerifySchema } from '../schemas/auth.js'
 import { generateOtp, generateToken } from '../utils/tokens.js'
 import { generateOtpSalt, hashOtp, verifyOtpHash } from '../utils/otp.js'
@@ -11,6 +13,19 @@ import { otpChallengeStore, sessionStore, userStore, walletChallengeStore } from
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 import { PostgresLinkedAddressStore } from '../models/linkedAddressStore.js'
 import { createOtpDeliveryProvider } from '../services/otpDeliveryFactory.js'
+import { detectCredentialStuffing } from '../services/abuseDetectionService.js'
+import { referralService } from '../services/referralService.js'
+import {
+  auditAuthOtpRequested,
+  auditAuthLoginSuccess,
+  auditAuthLoginFailed,
+  auditAuthLogout,
+  auditAuthLogoutAll,
+  auditAuthWalletChallengeIssued,
+  auditAuthWalletLoginSuccess,
+  auditAuthWalletLoginFailed,
+} from '../utils/auditLogger.js'
+import { sanitiseForClient } from '../utils/sanitiseForClient.js'
 
 const router = Router()
 
@@ -23,6 +38,10 @@ const WALLET_MAX_ATTEMPTS = 3
 // Initialize OTP delivery provider
 const otpDeliveryProvider = createOtpDeliveryProvider()
 
+// Redis-backed rate limiters (issue #1046)
+const authLimiter = createRateLimiter(rateLimitProfiles.auth)
+const otpLimiter = createRateLimiter(rateLimitProfiles.otp)
+
 /**
  * POST /api/auth/request-otp
  * Body: { email }
@@ -30,6 +49,8 @@ const otpDeliveryProvider = createOtpDeliveryProvider()
 router.post(
   '/request-otp',
   validate(requestOtpSchema, 'body'),
+  authLimiter,
+  otpLimiter,
   otpRequestRateLimit(),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -47,6 +68,8 @@ router.post(
       // Plaintext OTP is never stored or logged in production mode
       await otpDeliveryProvider.sendOtp(email, otp, OTP_TTL_MINUTES)
 
+      auditAuthOtpRequested(req, { email })
+
       res.json({ message: 'OTP sent to your email' })
     } catch (error) {
       next(error)
@@ -61,6 +84,7 @@ router.post(
 router.post(
   '/verify-otp',
   validate(verifyOtpSchema, 'body'),
+  authLimiter,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const email = (req.body.email as string).toLowerCase()
@@ -68,32 +92,67 @@ router.post(
 
       const challenge = await otpChallengeStore.getByEmail(email)
       if (!challenge) {
+        auditAuthLoginFailed(req, { email, reason: 'no_otp_challenge' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'No OTP requested for this email')
       }
 
       if (new Date() > challenge.expiresAt) {
         await otpChallengeStore.deleteByEmail(email)
+        auditAuthLoginFailed(req, { email, reason: 'otp_expired' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'OTP has expired')
       }
 
       if (challenge.attempts >= OTP_MAX_ATTEMPTS) {
         await otpChallengeStore.deleteByEmail(email)
+        auditAuthLoginFailed(req, { email, reason: 'max_attempts_exceeded' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid OTP')
       }
 
       const ok = verifyOtpHash(otp, challenge.salt, challenge.otpHash)
       if (!ok) {
         await otpChallengeStore.updateAttempts(email, challenge.attempts + 1)
+        auditAuthLoginFailed(req, { email, reason: 'invalid_otp' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid OTP')
       }
 
       await otpChallengeStore.deleteByEmail(email)
 
+      // Check if user exists before creation
+      const existingUser = await userStore.getByEmail(email)
+      const isNewUser = !existingUser
+
       const user = await userStore.getOrCreateByEmail(email)
       const token = generateToken()
       await sessionStore.create(email, token, { ip: req.ip, userAgent: req.get('User-Agent') })
 
-      res.json({ token, user })
+      // Generate referral code for new tenants
+      if (isNewUser && user.role === 'tenant') {
+        try {
+          await referralService.generateReferralCode(user.id)
+        } catch (error) {
+          // Log error but don't fail registration if referral code generation fails
+          console.error('Failed to generate referral code:', error)
+        }
+      }
+
+      // Apply referral code if provided (only for new users)
+      const referralCode = (req.body as any).referralCode
+      if (isNewUser && referralCode && user.role === 'tenant') {
+        try {
+          await referralService.applyReferralCode(referralCode, user.id)
+        } catch (error) {
+          // Log error but don't fail registration if referral code application fails
+          console.error('Failed to apply referral code:', error)
+        }
+      }
+
+      auditAuthLoginSuccess(req, { userId: user.id, email: user.email })
+
+      res.json({ token, user: sanitiseForClient({ ...user }) })
     } catch (error) {
       next(error)
     }
@@ -109,6 +168,7 @@ router.post('/logout', async (req: Request, res: Response) => {
   if (token) {
     await sessionStore.deleteByToken(token)
   }
+  auditAuthLogout(req)
   res.json({ message: 'Logged out' })
 })
 
@@ -119,6 +179,7 @@ router.post('/logout', async (req: Request, res: Response) => {
 router.post('/logout-all', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
   const email = req.user!.email
   const count = sessionStore.revokeAllByEmail(email)
+  auditAuthLogoutAll(req, { userId: req.user!.id, sessionCount: count })
   res.json({ message: `Logged out from ${count} session(s)` })
 })
 
@@ -126,7 +187,7 @@ router.post('/logout-all', authenticateToken, (req: AuthenticatedRequest, res: R
  * GET /api/auth/me
  */
 router.get('/me', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
-  res.json({ user: req.user })
+  res.json({ user: sanitiseForClient({ ...req.user! }) })
 })
 
 /**
@@ -159,6 +220,8 @@ router.post(
       attempts: 0,
     })
 
+    auditAuthWalletChallengeIssued(req, { address: normalizedAddress })
+
     res.json({ challengeXdr, expiresAt })
   },
 )
@@ -180,16 +243,22 @@ router.post(
 
       const challenge = await walletChallengeStore.getByAddress(normalizedAddress)
       if (!challenge) {
+        auditAuthWalletLoginFailed(req, { address: normalizedAddress, reason: 'no_challenge' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
       }
 
       if (new Date() > challenge.expiresAt) {
         await walletChallengeStore.deleteByAddress(normalizedAddress)
+        auditAuthWalletLoginFailed(req, { address: normalizedAddress, reason: 'challenge_expired' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
       }
 
       if (challenge.attempts >= WALLET_MAX_ATTEMPTS) {
         await walletChallengeStore.deleteByAddress(normalizedAddress)
+        auditAuthWalletLoginFailed(req, { address: normalizedAddress, reason: 'max_attempts_exceeded' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
       }
 
@@ -197,6 +266,8 @@ router.post(
       const isValid = verifySignedChallenge(address, signedChallengeXdr, challenge.nonce)
       if (!isValid) {
         await walletChallengeStore.updateAttempts(normalizedAddress, challenge.attempts + 1)
+        auditAuthWalletLoginFailed(req, { address: normalizedAddress, reason: 'invalid_signature' })
+        await detectCredentialStuffing(req.ip)
         throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid address or signature')
       }
 
@@ -224,7 +295,9 @@ router.post(
         }
       }
 
-      res.json({ token, user })
+      auditAuthWalletLoginSuccess(req, { address: normalizedAddress, userId: user.id })
+
+      res.json({ token, user: sanitiseForClient({ ...user }) })
     } catch (error) {
       next(error)
     }
