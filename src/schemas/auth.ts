@@ -7,6 +7,7 @@ export const requestOtpSchema = z.object({
 export const verifyOtpSchema = z.object({
   email: z.string().email(),
   otp: z.string().length(6),
+  referralCode: z.string().length(8).optional(),
 })
 
 export const walletChallengeSchema = z.object({
