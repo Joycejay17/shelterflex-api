@@ -67,11 +67,23 @@ export type CreateListingRequest = z.infer<typeof createListingSchema>
 export const listingFiltersSchema = z.object({
   status: z.nativeEnum(ListingStatus).optional(),
   query: z.string().optional(),
+  q: z.string().optional(),
+  minPrice: z.coerce.number().int().min(0).optional(),
+  maxPrice: z.coerce.number().int().min(0).optional(),
+  bedrooms: z.coerce.number().int().min(0).optional(),
+  lga: z.string().optional(),
+  paymentPlan: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 })
 
 export type ListingFiltersRequest = z.infer<typeof listingFiltersSchema>
+
+export const listingSuggestSchema = z.object({
+  q: z.string().trim().min(1).max(100),
+})
+
+export type ListingSuggestRequest = z.infer<typeof listingSuggestSchema>
 
 /**
  * Query params for GET /api/admin/whistleblower/listings
