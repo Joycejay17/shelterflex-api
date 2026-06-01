@@ -10,6 +10,7 @@ import { validateCreditScoringConfig } from "./config/creditScoring.js"
 import { validatePiiEncryptionKey } from "./utils/piiEncryption.js"
 import { startBackupJob } from "./jobs/backupJob.js"
 import { ReconciliationWorker } from "./reconciliation/index.js"
+import { notificationWSS } from "./services/websocket/NotificationWebSocketServer.js"
 
 const require = createRequire(import.meta.url)
 const { version } = require("../package.json") as { version: string }
@@ -45,9 +46,10 @@ async function main() {
     maybeStartOutboxWorker()
     const reconciliationWorker = new ReconciliationWorker()
     reconciliationWorker.start()
-    app.listen(env.PORT, () => {
+    const server = app.listen(env.PORT, () => {
       console.log(`[backend] listening on http://localhost:${env.PORT}`)
     })
+    notificationWSS.attach(server)
   } catch (error) {
     console.error(`[backend] Fatal startup error: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
     process.exit(1)

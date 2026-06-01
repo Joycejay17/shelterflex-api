@@ -1,4 +1,4 @@
-import { SorobanAdapter, RecordReceiptParams } from './adapter.js'
+import { SorobanAdapter, RecordReceiptParams, SyncDealStatusParams } from './adapter.js'
 import { SorobanConfig } from './client.js'
 import { RawReceiptEvent } from '../indexer/event-parser.js'
 import { logger } from '../utils/logger.js'
@@ -188,5 +188,9 @@ export class StubSorobanAdapter implements SorobanAdapter {
      async init(contractId: string, adminAddress: string, operatorAddress?: string): Promise<string> {
           logger.info('Soroban stub: init', { contractId, adminAddress, operatorAddress })
           return 'stub_tx_hash_init'
+     }
+
+     async syncDealStatus(params: SyncDealStatusParams): Promise<void> {
+          logger.info('Soroban stub: syncDealStatus', { ...params })
      }
 }

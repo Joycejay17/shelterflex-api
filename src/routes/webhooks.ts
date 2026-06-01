@@ -20,6 +20,11 @@ import { getSorobanConfigFromEnv } from "../soroban/client.js";
 import { NgnWalletService } from "../services/ngnWalletService.js";
 import { getPaymentProvider } from "../payments/index.js";
 import { requireValidWebhookSignature } from "../payments/webhookSignature.js";
+import {
+  verifyPaystackSignature,
+  verifyFlutterwaveSignature,
+  preventWebhookReplay,
+} from "../middleware/webhookSignature.js";
 import { jsonPayloadSha256Hex, sha256Hex, generateRandomSecretHex } from "../utils/sha256.js";
 import { z } from "zod";
 import { authenticateToken, type AuthenticatedRequest } from "../middleware/auth.js";
@@ -50,9 +55,26 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
    */
   router.post(
     "/payments/:rail",
+    (req: Request, res: Response, next: NextFunction) => {
+      const rail = String(req.params.rail)
+      if (rail === 'paystack') return verifyPaystackSignature(req, res, next)
+      if (rail === 'flutterwave') return verifyFlutterwaveSignature(req, res, next)
+      next()
+    },
     validate(paymentsWebhookSchema),
+    (req: Request, res: Response, next: NextFunction) => {
+      const rail = String(req.params.rail)
+      if (rail === 'paystack' || rail === 'flutterwave') {
+        return preventWebhookReplay(rail)(req, res, next)
+      }
+      next()
+    },
     async (req: Request, res: Response, next: NextFunction) => {
       try {
+        if (req.webhookReplaySkipped) {
+          return
+        }
+
         const rail = String(req.params.rail);
 
         const provider = getPaymentProvider(rail);
