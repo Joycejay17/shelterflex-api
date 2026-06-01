@@ -94,6 +94,7 @@ import { PostgresRewardsDataLayer } from "./services/postgres-rewards-data-layer
 import { createReceiptRepository, createTimelockRepository } from "./indexer/repositoryBootstrap.js"
 import { createLandlordPropertiesRouter } from "./routes/landlordProperties.js";
 import { createLandlordRouter } from "./routes/landlord.js";
+import { createAdminLandlordVerificationRouter, createLandlordVerificationRouter } from "./routes/landlordVerification.js";
 import { authenticateToken } from "./middleware/auth.js";
 import { createTenantApplicationsRouter } from "./routes/tenantApplications.js";
 import { createTenantSavedPropertiesRouter } from "./routes/tenantSavedProperties.js";
@@ -753,7 +754,9 @@ export function createApp() {
     "/api/v1/landlord/partner-applications",
     createPartnerLandlordApplicationsRouter(),
   );
+  app.use("/api/v1/landlords", createLandlordVerificationRouter());
   app.use("/api/v1/landlord", authenticateToken, createLandlordRouter());
+  app.use("/api/v1/admin", createAdminLandlordVerificationRouter());
   app.use("/api/v1/tenant/applications", createTenantApplicationsRouter());
   app.use(
     "/api/v1/tenant/saved-properties",
