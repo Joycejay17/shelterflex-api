@@ -1,5 +1,7 @@
 import express from "express"
 import cors from "cors"
+import * as Sentry from "@sentry/node"
+import { nodeProfilingIntegration } from "@sentry/profiling-node"
 import { env } from "./schemas/env.js"
 import { requestIdMiddleware } from "./middleware/requestId.js"
 import { errorHandler } from "./middleware/errorHandler.js"
@@ -110,7 +112,9 @@ import { createAdminSessionsRouter } from "./routes/adminSessions.js";
 import { durableIdempotencyService } from "./services/durableIdempotencyService.js";
 import { createSupportRouter } from "./routes/support.js";
 import { createPropertyIssueReportsRouter } from "./routes/propertyIssueReports.js";
-import { createPropertyPhotosRouter } from "./routes/propertyPhotos.js";
+import { createPropertyPhotosRouter } from "./routes/propertyPhotos.js"
+import { createAccountRouter } from "./routes/account.js"
+import { createAdminDataRetentionRouter } from "./routes/adminDataRetention.js";
 import {
   PostgresTenantApplicationStore,
   initTenantApplicationStore,
@@ -160,12 +164,50 @@ import { createKycWebhookRouter } from "./routes/kyc.js";
 import { createOnboardingRouter } from "./routes/onboarding.js";
 import { createEmployersRouter } from "./routes/employers.js";
 import { MonthlyDeductionReminderJob } from "./jobs/monthlyDeductionReminderJob.js";
+import { dataRetentionPurgeJobHandler, DATA_RETENTION_PURGE_JOB_NAME } from "./jobs/dataRetentionPurgeJob.js";
 
 export function createApp() {
   const app = express();
 
   // Trust the first proxy hop (Vercel/Render) so req.ip reflects the real client IP
   app.set('trust proxy', 1);
+
+  // Initialize Sentry
+  if (env.NODE_ENV !== "test" && process.env.SENTRY_DSN_BACKEND) {
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN_BACKEND,
+      environment: env.NODE_ENV || "development",
+      tracesSampleRate: 0.1,
+      integrations: [
+        nodeProfilingIntegration(),
+      ],
+      beforeSend(event) {
+        // Scrub PII from event data
+        if (event.request) {
+          delete event.request.cookies;
+          if (event.request.headers) {
+            delete event.request.headers["authorization"];
+            delete event.request.headers["cookie"];
+          }
+        }
+        // Scrub PII from user data
+        if (event.user) {
+          delete event.user.email;
+          delete event.user.phone;
+          delete event.user.ip_address;
+        }
+        // Scrub PII from extra data
+        if (event.extra) {
+          const extra = event.extra;
+          delete extra.email;
+          delete extra.phone;
+          delete extra.bvn;
+          delete extra.password;
+        }
+        return event;
+      },
+    });
+  }
 
   // Initialize secret rotation service
   if (env.NODE_ENV !== "test") {
@@ -366,6 +408,9 @@ export function createApp() {
     })
   })
 
+  // Register data retention purge job handler
+  jobScheduler.registerHandler(DATA_RETENTION_PURGE_JOB_NAME, dataRetentionPurgeJobHandler)
+
   // Centralized KYC Status Change Webhook Trigger
   kycStatusEmitter.on('statusChanged', (userId: string, status: any) => {
     const eventType = status === 'approved' ? WebhookEventType.KYC_APPROVED : WebhookEventType.KYC_REJECTED
@@ -501,6 +546,11 @@ export function createApp() {
   app.use(requestIdMiddleware);
   app.use(traceResponseMiddleware);
 
+  // Sentry request handler (must be before routes)
+  if (env.NODE_ENV !== "test" && process.env.SENTRY_DSN_BACKEND) {
+    app.use((Sentry as any).Handlers.requestHandler());
+  }
+
   // Metrics middleware - track all HTTP requests
   if (env.NODE_ENV !== "test") {
     app.use(metricsMiddleware);
@@ -583,10 +633,12 @@ export function createApp() {
   app.use('/api/v1/admin/webhook-replay', createWebhookReplayRouter())
   app.use('/api/v1/deals', createDealsRouter())
   app.use('/api/v1/whistleblower', createWhistleblowerRouter(earningsService))
+  app.use('/api/v1/staking', createStakingRouter(sorobanAdapter, walletService, linkedAddressStore, ngnWalletService, conversionService, stakingService, receiptRepo, conversionRateService))
   app.use('/api/v1/webhooks', createWebhooksRouter(ngnWalletService))
   app.use('/api/v1/deposits', createDepositsRouter(conversionService))
   app.use('/api/v1/gas-metrics', createGasMetricsRouter())
   app.use('/api/v1', migrationGuideRouter)
+  app.use("/health", createHealthRouter(sorobanAdapter));
 
   // Global API Rate Limiting
   app.use("/api/v1", createComprehensiveRateLimiter());
@@ -804,6 +856,10 @@ export function createApp() {
   app.use("/api/onboarding", createOnboardingRouter());
   app.use("/api", migrationGuideRouter);
 
+  // Account and data retention routes
+  app.use("/api/v1", createAccountRouter());
+  app.use("/api/v1", createAdminDataRetentionRouter());
+
   // Inspector job routes
   app.use('/api/v1/inspector', authenticateToken, createInspectorJobsRouter())
   app.use('/api/v1/admin/inspector', authenticateToken, createAdminInspectorJobsRouter())
@@ -852,6 +908,11 @@ export function createApp() {
       ),
     );
   });
+
+  // Sentry error handler (must be after all routes, before errorHandler)
+  if (env.NODE_ENV !== "test" && process.env.SENTRY_DSN_BACKEND) {
+    app.use((Sentry as any).Handlers.errorHandler());
+  }
 
   // Error handler (must be last)
   app.use(errorHandler);
