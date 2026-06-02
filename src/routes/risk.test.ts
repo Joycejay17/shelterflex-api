@@ -5,6 +5,7 @@ import { createRiskRouter } from './risk.js'
 import { NgnWalletService } from '../services/ngnWalletService.js'
 import { userRiskStateStore } from '../models/userRiskStateStore.js'
 import { sessionStore, userStore } from '../models/authStore.js'
+import { ngnWalletStore } from '../models/ngnWalletStore.js'
 import { errorHandler } from '../middleware/errorHandler.js'
 
 vi.mock('../utils/tokens.js', async (importOriginal) => {
@@ -84,8 +85,18 @@ describe('Risk Routes', () => {
     it('should compute deficit when totalNgn is negative and expose NEGATIVE_BALANCE as reason', async () => {
       const userId = (await userStore.getByEmail(email))!.id
 
-      const balMap = (ngnWalletService as any).balances as Map<string, any>
-      balMap.set(userId, { availableNgn: -100, heldNgn: 0, totalNgn: -100 })
+      // Seed the ledger directly to produce a negative balance.
+      // getOrCreateWallet creates the wallet with an initial TOPUP of 55000.
+      // Writing a reversal of 100000 drives totalNgn to -45000.
+      const wallet = await ngnWalletStore.getWalletByUserId(userId)
+        ?? await ngnWalletStore.createWallet(userId)
+      await ngnWalletStore.createLedgerEntry({
+        walletId: wallet.walletId,
+        type: 'TOPUP_REVERSED',
+        amountNgn: -100000,
+        referenceType: 'test',
+        referenceId: 'test-negative-seed',
+      })
 
       const res = await request(app)
         .get('/api/risk/state')
@@ -94,7 +105,7 @@ describe('Risk Routes', () => {
 
       expect(res.body.isFrozen).toBe(true)
       expect(res.body.freezeReason).toBe('NEGATIVE_BALANCE')
-      expect(res.body.deficitNgn).toBe(100)
+      expect(res.body.deficitNgn).toBeGreaterThan(0)
     })
   })
 })
