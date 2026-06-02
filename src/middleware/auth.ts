@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express'
+import * as Sentry from '@sentry/node'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { logger } from '../utils/logger.js'
@@ -67,6 +68,15 @@ export async function authenticateToken(
       role: user.role,
       displayCurrency: user.displayCurrency,
     }
+    
+    // Attach userId and role to Sentry scope for error tracking
+    if (process.env.SENTRY_DSN_BACKEND && process.env.NODE_ENV !== "test") {
+      Sentry.setUser({
+        id: user.id,
+        role: user.role,
+      });
+    }
+    
     logger.info('User authenticated successfully', {
       userId: user.id,
       email: user.email,
