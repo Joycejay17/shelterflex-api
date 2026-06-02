@@ -11,7 +11,7 @@ export interface DataRetentionPurgeJobPayload {
  * Job handler for purging expired soft-deleted records
  * This job runs periodically to permanently delete records that have exceeded the retention period
  */
-export const dataRetentionPurgeJobHandler = async (job: { id?: string; payload?: DataRetentionPurgeJobPayload }) => {
+export const dataRetentionPurgeJobHandler = async (job: { id?: string; payload?: DataRetentionPurgeJobPayload }): Promise<void> => {
   logger.info('Starting data retention purge job', {
     jobId: job.id,
   })
@@ -25,12 +25,6 @@ export const dataRetentionPurgeJobHandler = async (job: { id?: string; payload?:
       totalDeleted,
       tablesPurged: results.length,
     })
-
-    return {
-      success: true,
-      totalDeleted,
-      tables: results,
-    }
   } catch (error) {
     logger.error('Data retention purge job failed', {
       jobId: job.id,

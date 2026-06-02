@@ -534,7 +534,7 @@ export function createApp() {
 
   // Sentry request handler (must be before routes)
   if (env.NODE_ENV !== "test" && process.env.SENTRY_DSN_BACKEND) {
-    app.use(Sentry.Handlers.requestHandler());
+    app.use((Sentry as any).Handlers.requestHandler());
   }
 
   // Metrics middleware - track all HTTP requests
@@ -746,8 +746,7 @@ export function createApp() {
 
   // Sentry error handler (must be after all routes, before errorHandler)
   if (env.NODE_ENV !== "test" && process.env.SENTRY_DSN_BACKEND) {
-    // @ts-ignore - Sentry.Handlers exists but TypeScript types may be outdated
-    app.use(Sentry.Handlers.errorHandler());
+    app.use((Sentry as any).Handlers.errorHandler());
   }
 
   // Error handler (must be last)
