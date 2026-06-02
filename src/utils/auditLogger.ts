@@ -110,6 +110,10 @@ export type AuditEventType =
   // Tenant rating card
   | 'TENANT_RATING_SUBMITTED'
   | 'TENANT_RATING_SHARE_TOKEN_GENERATED'
+  // Tenant referral programme
+  | 'REFERRAL_VIEWED'
+  | 'REFERRAL_APPLIED'
+  | 'ADMIN_REFERRALS_VIEWED'
   // Data privacy / erasure
   | 'USER_ERASURE_REQUESTED'
   | 'USER_ERASURE_COMPLETED'
