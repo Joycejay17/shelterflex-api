@@ -6,8 +6,7 @@ import { otpRequestRateLimit, walletAuthRateLimit } from '../middleware/authRate
 import { createRateLimiter } from '../middleware/rateLimiter.js'
 import { rateLimitProfiles } from '../config/rateLimitConfig.js'
 import { requestOtpSchema, verifyOtpSchema, walletChallengeSchema, walletVerifySchema } from '../schemas/auth.js'
-import { randomUUID } from 'node:crypto'
-import { generateOtp, generateToken } from '../utils/tokens.js'
+import { generateId, generateOtp, generateToken } from '../utils/tokens.js'
 import { generateOtpSalt, hashOtp, verifyOtpHash } from '../utils/otp.js'
 import { generateNonce, generateChallengeXdr, verifySignedChallenge, normalizeStellarAddress } from '../utils/wallet.js'
 import {
@@ -81,7 +80,7 @@ async function issueSessionPair(
   res: Response,
   user: { id: string; email: string },
   auditInfo: { ip?: string; userAgent?: string },
-  family = randomUUID(),
+  family = generateId(),
 ): Promise<string> {
   const accessToken = generateToken()
   const refreshToken = generateToken()
