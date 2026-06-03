@@ -478,6 +478,61 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /api/wallet/ngn/balance:
+    get:
+      summary: Get NGN wallet balance
+      description: Returns the current available, held, and total NGN balance for the authenticated user.
+      operationId: getNgnBalance
+      tags:
+        - NGN Wallet
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Wallet balance retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NgnBalanceResponse'
+        '401':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/wallet/ngn/ledger:
+    get:
+      summary: Get NGN wallet ledger
+      description: Returns a paginated list of all ledger entries for the authenticated user.
+      operationId: getNgnLedger
+      tags:
+        - NGN Wallet
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ledger entries retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NgnLedgerResponse'
+        '401':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
   /api/wallet/ngn/withdraw/initiate:
     post:
       summary: Initiate NGN withdrawal
@@ -2056,6 +2111,68 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/WithdrawalResponse'
+        nextCursor:
+          type: string
+          nullable: true
+
+    NgnBalanceResponse:
+      type: object
+      required:
+        - success
+        - availableNgn
+        - heldNgn
+        - totalNgn
+      properties:
+        success:
+          type: boolean
+        availableNgn:
+          type: number
+        heldNgn:
+          type: number
+        totalNgn:
+          type: number
+
+    NgnLedgerEntry:
+      type: object
+      required:
+        - entryId
+        - walletId
+        - type
+        - amountNgn
+        - referenceType
+        - referenceId
+        - createdAt
+      properties:
+        entryId:
+          type: string
+        walletId:
+          type: string
+        type:
+          type: string
+          enum: [TOPUP_PENDING, TOPUP_CONFIRMED, TOPUP_REVERSED, STAKE_RESERVE, STAKE_RELEASE, CONVERSION_DEBIT, WITHDRAWAL_PENDING, WITHDRAWAL_CONFIRMED, WITHDRAWAL_FAILED, ADJUSTMENT]
+        amountNgn:
+          type: number
+        referenceType:
+          type: string
+        referenceId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    NgnLedgerResponse:
+      type: object
+      required:
+        - success
+        - entries
+        - nextCursor
+      properties:
+        success:
+          type: boolean
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/NgnLedgerEntry'
         nextCursor:
           type: string
           nullable: true

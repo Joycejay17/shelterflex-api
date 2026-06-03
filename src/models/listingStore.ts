@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { getPool, type PgPoolLike } from '../db.js'
 import {
   Listing,
+  ListingSearchResult,
   ListingStatus,
   CreateListingInput,
   ListingFilters,
@@ -12,6 +13,8 @@ interface ListingStorePort {
   create(input: CreateListingInput): Promise<Listing>
   getById(listingId: string): Promise<Listing | null>
   list(filters?: ListingFilters): Promise<PaginatedListings>
+  search(filters?: ListingFilters): Promise<PaginatedListings>
+  suggest(query: string): Promise<string[]>
   updateStatus(listingId: string, status: ListingStatus, rejectionReason?: string): Promise<Listing | null>
   lockToDeal(listingId: string, dealId: string): Promise<Listing | null>
   hasReachedMonthlyLimit(whistleblowerId: string): Promise<boolean>
@@ -60,15 +63,20 @@ class InMemoryListingStore implements ListingStorePort {
   }
 
   async list(filters: ListingFilters = {}): Promise<PaginatedListings> {
-    const { status, query, page = 1, pageSize = 20 } = filters
+    return this.search(filters)
+  }
+
+  async search(filters: ListingFilters = {}): Promise<PaginatedListings> {
+    const { status, query, q, page = 1, pageSize = 20 } = filters
+    const searchQuery = q ?? query
     let filtered = Array.from(this.listings.values())
 
     if (status) {
       filtered = filtered.filter((l) => l.status === status)
     }
 
-    if (query && query.trim()) {
-      const searchTerm = query.toLowerCase()
+    if (searchQuery && searchQuery.trim()) {
+      const searchTerm = searchQuery.toLowerCase()
       filtered = filtered.filter(
         (l) =>
           l.address.toLowerCase().includes(searchTerm) ||
@@ -76,6 +84,23 @@ class InMemoryListingStore implements ListingStorePort {
           l.area?.toLowerCase().includes(searchTerm) ||
           l.description?.toLowerCase().includes(searchTerm),
       )
+    }
+
+    if (filters.minPrice != null) {
+      filtered = filtered.filter((l) => (l.installmentBasePriceNgn ?? l.annualRentNgn) >= filters.minPrice!)
+    }
+    if (filters.maxPrice != null) {
+      filtered = filtered.filter((l) => (l.installmentBasePriceNgn ?? l.annualRentNgn) <= filters.maxPrice!)
+    }
+    if (filters.bedrooms != null) {
+      filtered = filtered.filter((l) => l.bedrooms === filters.bedrooms)
+    }
+    if (filters.lga && filters.lga.trim()) {
+      const lga = filters.lga.toLowerCase()
+      filtered = filtered.filter((l) => l.area?.toLowerCase() === lga)
+    }
+    if (filters.paymentPlan && filters.paymentPlan !== 'outright') {
+      filtered = filtered.filter((l) => l.installmentBasePriceNgn != null)
     }
 
     filtered.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
@@ -87,12 +112,32 @@ class InMemoryListingStore implements ListingStorePort {
     const listings = filtered.slice(start, end)
 
     return {
-      listings,
+      listings: listings.map((listing) => ({
+        ...listing,
+        highlightedSnippet: listing.description ?? listing.address,
+        rank: 0,
+      })),
       total,
       page,
       pageSize,
       totalPages,
     }
+  }
+
+  async suggest(query: string): Promise<string[]> {
+    const searchTerm = query.trim().toLowerCase()
+    const suggestions = new Set<string>()
+
+    for (const listing of this.listings.values()) {
+      for (const candidate of [listing.address, listing.area, listing.city]) {
+        if (candidate?.toLowerCase().includes(searchTerm)) {
+          suggestions.add(candidate)
+        }
+      }
+      if (suggestions.size >= 5) break
+    }
+
+    return Array.from(suggestions).slice(0, 5)
   }
 
   async updateStatus(
@@ -264,24 +309,57 @@ class PostgresListingStore implements ListingStorePort {
   }
 
   async list(filters: ListingFilters = {}): Promise<PaginatedListings> {
+    return this.search(filters)
+  }
+
+  async search(filters: ListingFilters = {}): Promise<PaginatedListings> {
     const pool = await this.pool()
     const where: string[] = []
     const values: unknown[] = []
+    let rankExpression = '0::real'
+    let headlineExpression = `COALESCE(description, address)`
 
     if (filters.status) {
       values.push(filters.status)
       where.push(`status = $${values.length}`)
     }
 
-    if (filters.query && filters.query.trim()) {
-      values.push(`%${filters.query.trim()}%`)
+    const freeText = (filters.q ?? filters.query)?.trim()
+    if (freeText) {
+      values.push(freeText)
       const idx = values.length
-      where.push(`(
-        address ILIKE $${idx} OR
-        COALESCE(city, '') ILIKE $${idx} OR
-        COALESCE(area, '') ILIKE $${idx} OR
-        COALESCE(description, '') ILIKE $${idx}
-      )`)
+      where.push(`search_vector @@ plainto_tsquery('english', $${idx})`)
+      rankExpression = `ts_rank(search_vector, plainto_tsquery('english', $${idx}))`
+      headlineExpression = `ts_headline(
+        'english',
+        COALESCE(description, address),
+        plainto_tsquery('english', $${idx}),
+        'StartSel=<mark>, StopSel=</mark>, MaxWords=24, MinWords=8'
+      )`
+    }
+
+    if (filters.minPrice != null) {
+      values.push(filters.minPrice)
+      where.push(`COALESCE(installment_base_price_ngn, annual_rent_ngn) >= $${values.length}`)
+    }
+
+    if (filters.maxPrice != null) {
+      values.push(filters.maxPrice)
+      where.push(`COALESCE(installment_base_price_ngn, annual_rent_ngn) <= $${values.length}`)
+    }
+
+    if (filters.bedrooms != null) {
+      values.push(filters.bedrooms)
+      where.push(`bedrooms = $${values.length}`)
+    }
+
+    if (filters.lga && filters.lga.trim()) {
+      values.push(filters.lga.trim())
+      where.push(`LOWER(COALESCE(area, '')) = LOWER($${values.length})`)
+    }
+
+    if (filters.paymentPlan && filters.paymentPlan !== 'outright') {
+      where.push('installment_base_price_ngn IS NOT NULL')
     }
 
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : ''
@@ -296,14 +374,18 @@ class PostgresListingStore implements ListingStorePort {
 
     const queryValues = [...values, pageSize, offset]
     const listingRows = await pool.query(
-      `SELECT * FROM whistleblower_listings ${whereClause}
-       ORDER BY created_at DESC
+      `SELECT *, ${rankExpression} AS search_rank, ${headlineExpression} AS highlighted_snippet
+       FROM whistleblower_listings ${whereClause}
+       ORDER BY search_rank DESC, created_at DESC
        LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
       queryValues,
     )
 
     const total = Number((countResult.rows[0] as { count: string }).count)
-    const listings = listingRows.rows.map((row) => this.mapRow(row as ListingRow))
+    const listings = listingRows.rows.map((row) => this.mapSearchRow(row as ListingRow & {
+      highlighted_snippet: string | null
+      search_rank: string | number | null
+    }))
 
     return {
       listings,
@@ -312,6 +394,30 @@ class PostgresListingStore implements ListingStorePort {
       pageSize,
       totalPages: Math.ceil(total / pageSize),
     }
+  }
+
+  async suggest(query: string): Promise<string[]> {
+    const pool = await this.pool()
+    const { rows } = await pool.query(
+      `SELECT suggestion
+       FROM (
+         SELECT address AS suggestion, created_at FROM whistleblower_listings
+         WHERE status = $1 AND address ILIKE $2
+         UNION ALL
+         SELECT area AS suggestion, created_at FROM whistleblower_listings
+         WHERE status = $1 AND area ILIKE $2
+         UNION ALL
+         SELECT city AS suggestion, created_at FROM whistleblower_listings
+         WHERE status = $1 AND city ILIKE $2
+       ) suggestions
+       WHERE suggestion IS NOT NULL
+       GROUP BY suggestion
+       ORDER BY MAX(created_at) DESC
+       LIMIT 5`,
+      [ListingStatus.APPROVED, `%${query.trim()}%`],
+    )
+
+    return rows.map((row) => (row as { suggestion: string }).suggestion)
   }
 
   async updateStatus(
@@ -430,6 +536,17 @@ class PostgresListingStore implements ListingStorePort {
       updatedAt: new Date(row.updated_at),
     }
   }
+
+  private mapSearchRow(row: ListingRow & {
+    highlighted_snippet: string | null
+    search_rank: string | number | null
+  }): ListingSearchResult {
+    return {
+      ...this.mapRow(row),
+      highlightedSnippet: row.highlighted_snippet ?? row.description ?? row.address,
+      rank: row.search_rank == null ? 0 : toNumber(row.search_rank),
+    }
+  }
 }
 
 class HybridListingStore implements ListingStorePort {
@@ -456,6 +573,16 @@ class HybridListingStore implements ListingStorePort {
   async list(filters: ListingFilters = {}): Promise<PaginatedListings> {
     const adapter = await this.adapter()
     return adapter.list(filters)
+  }
+
+  async search(filters: ListingFilters = {}): Promise<PaginatedListings> {
+    const adapter = await this.adapter()
+    return adapter.search(filters)
+  }
+
+  async suggest(query: string): Promise<string[]> {
+    const adapter = await this.adapter()
+    return adapter.suggest(query)
   }
 
   async updateStatus(

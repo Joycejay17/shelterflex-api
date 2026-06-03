@@ -118,7 +118,7 @@ export function createAdminReconciliationRouter(ngnWalletService: NgnWalletServi
         })
 
         const withFrozen = await Promise.all(
-          items.map(async (it) => {
+          items.map(async (it: { userId: string; balance: any }) => {
             const risk = await userRiskStateStore.getByUserId(it.userId)
             return {
               userId: it.userId,

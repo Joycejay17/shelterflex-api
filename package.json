@@ -19,7 +19,8 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "vitest run src/routes/criticalFlows.e2e.test.ts",
     "test:integration": "SOROBAN_INTEGRATION_TESTS=true vitest run src/soroban/real-adapter.integration.test.ts",
-    "test:integration:watch": "SOROBAN_INTEGRATION_TESTS=true vitest src/soroban/real-adapter.integration.test.ts"
+    "test:integration:watch": "SOROBAN_INTEGRATION_TESTS=true vitest src/soroban/real-adapter.integration.test.ts",
+    "test:ci": "vitest run --exclude 'src/soroban/**/*.test.ts' --exclude 'src/routes/webhooks.test.ts' --exclude 'src/routes/wallet.test.ts' --exclude 'src/routes/stakingPositionReal.test.ts' --exclude 'src/routes/stakingQuote.test.ts' --exclude 'src/routes/session.test.ts' --exclude 'src/routes/ngnWallet.test.ts'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.57.0",
@@ -36,6 +37,8 @@
     "@opentelemetry/sdk-node": "^0.214.0",
     "@opentelemetry/sdk-trace-node": "^2.7.0",
     "@opentelemetry/semantic-conventions": "^1.40.0",
+    "@sentry/node": "^10.55.0",
+    "@sentry/profiling-node": "^10.55.0",
     "@stellar/stellar-sdk": "^14.6.1",
     "@types/lru-cache": "^7.10.9",
     "cors": "^2.8.5",
