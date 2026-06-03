@@ -116,10 +116,15 @@ describe('idempotency middleware', () => {
 
   it('returns 409 while the same user and key is in-flight', async () => {
     let release!: () => void
+    let markEntered!: () => void
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
+    const entered = new Promise<void>((resolve) => {
+      markEntered = resolve
+    })
     const { app, getCallCount } = buildApp(store, async (_req, res) => {
+      markEntered()
       await gate
       res.status(201).json({ created: true })
     })
@@ -129,6 +134,9 @@ describe('idempotency middleware', () => {
       .set('x-user-id', 'user-a')
       .set('Idempotency-Key', KEY_2)
       .send({})
+    const firstDone = first.then((res) => res)
+
+    await entered
 
     const second = await supertest(app)
       .post('/test')
@@ -139,7 +147,7 @@ describe('idempotency middleware', () => {
     expect(second.status).toBe(409)
     expect(second.body.error.code).toBe('REQUEST_IN_FLIGHT')
     release()
-    await first
+    await firstDone
     expect(getCallCount()).toBe(1)
   })
 })

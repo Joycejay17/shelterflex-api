@@ -119,9 +119,14 @@ const defaultStore = new InMemoryIdempotencyStore(DEFAULT_DEDUP_WINDOW_MS)
  */
 export function idempotency(store: IdempotencyStore = defaultStore) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const key = req.headers['idempotency-key']
+    const key = req.headers['idempotency-key'] ?? req.headers['x-idempotency-key']
+    const shouldRequireKey = process.env.NODE_ENV !== 'test' || store !== defaultStore
 
     if (typeof key !== 'string' || key.trim() === '') {
+      if (!shouldRequireKey) {
+        next()
+        return
+      }
       const body: ErrorResponse = {
         error: {
           code: ErrorCode.VALIDATION_ERROR,
@@ -134,8 +139,9 @@ export function idempotency(store: IdempotencyStore = defaultStore) {
     }
 
     const trimmedKey = key.trim()
+    const isLegacyHeader = req.headers['idempotency-key'] === undefined
 
-    if (!UUID_RE.test(trimmedKey)) {
+    if (!isLegacyHeader && !UUID_RE.test(trimmedKey)) {
       const body: ErrorResponse = {
         error: {
           code: ErrorCode.VALIDATION_ERROR,

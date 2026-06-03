@@ -116,6 +116,7 @@ export const ERROR_CLASSIFICATION: Record<string, ErrorClassification> = {
   [ErrorCode.SERVICE_UNAVAILABLE]: "transient",
   [ErrorCode.DUPLICATE_REQUEST]: "permanent",
   [ErrorCode.REQUEST_IN_FLIGHT]: "transient",
+  [ErrorCode.NO_SCORE_YET]: "permanent",
   [ErrorCode.API_VERSION_DEPRECATED]: "permanent",
 };
 
