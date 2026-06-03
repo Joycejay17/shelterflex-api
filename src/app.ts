@@ -146,6 +146,7 @@ import { createTenantDocumentsRouter } from "./routes/tenantDocuments.js";
 import { createReferralsRouter } from "./routes/referrals.js";
 import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSchedule.js";
 import { createDocsRouter } from "./routes/docs.js";
+import { createListingsRouter } from "./routes/listings.js";
 import listingApplicationsRouter from "./routes/listingApplications.js";
 import { createKycRouter } from "./routes/kyc.js";
 import { createAdminRolesRouter } from "./routes/adminRoles.js";
@@ -850,6 +851,7 @@ export function createApp() {
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
   app.use("/api/tenant/onboarding", createTenantOnboardingRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
+  app.use("/api/listings", createListingsRouter());
   app.use("/api", listingApplicationsRouter);
   app.use("/api/landlord/payout-schedule", createLandlordPayoutScheduleRouter());
   app.use("/api/webhooks/kyc", createKycWebhookRouter());
