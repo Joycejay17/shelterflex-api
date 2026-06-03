@@ -56,6 +56,8 @@ export enum ErrorCode {
   // Auth
   UNAUTHORIZED = "UNAUTHORIZED",
   FORBIDDEN = "FORBIDDEN",
+  TOKEN_EXPIRED = "TOKEN_EXPIRED",
+  INVALID_TOKEN = "INVALID_TOKEN",
 
   // Rate limiting
   TOO_MANY_REQUESTS = "TOO_MANY_REQUESTS",
@@ -103,6 +105,8 @@ export const ERROR_CLASSIFICATION: Record<string, ErrorClassification> = {
   [ErrorCode.VALIDATION_ERROR]: "permanent",
   [ErrorCode.UNAUTHORIZED]: "permanent",
   [ErrorCode.FORBIDDEN]: "permanent",
+  [ErrorCode.TOKEN_EXPIRED]: "permanent",
+  [ErrorCode.INVALID_TOKEN]: "permanent",
   [ErrorCode.TOO_MANY_REQUESTS]: "transient",
   [ErrorCode.NOT_FOUND]: "permanent",
   [ErrorCode.CONFLICT]: "permanent",
