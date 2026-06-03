@@ -45,6 +45,10 @@ const WALLET_MAX_ATTEMPTS = 3
 // Initialize OTP delivery provider
 const otpDeliveryProvider = createOtpDeliveryProvider()
 
+// Redis-backed rate limiters (issue #1046)
+const authLimiter = createRateLimiter(rateLimitProfiles.auth)
+const otpLimiter = createRateLimiter(rateLimitProfiles.otp)
+
 const REFRESH_COOKIE_NAME = 'refreshToken'
 
 function getCookie(req: Request, name: string): string | undefined {
