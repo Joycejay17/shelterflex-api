@@ -718,6 +718,7 @@ export function createApp() {
     app.use("/api/whistleblower-applications", createWhistleblowerApplicationsRouter());
     app.use("/api/admin/whistleblower-applications", createAdminWhistleblowerApplicationsRouter());
     app.use("/api/admin/underwriting", createAdminUnderwritingRouter());
+    app.use("/api/admin/analytics", createAdminAnalyticsRouter());
     app.use("/api/admin", createAdminTenantCreditScoreRouter());
     app.use("/api/admin", createSettlementAdminRouter());
     app.use(
@@ -816,6 +817,7 @@ export function createApp() {
       receiptRepo,
       conversionRateService,
     ),
+
   );
   app.use("/api/v1/webhooks", createWebhooksRouter(ngnWalletService));
   app.use("/api/v1/deposits", createDepositsRouter(conversionService));
