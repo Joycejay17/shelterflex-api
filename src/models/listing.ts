@@ -32,6 +32,11 @@ export interface Listing {
   updatedAt: Date
 }
 
+export interface ListingSearchResult extends Listing {
+  highlightedSnippet: string
+  rank: number
+}
+
 export interface CreateListingInput {
   whistleblowerId: string
   address: string
@@ -50,12 +55,18 @@ export interface CreateListingInput {
 export interface ListingFilters {
   status?: ListingStatus
   query?: string
+  q?: string
+  minPrice?: number
+  maxPrice?: number
+  bedrooms?: number
+  lga?: string
+  paymentPlan?: string
   page?: number
   pageSize?: number
 }
 
 export interface PaginatedListings {
-  listings: Listing[]
+  listings: Listing[] | ListingSearchResult[]
   total: number
   page: number
   pageSize: number

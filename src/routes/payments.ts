@@ -1,5 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { validate } from '../middleware/validate.js'
+import { idempotency } from '../middleware/idempotency.js'
 import { confirmPaymentSchema } from '../schemas/payment.js'
 import { outboxStore, OutboxSender } from '../outbox/index.js'
 import { SorobanAdapter } from '../soroban/adapter.js'
@@ -32,6 +33,7 @@ export function createPaymentsRouter(adapter: SorobanAdapter) {
    */
   router.post(
     '/confirm',
+    idempotency(),
     validate(confirmPaymentSchema),
     async (req: Request, res: Response, next: NextFunction) => {
       try {

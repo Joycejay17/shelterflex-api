@@ -65,14 +65,44 @@ The repository includes a migration runner script in `src/repositories/test.ts` 
 
 ## API Specification
 
+All API endpoints are now versioned under `/api/v1/`. The current version is `v1`.
+
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/health` | Service liveness check |
+| `GET` | `/health` | Service liveness check (includes API version) |
 | `GET` | `/soroban/config` | Returns the active Soroban RPC configuration |
-| `POST` | `/api/example/echo` | Example endpoint demonstrating Zod validation |
+| `POST` | `/api/v1/example/echo` | Example endpoint demonstrating Zod validation |
 | `POST` | `/soroban/simulate` | Validates and queues a Soroban contract simulation |
 
-### POST `/api/example/echo`
+### API Versioning
+
+The API uses URL path versioning with the `/api/v1/` prefix. Requests to the unversioned `/api/*` paths are automatically redirected to `/api/v1/*` with deprecation headers.
+
+**Version negotiation:**
+- URL path prefix: `/api/v1/...` (preferred)
+- `Accept-Version` header: `v1` (optional)
+- Default: `v1`
+
+**Deprecation headers:**
+When accessing deprecated API versions, the response includes:
+- `Deprecation: true`
+- `Sunset: {date}` (ISO 8601 date string)
+- `Link: </api/v1>; rel="successor-version"`
+
+**Health check response:**
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "apiVersion": "v1",
+  "uptimeSeconds": 1234,
+  "dbLatencyMs": 5,
+  "memoryUsageMb": 128,
+  "requestId": "abc-123"
+}
+```
+
+### POST `/api/v1/example/echo`
 
 Example endpoint demonstrating Zod request validation. Use this as a reference pattern when adding new endpoints.
 
@@ -118,21 +148,21 @@ Example endpoint demonstrating Zod request validation. Use this as a reference p
 
 Valid request:
 ```bash
-curl -X POST http://localhost:3001/api/example/echo \
+curl -X POST http://localhost:3001/api/v1/example/echo \
   -H "Content-Type: application/json" \
   -d '{"message": "Hello, world!", "timestamp": 1234567890}'
 ```
 
 Invalid request (empty message):
 ```bash
-curl -X POST http://localhost:3001/api/example/echo \
+curl -X POST http://localhost:3001/api/v1/example/echo \
   -H "Content-Type: application/json" \
   -d '{"message": ""}'
 ```
 
 Invalid request (wrong type):
 ```bash
-curl -X POST http://localhost:3001/api/example/echo \
+curl -X POST http://localhost:3001/api/v1/example/echo \
   -H "Content-Type: application/json" \
   -d '{"message": 123}'
 ```
@@ -358,4 +388,113 @@ When a limit is exceeded, the server returns a **429** error with a `Retry-After
 ```
 
 Health checks (`/health`) are exempt from rate limiting.
+
+## Object Storage
+
+The backend uses S3-compatible object storage for tenant documents, property media, inspection reports, and rental agreements. The storage layer supports both AWS S3 and MinIO (for local development).
+
+### Configuration
+
+Set the storage provider and credentials in `.env`:
+
+```bash
+# Storage provider: s3 (AWS S3 or MinIO) or local (filesystem)
+STORAGE_PROVIDER=s3
+
+# S3 Configuration (required when STORAGE_PROVIDER=s3)
+S3_BUCKET=tenant-documents
+S3_REGION=us-east-1
+S3_ACCESS_KEY_ID=your_access_key
+S3_SECRET_ACCESS_KEY=your_secret_key
+S3_ENDPOINT=https://s3.amazonaws.com  # For MinIO: http://localhost:9000
+S3_FORCE_PATH_STYLE=false  # Set to true for MinIO
+
+# Local Storage Configuration (required when STORAGE_PROVIDER=local)
+LOCAL_STORAGE_DIR=/tmp/shelterflex-dev
+```
+
+### Local Development with MinIO
+
+For local development, you can run MinIO using Docker:
+
+```bash
+docker run -d \
+  -p 9000:9000 \
+  -p 9001:9001 \
+  --name minio \
+  -e MINIO_ROOT_USER=minioadmin \
+  -e MINIO_ROOT_PASSWORD=minioadmin \
+  minio/minio server /data --console-address ":9001"
+```
+
+Then configure your `.env`:
+
+```bash
+STORAGE_PROVIDER=s3
+S3_BUCKET=tenant-documents
+S3_REGION=us-east-1
+S3_ACCESS_KEY_ID=minioadmin
+S3_SECRET_ACCESS_KEY=minioadmin
+S3_ENDPOINT=http://localhost:9000
+S3_FORCE_PATH_STYLE=true
+```
+
+After starting MinIO:
+1. Visit http://localhost:9001
+2. Login with `minioadmin` / `minioadmin`
+3. Create a bucket named `tenant-documents`
+4. Set bucket policy to block all public access (access via presigned URLs only)
+
+### Bucket Structure Convention
+
+Files are organized using the following key structure:
+
+- `tenant-documents/{tenantId}/{docType}/{uuid}.{ext}` - Tenant documents
+- `property-media/{listingId}/{uuid}.{ext}` - Property images
+- `inspection-reports/{jobId}/{uuid}.{ext}` - Inspection reports
+- `agreements/{dealId}/agreement.pdf` - Rental agreements
+
+### Usage
+
+```typescript
+import {
+  getStorageProvider,
+  buildTenantDocumentObjectKey,
+  uploadFile,
+  deleteFile,
+  generatePresignedUpload,
+  generatePresignedDownload,
+  copyFile,
+} from './services/storageService.js'
+
+// Get the configured storage provider
+const provider = getStorageProvider()
+
+// Upload a file
+const key = buildTenantDocumentObjectKey('tenant-123', 'id-proof', 'application/pdf')
+const { key: objectKey, url } = await uploadFile(key, buffer, 'application/pdf')
+
+// Generate presigned upload URL (for direct browser upload)
+const { uploadUrl, objectKey } = await generatePresignedUpload(key, 'image/jpeg', 900)
+
+// Generate presigned download URL
+const { downloadUrl } = await generatePresignedDownload(key, 300)
+
+// Delete a file
+await deleteFile(key)
+
+// Copy a file
+await copyFile(sourceKey, destKey)
+```
+
+### Switching Providers
+
+Set `STORAGE_PROVIDER=local` to use filesystem storage without AWS credentials:
+
+```bash
+STORAGE_PROVIDER=local
+LOCAL_STORAGE_DIR=/tmp/shelterflex-dev
+```
+
+This is useful for local development when you don't want to run MinIO.
 

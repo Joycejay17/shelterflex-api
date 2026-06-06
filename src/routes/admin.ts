@@ -19,6 +19,9 @@ import {
   auditRewardMarkedPaid,
   auditAdminOutboxMarkDead,
   auditAdminOutboxRetry,
+  auditLog,
+  extractAuditContext,
+  type AuditEventType,
 } from "../utils/auditLogger.js";
 import { AppError, notFound } from "../errors/AppError.js";
 import { ErrorCode } from "../errors/errorCodes.js";
@@ -38,6 +41,8 @@ import type { WalletStore } from "../models/wallet.js";
 import type { EncryptionService } from "../services/walletService.js";
 import { ReceiptIndexer } from "../indexer/worker.js";
 import { kycRepository } from "../repositories/KycRepository.js";
+import { paymentDisputeRepository } from "../repositories/PaymentDisputeRepository.js";
+import { v4 as uuidv4 } from "uuid";
 
 export function createAdminRouter(
   adapter: SorobanAdapter,
@@ -257,6 +262,29 @@ export function createAdminRouter(
           status:
             summary.dead > 0 || summary.failed > 10 ? "degraded" : "healthy",
           summary,
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  /**
+   * GET /api/admin/outbox/dead-letter
+   *
+   * List dead-lettered outbox items (issue #974).
+   */
+  router.get(
+    "/outbox/dead-letter",
+    requireAdminSecret,
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 100;
+        const items = await outboxStore.listByStatus(OutboxStatus.DEAD);
+        res.json({
+          success: true,
+          data: items.slice(0, Math.min(limit, 1000)),
+          total: items.length,
         });
       } catch (error) {
         next(error);
@@ -976,6 +1004,495 @@ export function createAdminRouter(
         next(error);
       }
     },
+  );
+
+  /**
+   * POST /api/admin/kyc/bulk
+   *
+   * Bulk approve or reject KYC submissions
+   * Max batch size: 50 IDs
+   * Requires super_admin role
+   */
+  router.post(
+    "/kyc/bulk",
+    requireAdminSecret,
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { action, ids, reason } = req.body as {
+          action: "approve" | "reject";
+          ids: string[];
+          reason?: string;
+        };
+
+        if (!action || !["approve", "reject"].includes(action)) {
+          throw new AppError(
+            ErrorCode.VALIDATION_ERROR,
+            400,
+            "Invalid action. Must be 'approve' or 'reject'",
+          );
+        }
+
+        if (!Array.isArray(ids) || ids.length === 0) {
+          throw new AppError(
+            ErrorCode.VALIDATION_ERROR,
+            400,
+            "IDs array is required and must not be empty",
+          );
+        }
+
+        if (ids.length > 50) {
+          throw new AppError(
+            ErrorCode.VALIDATION_ERROR,
+            400,
+            "Max batch size is 50 IDs",
+          );
+        }
+
+        const batchId = uuidv4();
+        const adminId = (req as any).user?.id || "admin";
+
+        logger.info("Bulk KYC action requested", {
+          batchId,
+          action,
+          count: ids.length,
+          requestId: req.requestId,
+        });
+
+        // Process IDs in parallel
+        const results = await Promise.allSettled(
+          ids.map(async (id) => {
+            try {
+              const record = await kycRepository.findById(id);
+              if (!record) {
+                return { id, success: false, reason: "Record not found" };
+              }
+
+              if (action === "approve") {
+                if (record.status !== "pending" && record.status !== "in_review") {
+                  return {
+                    id,
+                    success: false,
+                    reason: `Cannot approve in current status: ${record.status}`,
+                  };
+                }
+                await kycRepository.updateStatus(
+                  id,
+                  "approved",
+                  undefined,
+                  undefined,
+                  reason,
+                  adminId,
+                );
+                auditLog(
+                  "KYC_APPROVED" as AuditEventType,
+                  extractAuditContext(req, "admin"),
+                  {
+                    batchId,
+                    recordId: id,
+                    userId: record.userId,
+                  },
+                );
+              } else {
+                if (record.status !== "pending" && record.status !== "in_review") {
+                  return {
+                    id,
+                    success: false,
+                    reason: `Cannot reject in current status: ${record.status}`,
+                  };
+                }
+                await kycRepository.updateStatus(
+                  id,
+                  "rejected",
+                  undefined,
+                  undefined,
+                  reason,
+                  adminId,
+                );
+                auditLog(
+                  "KYC_REJECTED" as AuditEventType,
+                  extractAuditContext(req, "admin"),
+                  {
+                    batchId,
+                    recordId: id,
+                    userId: record.userId,
+                    reason,
+                  },
+                );
+              }
+
+              return { id, success: true };
+            } catch (error) {
+              return {
+                id,
+                success: false,
+                reason:
+                  error instanceof Error ? error.message : "Unknown error",
+              };
+            }
+          })
+        );
+
+        const succeeded: string[] = [];
+        const failed: { id: string; reason: string }[] = [];
+
+        results.forEach((result) => {
+          if (result.status === "fulfilled") {
+            if (result.value.success) {
+              succeeded.push(result.value.id);
+            } else {
+              failed.push({
+                id: result.value.id,
+                reason: result.value.reason || "Unknown error",
+              });
+            }
+          } else {
+            failed.push({
+              id: "unknown",
+              reason: result.reason?.message || "Promise rejected",
+            });
+          }
+        });
+
+        logger.info("Bulk KYC action completed", {
+          batchId,
+          action,
+          succeeded: succeeded.length,
+          failed: failed.length,
+          requestId: req.requestId,
+        });
+
+        res.json({
+          success: true,
+          batchId,
+          action,
+          succeeded,
+          failed,
+        });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  /**
+   * POST /api/admin/disputes/bulk
+   *
+   * Bulk resolve or reject payment disputes
+   * Max batch size: 50 IDs
+   * Requires super_admin role
+   */
+  router.post(
+    "/disputes/bulk",
+    requireAdminSecret,
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { action, ids, resolution } = req.body as {
+          action: "resolve" | "reject";
+          ids: string[];
+          resolution?: string;
+        };
+
+        if (!action || !["resolve", "reject"].includes(action)) {
+          throw new AppError(
+            ErrorCode.VALIDATION_ERROR,
+            400,
+            "Invalid action. Must be 'resolve' or 'reject'",
+          );
+        }
+
+        if (!Array.isArray(ids) || ids.length === 0) {
+          throw new AppError(
+            ErrorCode.VALIDATION_ERROR,
+            400,
+            "IDs array is required and must not be empty",
+          );
+        }
+
+        if (ids.length > 50) {
+          throw new AppError(
+            ErrorCode.VALIDATION_ERROR,
+            400,
+            "Max batch size is 50 IDs",
+          );
+        }
+
+        const batchId = uuidv4();
+        const adminId = (req as any).user?.id || "admin";
+
+        logger.info("Bulk dispute action requested", {
+          batchId,
+          action,
+          count: ids.length,
+          requestId: req.requestId,
+        });
+
+        // Process IDs in parallel
+        const results = await Promise.allSettled(
+          ids.map(async (id) => {
+            try {
+              const dispute = await paymentDisputeRepository.findById(id);
+              if (!dispute) {
+                return { id, success: false, reason: "Dispute not found" };
+              }
+
+              if (dispute.status !== "pending" && dispute.status !== "under_review") {
+                return {
+                  id,
+                  success: false,
+                  reason: `Cannot process in current status: ${dispute.status}`,
+                };
+              }
+
+              const newStatus = action === "resolve" ? "resolved" : "rejected";
+              await paymentDisputeRepository.updateStatus(
+                id,
+                newStatus,
+                resolution,
+                adminId
+              );
+
+              auditLog(
+                "DISPUTE_RESOLVED" as AuditEventType,
+                extractAuditContext(req, "admin"),
+                {
+                  batchId,
+                  disputeId: id,
+                  status: newStatus,
+                  resolution,
+                }
+              );
+
+              return { id, success: true };
+            } catch (error) {
+              return {
+                id,
+                success: false,
+                reason:
+                  error instanceof Error ? error.message : "Unknown error",
+              };
+            }
+          })
+        );
+
+        const succeeded: string[] = [];
+        const failed: { id: string; reason: string }[] = [];
+
+        results.forEach((result) => {
+          if (result.status === "fulfilled") {
+            if (result.value.success) {
+              succeeded.push(result.value.id);
+            } else {
+              failed.push({
+                id: result.value.id,
+                reason: result.value.reason || "Unknown error",
+              });
+            }
+          } else {
+            failed.push({
+              id: "unknown",
+              reason: result.reason?.message || "Promise rejected",
+            });
+          }
+        });
+
+        logger.info("Bulk dispute action completed", {
+          batchId,
+          action,
+          succeeded: succeeded.length,
+          failed: failed.length,
+          requestId: req.requestId,
+        });
+
+        res.json({
+          success: true,
+          batchId,
+          action,
+          succeeded,
+          failed,
+        });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  /**
+   * POST /api/admin/listings/bulk
+   *
+   * Bulk activate, deactivate, or delete listings
+   * Max batch size: 50 IDs
+   * Requires super_admin role
+   */
+  router.post(
+    "/listings/bulk",
+    requireAdminSecret,
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { action, ids } = req.body as {
+          action: "activate" | "deactivate" | "delete";
+          ids: string[];
+        };
+
+        if (!action || !["activate", "deactivate", "delete"].includes(action)) {
+          throw new AppError(
+            ErrorCode.VALIDATION_ERROR,
+            400,
+            "Invalid action. Must be 'activate', 'deactivate', or 'delete'",
+          );
+        }
+
+        if (!Array.isArray(ids) || ids.length === 0) {
+          throw new AppError(
+            ErrorCode.VALIDATION_ERROR,
+            400,
+            "IDs array is required and must not be empty",
+          );
+        }
+
+        if (ids.length > 50) {
+          throw new AppError(
+            ErrorCode.VALIDATION_ERROR,
+            400,
+            "Max batch size is 50 IDs",
+          );
+        }
+
+        const batchId = uuidv4();
+        const adminId = (req as any).user?.id || "admin";
+
+        logger.info("Bulk listing action requested", {
+          batchId,
+          action,
+          count: ids.length,
+          requestId: req.requestId,
+        });
+
+        // Process IDs in parallel
+        const results = await Promise.allSettled(
+          ids.map(async (id) => {
+            try {
+              const listing = await listingStore.getById(id);
+              if (!listing) {
+                return { id, success: false, reason: "Listing not found" };
+              }
+
+              if (action === "activate") {
+                if (listing.status !== ListingStatus.PENDING_REVIEW) {
+                  return {
+                    id,
+                    success: false,
+                    reason: `Cannot activate in current status: ${listing.status}`,
+                  };
+                }
+                const updated = await listingStore.moderate(
+                  id,
+                  ListingStatus.APPROVED,
+                  adminId
+                );
+                auditLog(
+                  "LISTING_APPROVED" as AuditEventType,
+                  extractAuditContext(req, "admin"),
+                  {
+                    batchId,
+                    listingId: id,
+                    reviewedBy: adminId,
+                  }
+                );
+              } else if (action === "deactivate") {
+                if (listing.status !== ListingStatus.APPROVED) {
+                  return {
+                    id,
+                    success: false,
+                    reason: `Cannot deactivate in current status: ${listing.status}`,
+                  };
+                }
+                const updated = await listingStore.moderate(
+                  id,
+                  ListingStatus.REJECTED,
+                  adminId,
+                  "Deactivated by admin"
+                );
+                auditLog(
+                  "LISTING_REJECTED" as AuditEventType,
+                  extractAuditContext(req, "admin"),
+                  {
+                    batchId,
+                    listingId: id,
+                    reviewedBy: adminId,
+                    reason: "Deactivated by admin",
+                  }
+                );
+              } else if (action === "delete") {
+                // Soft delete - update status to rejected with reason
+                const updated = await listingStore.moderate(
+                  id,
+                  ListingStatus.REJECTED,
+                  adminId,
+                  "Deleted by admin"
+                );
+                auditLog(
+                  "LISTING_DELETED" as AuditEventType,
+                  extractAuditContext(req, "admin"),
+                  {
+                    batchId,
+                    listingId: id,
+                    reviewedBy: adminId,
+                  }
+                );
+              }
+
+              return { id, success: true };
+            } catch (error) {
+              return {
+                id,
+                success: false,
+                reason:
+                  error instanceof Error ? error.message : "Unknown error",
+              };
+            }
+          })
+        );
+
+        const succeeded: string[] = [];
+        const failed: { id: string; reason: string }[] = [];
+
+        results.forEach((result) => {
+          if (result.status === "fulfilled") {
+            if (result.value.success) {
+              succeeded.push(result.value.id);
+            } else {
+              failed.push({
+                id: result.value.id,
+                reason: result.value.reason || "Unknown error",
+              });
+            }
+          } else {
+            failed.push({
+              id: "unknown",
+              reason: result.reason?.message || "Promise rejected",
+            });
+          }
+        });
+
+        logger.info("Bulk listing action completed", {
+          batchId,
+          action,
+          succeeded: succeeded.length,
+          failed: failed.length,
+          requestId: req.requestId,
+        });
+
+        res.json({
+          success: true,
+          batchId,
+          action,
+          succeeded,
+          failed,
+        });
+      } catch (error) {
+        next(error);
+      }
+    }
   );
 
   return router;
