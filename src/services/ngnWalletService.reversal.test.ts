@@ -46,7 +46,7 @@ describe('NgnWalletService - Reversal & Freeze Logic', () => {
 
       // Assert: Ledger should have reversal entry
       const ledger = await service.getLedger(testUserId)
-      const reversalEntry = ledger.entries.find((e) => e.type === 'top_up_reversed')
+      const reversalEntry = ledger.entries.find((e) => e.type === 'TOPUP_REVERSED')
       expect(reversalEntry).toBeTruthy()
       expect(reversalEntry?.amountNgn).toBe(-10000)
     })
@@ -127,7 +127,7 @@ describe('NgnWalletService - Reversal & Freeze Logic', () => {
       expect(newBalance.availableNgn).toBe(initialBalance.availableNgn + 20000)
 
       const ledger = await service.getLedger(testUserId)
-      const topUpEntry = ledger.entries.find((e) => e.type === 'top_up')
+      const topUpEntry = ledger.entries.find((e) => e.type === 'TOPUP_CONFIRMED')
       expect(topUpEntry).toBeTruthy()
       expect(topUpEntry?.amountNgn).toBe(20000)
     })
@@ -135,7 +135,7 @@ describe('NgnWalletService - Reversal & Freeze Logic', () => {
     it('should auto-unfreeze user when balance becomes non-negative (NEGATIVE_BALANCE only)', async () => {
       // Setup: Freeze user due to negative balance
       await userRiskStateStore.freeze(testUserId, 'NEGATIVE_BALANCE', 'Test freeze')
-      
+
       // Setup: Set negative balance
       const currentBalance = await service.getBalance(testUserId)
       const deficit = Math.abs(currentBalance.totalNgn) + 1000

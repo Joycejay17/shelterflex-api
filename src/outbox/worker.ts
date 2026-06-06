@@ -1,21 +1,9 @@
 import { outboxStore } from './store.js'
 import { OutboxSender } from './sender.js'
 import { OutboxStatus, type OutboxItem } from './types.js'
+import { outboxProcessor } from '../services/outboxProcessor.js'
+import { outboxConfig } from '../config/outboxConfig.js'
 import { logger } from '../utils/logger.js'
-
-const MAX_RETRY_COUNT = 10
-const BASE_BACKOFF_MS = 1000 // 1 second
-
-function getBackoffMs(retryCount: number): number {
-  // Exponential backoff: 2^retryCount * BASE_BACKOFF_MS, capped at 1 hour
-  return Math.min(Math.pow(2, retryCount) * BASE_BACKOFF_MS, 60 * 60 * 1000)
-}
-
-function shouldRetry(item: OutboxItem): boolean {
-  if (item.retryCount >= MAX_RETRY_COUNT) return false
-  if (!item.nextRetryAt) return true // If never scheduled, allow retry
-  return Date.now() >= new Date(item.nextRetryAt).getTime()
-}
 
 export class OutboxWorker {
   private intervalId: NodeJS.Timeout | null = null
@@ -35,7 +23,7 @@ export class OutboxWorker {
         this.processingPromise = null
       })
     }, intervalMs)
-    logger.info('OutboxWorker started', { intervalMs })
+    logger.info('OutboxWorker started', { intervalMs, config: outboxConfig })
   }
 
   async stop() {
@@ -52,7 +40,7 @@ export class OutboxWorker {
   }
 
   async process() {
-    // 1) Process new pending items — first delivery attempt
+    // 1) First delivery attempt for all pending items
     const pending = await outboxStore.listByStatus(OutboxStatus.PENDING)
     for (const item of pending) {
       logger.info('Processing pending outbox item', {
@@ -60,31 +48,33 @@ export class OutboxWorker {
         txType: item.txType,
         txId: item.txId,
       })
-      // sender.send marks the item SENT on success, FAILED on error
-      await this.sender.send(item)
+      await this.attemptSend(item)
     }
 
-    // 2) Retry failed items with exponential backoff / dead-letter
+    // 2) Retry eligible failed items; promote exhausted items to DLQ
     const failed = await outboxStore.listByStatus(OutboxStatus.FAILED)
     for (const item of failed) {
-      if (item.retryCount >= MAX_RETRY_COUNT) {
-        await outboxStore.markDead(item.id, 'Max retry count reached')
-        logger.warn('Outbox item moved to dead letter queue', {
-          outboxId: item.id,
-          txId: item.txId,
-          retryCount: item.retryCount,
-        })
+      if (item.retryCount >= outboxConfig.maxAttempts) {
+        await outboxProcessor.promoteToDeadLetter(item, 'Max retry count reached')
         continue
       }
-      if (!shouldRetry(item)) continue
+      if (!outboxProcessor.shouldRetry(item)) continue
+
       logger.info('Retrying failed outbox item', {
         outboxId: item.id,
         txId: item.txId,
         retryCount: item.retryCount,
         lastError: item.lastError,
       })
-      // sender.send handles updating retry info and status in store
-      await this.sender.send(item)
+      await this.attemptSend(item)
+    }
+  }
+
+  private async attemptSend(item: OutboxItem): Promise<void> {
+    const success = await this.sender.send(item)
+    if (!success) {
+      const error = item.lastError ?? 'Send failed'
+      await outboxProcessor.scheduleRetry(item, error)
     }
   }
 }

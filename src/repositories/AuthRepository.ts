@@ -25,6 +25,8 @@ export interface LandlordProfile {
   bankName?: string
   accountNumber?: string
   accountName?: string
+  verificationLevel?: 'unverified' | 'id_verified' | 'id_and_property_verified' | 'premium'
+  verifiedAt?: Date | null
   notificationPreferences: {
     newInquiries: boolean
     paymentUpdates: boolean
@@ -384,6 +386,21 @@ export class PostgresSessionRepository {
       createdAt: row.created_at,
       userId: row.user_id
     }
+  }
+
+  async getTokenState(token: string): Promise<'active' | 'expired' | 'invalid'> {
+    const pool = await this.pool()
+    const tokenHash = this.hashToken(token)
+
+    const { rows } = await pool.query(
+      `SELECT expires_at, revoked_at
+       FROM sessions
+       WHERE token_hash = $1`,
+      [tokenHash],
+    )
+
+    if (rows.length === 0 || rows[0].revoked_at) return 'invalid'
+    return new Date(rows[0].expires_at).getTime() < Date.now() ? 'expired' : 'active'
   }
 
   async revokeByToken(token: string): Promise<void> {
