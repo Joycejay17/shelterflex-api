@@ -101,6 +101,8 @@ import { createLandlordPropertiesRouter } from "./routes/landlordProperties.js";
 import { createLandlordRouter } from "./routes/landlord.js";
 import { createAdminLandlordVerificationRouter, createLandlordVerificationRouter } from "./routes/landlordVerification.js";
 import { authenticateToken } from "./middleware/auth.js";
+import { requireFlag } from "./middleware/requireFlag.js";
+import { createFeatureFlagsRouter } from "./routes/featureFlags.js";
 import { createTenantApplicationsRouter } from "./routes/tenantApplications.js";
 import { createTenantSavedPropertiesRouter } from "./routes/tenantSavedProperties.js";
 import { createTenantPaymentsRouter } from "./routes/tenantPayments.js";
@@ -721,8 +723,10 @@ export function createApp() {
     app.use("/api/admin/analytics", createAdminAnalyticsRouter());
     app.use("/api/admin", createAdminTenantCreditScoreRouter());
     app.use("/api/admin", createSettlementAdminRouter());
+    app.use("/api/config/feature-flags", createFeatureFlagsRouter());
     app.use(
       "/api/staking",
+      requireFlag("STAKING_ENABLED"),
       createStakingRouter(
         sorobanAdapter,
         walletService,
@@ -733,7 +737,6 @@ export function createApp() {
         receiptRepo,
         conversionRateService,
       ),
-
     );
     app.use("/api/webhooks", createWebhooksRouter(ngnWalletService));
     app.use("/api/deposits", createDepositsRouter(conversionService));
@@ -805,8 +808,12 @@ export function createApp() {
   app.use("/api/v1/admin/analytics", createAdminAnalyticsRouter());
   app.use("/api/v1/admin", createAdminTenantCreditScoreRouter());
   app.use("/api/v1/admin", createSettlementAdminRouter());
+  app.use("/api/v1/config/feature-flags", createFeatureFlagsRouter());
+
+
   app.use(
     "/api/v1/staking",
+    requireFlag("STAKING_ENABLED"),
     createStakingRouter(
       sorobanAdapter,
       walletService,
@@ -862,9 +869,9 @@ export function createApp() {
   app.use("/api/v1", createAccountRouter());
   app.use("/api/v1", createAdminDataRetentionRouter());
 
-  // Inspector job routes
-  app.use('/api/v1/inspector', authenticateToken, createInspectorJobsRouter())
-  app.use('/api/v1/admin/inspector', authenticateToken, createAdminInspectorJobsRouter())
+  // Inspector job routes — gated by INSPECTOR_DASHBOARD_ENABLED flag
+  app.use('/api/v1/inspector', authenticateToken, requireFlag('INSPECTOR_DASHBOARD_ENABLED'), createInspectorJobsRouter())
+  app.use('/api/v1/admin/inspector', authenticateToken, requireFlag('INSPECTOR_DASHBOARD_ENABLED'), createAdminInspectorJobsRouter())
 
   // Rent guarantee insurance routes
   const rentGuaranteeProvider = createRentGuaranteeProviderFromEnv(process.env.RENT_GUARANTEE_PROVIDER)
