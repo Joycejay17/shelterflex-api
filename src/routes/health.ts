@@ -52,6 +52,7 @@ export function createHealthRouter(adapter: SorobanAdapter): Router {
       uptime: uptimeSeconds,
       uptimeSeconds,
       version: env.VERSION,
+      apiVersion: "v1",
       dbLatencyMs,
       memoryUsageMb: Math.round(memory.heapUsed / 1024 / 1024),
       requestId: req.requestId,

@@ -5,6 +5,7 @@ import type { RentGuaranteeProvider, InsurancePolicy } from '../services/insuran
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { auditLog, extractAuditContext } from '../utils/auditLogger.js'
+import { idempotency } from '../middleware/idempotency.js'
 
 interface PolicyRow {
   id: string
@@ -64,7 +65,7 @@ export function createRentGuaranteeRouter(provider: RentGuaranteeProvider): Rout
     }
   })
 
-  router.post('/deals/:dealId/insurance/purchase', authenticateToken, async (req: AuthenticatedRequest, res, next) => {
+  router.post('/deals/:dealId/insurance/purchase', authenticateToken, idempotency(), async (req: AuthenticatedRequest, res, next) => {
     try {
       assertLandlordOrAdmin(req)
       const { dealId } = req.params

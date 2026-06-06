@@ -56,6 +56,8 @@ export enum ErrorCode {
   // Auth
   UNAUTHORIZED = "UNAUTHORIZED",
   FORBIDDEN = "FORBIDDEN",
+  TOKEN_EXPIRED = "TOKEN_EXPIRED",
+  INVALID_TOKEN = "INVALID_TOKEN",
 
   // Rate limiting
   TOO_MANY_REQUESTS = "TOO_MANY_REQUESTS",
@@ -86,6 +88,10 @@ export enum ErrorCode {
 
   // Idempotency
   DUPLICATE_REQUEST = "DUPLICATE_REQUEST",
+  REQUEST_IN_FLIGHT = "REQUEST_IN_FLIGHT",
+
+  // Credit score
+  NO_SCORE_YET = "NO_SCORE_YET",
 
   // Deprecation
   API_VERSION_DEPRECATED = "API_VERSION_DEPRECATED",
@@ -99,6 +105,8 @@ export const ERROR_CLASSIFICATION: Record<string, ErrorClassification> = {
   [ErrorCode.VALIDATION_ERROR]: "permanent",
   [ErrorCode.UNAUTHORIZED]: "permanent",
   [ErrorCode.FORBIDDEN]: "permanent",
+  [ErrorCode.TOKEN_EXPIRED]: "permanent",
+  [ErrorCode.INVALID_TOKEN]: "permanent",
   [ErrorCode.TOO_MANY_REQUESTS]: "transient",
   [ErrorCode.NOT_FOUND]: "permanent",
   [ErrorCode.CONFLICT]: "permanent",
@@ -111,6 +119,8 @@ export const ERROR_CLASSIFICATION: Record<string, ErrorClassification> = {
   [ErrorCode.ACCOUNT_FROZEN]: "permanent",
   [ErrorCode.SERVICE_UNAVAILABLE]: "transient",
   [ErrorCode.DUPLICATE_REQUEST]: "permanent",
+  [ErrorCode.REQUEST_IN_FLIGHT]: "transient",
+  [ErrorCode.NO_SCORE_YET]: "permanent",
   [ErrorCode.API_VERSION_DEPRECATED]: "permanent",
 };
 

@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express'
+import * as Sentry from '@sentry/node'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { logger } from '../utils/logger.js'
@@ -34,7 +35,19 @@ export async function authenticateToken(
       return
     }
 
-    const session = await sessionStore.getByToken(token)
+    const tokenState = await sessionStore.getTokenState(token)
+    if (tokenState === 'expired') {
+      logger.warn('Unauthorized access attempt - expired token', {
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+        requestId: req.requestId,
+        path: req.path,
+      })
+      next(new AppError(ErrorCode.TOKEN_EXPIRED, 401, 'Access token expired'))
+      return
+    }
+
+    const session = tokenState === 'active' ? await sessionStore.getByToken(token) : undefined
     if (!session) {
       logger.warn('Unauthorized access attempt - invalid or expired token', {
         ip: req.ip,
@@ -43,7 +56,7 @@ export async function authenticateToken(
         path: req.path,
         token: token.substring(0, 8) + '...',
       })
-      next(new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid or expired token'))
+      next(new AppError(ErrorCode.INVALID_TOKEN, 401, 'Invalid token'))
       return
     }
 
@@ -67,6 +80,15 @@ export async function authenticateToken(
       role: user.role,
       displayCurrency: user.displayCurrency,
     }
+    
+    // Attach userId and role to Sentry scope for error tracking
+    if (process.env.SENTRY_DSN_BACKEND && process.env.NODE_ENV !== "test") {
+      Sentry.setUser({
+        id: user.id,
+        role: user.role,
+      });
+    }
+    
     logger.info('User authenticated successfully', {
       userId: user.id,
       email: user.email,

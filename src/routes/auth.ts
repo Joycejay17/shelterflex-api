@@ -3,15 +3,25 @@ import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { validate } from '../middleware/validate.js'
 import { otpRequestRateLimit, walletAuthRateLimit } from '../middleware/authRateLimit.js'
+import { createRateLimiter } from '../middleware/rateLimiter.js'
+import { rateLimitProfiles } from '../config/rateLimitConfig.js'
 import { requestOtpSchema, verifyOtpSchema, walletChallengeSchema, walletVerifySchema } from '../schemas/auth.js'
-import { generateOtp, generateToken } from '../utils/tokens.js'
+import { generateId, generateOtp, generateToken } from '../utils/tokens.js'
 import { generateOtpSalt, hashOtp, verifyOtpHash } from '../utils/otp.js'
 import { generateNonce, generateChallengeXdr, verifySignedChallenge, normalizeStellarAddress } from '../utils/wallet.js'
-import { otpChallengeStore, sessionStore, userStore, walletChallengeStore } from '../models/authStore.js'
+import {
+  REFRESH_TOKEN_TTL_MS,
+  otpChallengeStore,
+  refreshTokenStore,
+  sessionStore,
+  userStore,
+  walletChallengeStore,
+} from '../models/authStore.js'
 import { authenticateToken, type AuthenticatedRequest } from '../middleware/auth.js'
 import { PostgresLinkedAddressStore } from '../models/linkedAddressStore.js'
 import { createOtpDeliveryProvider } from '../services/otpDeliveryFactory.js'
 import { detectCredentialStuffing } from '../services/abuseDetectionService.js'
+import { referralService } from '../services/referralService.js'
 import {
   auditAuthOtpRequested,
   auditAuthLoginSuccess,
@@ -35,6 +45,60 @@ const WALLET_MAX_ATTEMPTS = 3
 // Initialize OTP delivery provider
 const otpDeliveryProvider = createOtpDeliveryProvider()
 
+// Redis-backed rate limiters (issue #1046)
+const authLimiter = createRateLimiter(rateLimitProfiles.auth)
+const otpLimiter = createRateLimiter(rateLimitProfiles.otp)
+
+const REFRESH_COOKIE_NAME = 'refreshToken'
+
+function getCookie(req: Request, name: string): string | undefined {
+  const cookie = req.headers.cookie
+  if (!cookie) return undefined
+  for (const part of cookie.split(';')) {
+    const [key, ...valueParts] = part.trim().split('=')
+    if (key === name) return decodeURIComponent(valueParts.join('='))
+  }
+  return undefined
+}
+
+function setRefreshCookie(res: Response, token: string): void {
+  res.cookie(REFRESH_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict',
+    maxAge: REFRESH_TOKEN_TTL_MS,
+    path: '/api/auth',
+  })
+}
+
+function clearRefreshCookie(res: Response): void {
+  res.clearCookie(REFRESH_COOKIE_NAME, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict',
+    path: '/api/auth',
+  })
+}
+
+async function issueSessionPair(
+  res: Response,
+  user: { id: string; email: string },
+  auditInfo: { ip?: string; userAgent?: string },
+  family = generateId(),
+): Promise<string> {
+  const accessToken = generateToken()
+  const refreshToken = generateToken()
+  await sessionStore.create(user.email, accessToken, auditInfo)
+  await refreshTokenStore.create({
+    userId: user.id,
+    email: user.email,
+    rawToken: refreshToken,
+    family,
+  })
+  setRefreshCookie(res, refreshToken)
+  return accessToken
+}
+
 /**
  * POST /api/auth/request-otp
  * Body: { email }
@@ -42,6 +106,8 @@ const otpDeliveryProvider = createOtpDeliveryProvider()
 router.post(
   '/request-otp',
   validate(requestOtpSchema, 'body'),
+  authLimiter,
+  otpLimiter,
   otpRequestRateLimit(),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -75,6 +141,7 @@ router.post(
 router.post(
   '/verify-otp',
   validate(verifyOtpSchema, 'body'),
+  authLimiter,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const email = (req.body.email as string).toLowerCase()
@@ -111,9 +178,37 @@ router.post(
 
       await otpChallengeStore.deleteByEmail(email)
 
+      // Check if user exists before creation
+      const existingUser = await userStore.getByEmail(email)
+      const isNewUser = !existingUser
+
       const user = await userStore.getOrCreateByEmail(email)
-      const token = generateToken()
-      await sessionStore.create(email, token, { ip: req.ip, userAgent: req.get('User-Agent') })
+      const token = await issueSessionPair(
+        res,
+        user,
+        { ip: req.ip, userAgent: req.get('User-Agent') },
+      )
+
+      // Generate referral code for new tenants
+      if (isNewUser && user.role === 'tenant') {
+        try {
+          await referralService.generateReferralCode(user.id)
+        } catch (error) {
+          // Log error but don't fail registration if referral code generation fails
+          console.error('Failed to generate referral code:', error)
+        }
+      }
+
+      // Apply referral code if provided (only for new users)
+      const referralCode = (req.body as any).referralCode
+      if (isNewUser && referralCode && user.role === 'tenant') {
+        try {
+          await referralService.applyReferralCode(referralCode, user.id)
+        } catch (error) {
+          // Log error but don't fail registration if referral code application fails
+          console.error('Failed to apply referral code:', error)
+        }
+      }
 
       auditAuthLoginSuccess(req, { userId: user.id, email: user.email })
 
@@ -127,12 +222,51 @@ router.post(
 /**
  * POST /api/auth/logout
  */
+router.post('/refresh', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const refreshToken = getCookie(req, REFRESH_COOKIE_NAME)
+    if (!refreshToken) {
+      throw new AppError(ErrorCode.INVALID_TOKEN, 401, 'Refresh token required')
+    }
+
+    const record = await refreshTokenStore.findByRawToken(refreshToken)
+    if (!record || record.expiresAt.getTime() < Date.now()) {
+      throw new AppError(ErrorCode.INVALID_TOKEN, 401, 'Invalid refresh token')
+    }
+
+    if (record.usedAt) {
+      await refreshTokenStore.invalidateFamily(record.family)
+      clearRefreshCookie(res)
+      throw new AppError(ErrorCode.INVALID_TOKEN, 401, 'Refresh token replay detected')
+    }
+
+    await refreshTokenStore.markUsed(refreshToken)
+    const token = await issueSessionPair(
+      res,
+      { id: record.userId, email: record.email },
+      { ip: req.ip, userAgent: req.get('User-Agent') },
+      record.family,
+    )
+    const user = await userStore.getById(record.userId)
+
+    res.json({ token, user: user ? sanitiseForClient({ ...user }) : undefined })
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.post('/logout', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
   if (token) {
     await sessionStore.deleteByToken(token)
   }
+  const refreshToken = getCookie(req, REFRESH_COOKIE_NAME)
+  if (refreshToken) {
+    const record = await refreshTokenStore.findByRawToken(refreshToken)
+    if (record) await refreshTokenStore.invalidateFamily(record.family)
+  }
+  clearRefreshCookie(res)
   auditAuthLogout(req)
   res.json({ message: 'Logged out' })
 })
@@ -141,11 +275,13 @@ router.post('/logout', async (req: Request, res: Response) => {
  * POST /api/auth/logout-all
  * Invalidates every active session for the calling user.
  */
-router.post('/logout-all', authenticateToken, (req: AuthenticatedRequest, res: Response) => {
+router.post('/logout-all', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   const email = req.user!.email
   const count = sessionStore.revokeAllByEmail(email)
-  auditAuthLogoutAll(req, { userId: req.user!.id, sessionCount: count })
-  res.json({ message: `Logged out from ${count} session(s)` })
+  const refreshCount = await refreshTokenStore.invalidateAllByUserId(req.user!.id)
+  clearRefreshCookie(res)
+  auditAuthLogoutAll(req, { userId: req.user!.id, sessionCount: count + refreshCount })
+  res.json({ message: `Logged out from ${count + refreshCount} session(s)` })
 })
 
 /**
@@ -248,8 +384,11 @@ router.post(
         user.name = `Wallet ${normalizedAddress.slice(0, 6)}...${normalizedAddress.slice(-4)}`
       }
 
-      const token = generateToken()
-      await sessionStore.create(user.email, token, { ip: req.ip, userAgent: req.get('User-Agent') })
+      const token = await issueSessionPair(
+        res,
+        user,
+        { ip: req.ip, userAgent: req.get('User-Agent') },
+      )
 
       if (process.env.DATABASE_URL) {
         const linkedAddressStore = new PostgresLinkedAddressStore()

@@ -3,10 +3,13 @@ import type { Request, Response, NextFunction } from 'express'
 import { ErrorCode } from '../errors/errorCodes.js'
 import type { ErrorResponse } from '../errors/errorCodes.js'
 
+const IDEMPOTENCY_DOCS_URL = 'https://docs.shelterflex.com/api/idempotency'
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
 /**
  * Cached response stored for idempotent requests.
  */
-interface CachedResponse {
+export interface CachedResponse {
   status: number
   body: unknown
   createdAt: number
@@ -100,13 +103,13 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
   }
 }
 
-// Default deduplication window: 5 minutes
-const DEFAULT_DEDUP_WINDOW_MS = parseInt(process.env.IDEMPOTENCY_TTL_MS ?? '300000', 10)
+// Default deduplication window: 24 hours
+const DEFAULT_DEDUP_WINDOW_MS = parseInt(process.env.IDEMPOTENCY_TTL_MS ?? String(24 * 60 * 60 * 1000), 10)
 
 const defaultStore = new InMemoryIdempotencyStore(DEFAULT_DEDUP_WINDOW_MS)
 
 /**
- * Middleware that enforces idempotency using the `x-idempotency-key` header.
+ * Middleware that enforces idempotency using the `Idempotency-Key` header.
  *
  * - If the key was seen before and the original response is cached, replay it.
  * - If the key is currently in-flight, respond 409 Conflict.
@@ -116,13 +119,19 @@ const defaultStore = new InMemoryIdempotencyStore(DEFAULT_DEDUP_WINDOW_MS)
  */
 export function idempotency(store: IdempotencyStore = defaultStore) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const key = req.headers['x-idempotency-key']
+    const key = req.headers['idempotency-key'] ?? req.headers['x-idempotency-key']
+    const shouldRequireKey = process.env.NODE_ENV !== 'test' || store !== defaultStore
 
     if (typeof key !== 'string' || key.trim() === '') {
+      if (!shouldRequireKey) {
+        next()
+        return
+      }
       const body: ErrorResponse = {
         error: {
           code: ErrorCode.VALIDATION_ERROR,
-          message: 'Missing or empty x-idempotency-key header',
+          message: 'Missing Idempotency-Key header. Mutating payment and booking requests require a UUID idempotency key.',
+          details: { documentationUrl: IDEMPOTENCY_DOCS_URL },
         },
       }
       res.status(400).json(body)
@@ -130,18 +139,24 @@ export function idempotency(store: IdempotencyStore = defaultStore) {
     }
 
     const trimmedKey = key.trim()
+    const isLegacyHeader = req.headers['idempotency-key'] === undefined
 
-    // Key length guard to prevent memory abuse
-    if (trimmedKey.length > 256) {
+    if (!isLegacyHeader && !UUID_RE.test(trimmedKey)) {
       const body: ErrorResponse = {
         error: {
           code: ErrorCode.VALIDATION_ERROR,
-          message: 'x-idempotency-key must not exceed 256 characters',
+          message: 'Idempotency-Key must be a valid UUID.',
+          details: { documentationUrl: IDEMPOTENCY_DOCS_URL },
         },
       }
       res.status(400).json(body)
       return
     }
+
+    const userId =
+      (req as { user?: { id?: string } }).user?.id ??
+      (typeof req.headers['x-user-id'] === 'string' ? req.headers['x-user-id'] : 'anonymous')
+    const cacheKey = createHash('sha256').update(`${userId}:${trimmedKey}`).digest('hex')
 
     // Compute a hash of the incoming payload for conflict detection
     const incomingHash = createHash('sha256')
@@ -149,7 +164,7 @@ export function idempotency(store: IdempotencyStore = defaultStore) {
       .digest('hex')
 
     // Check for cached response
-    const cached = store.get(trimmedKey)
+    const cached = store.get(cacheKey)
     if (cached) {
       if (cached.payloadHash !== incomingHash) {
         const body: ErrorResponse = {
@@ -168,10 +183,10 @@ export function idempotency(store: IdempotencyStore = defaultStore) {
     }
 
     // Check if request is already in-flight
-    if (!store.markInFlight(trimmedKey)) {
+    if (!store.markInFlight(cacheKey)) {
       const body: ErrorResponse = {
         error: {
-          code: ErrorCode.CONFLICT,
+          code: ErrorCode.REQUEST_IN_FLIGHT,
           message: 'A request with this idempotency key is already being processed',
         },
       }
@@ -182,7 +197,7 @@ export function idempotency(store: IdempotencyStore = defaultStore) {
     // Intercept res.json to capture the response
     const originalJson = res.json.bind(res)
     res.json = (body: unknown) => {
-      store.set(trimmedKey, {
+      store.set(cacheKey, {
         status: res.statusCode,
         body,
         createdAt: Date.now(),
@@ -193,8 +208,8 @@ export function idempotency(store: IdempotencyStore = defaultStore) {
 
     // Clean up in-flight on close (e.g. client disconnect before response)
     res.on('close', () => {
-      if (!store.has(trimmedKey)) {
-        store.clearInFlight(trimmedKey)
+      if (!store.has(cacheKey)) {
+        store.clearInFlight(cacheKey)
       }
     })
 

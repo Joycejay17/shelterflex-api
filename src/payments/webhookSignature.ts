@@ -8,7 +8,7 @@ import { getValidSecretVersions } from '../services/rotatingSecretProvider.js'
 declare global {
   namespace Express {
     interface Request {
-      rawBody?: string
+      rawBody?: string | Buffer
     }
   }
 }
