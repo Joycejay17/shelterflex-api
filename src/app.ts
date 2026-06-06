@@ -85,6 +85,7 @@ import { sanitizeRequest, detectMaliciousPatterns } from "./middleware/sanitizat
 import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js"
 import { createWhistleblowerApplicationsRouter } from "./routes/whistleblowerApplications.js"
 import { createAdminWhistleblowerApplicationsRouter } from "./routes/adminWhistleblowerApplications.js"
+import { createAdminAnalyticsRouter } from "./routes/adminAnalytics.js"
 import { createConversionProviderFromEnv } from "./services/conversionProviderFactory.js"
 import { ConversionRateService } from "./services/conversionRateService.js"
 import { createConversionRouter } from "./routes/conversion.js"
@@ -646,9 +647,6 @@ export function createApp() {
 
   app.use("/api/v1/auth", authRouter);
 
-  app.use("/", publicRouter);
-  app.use("/api/v1", createBalanceRouter(sorobanAdapter));
-  app.use("/api/v1", createReceiptsRouter(receiptRepo));
   app.use("/api/v1/support", createSupportRouter());
   app.use("/api/v1/property-issue-reports", createPropertyIssueReportsRouter());
 
@@ -803,6 +801,7 @@ export function createApp() {
   app.use("/api/v1/whistleblower-applications", createWhistleblowerApplicationsRouter());
   app.use("/api/v1/admin/whistleblower-applications", createAdminWhistleblowerApplicationsRouter());
   app.use("/api/v1/admin/underwriting", createAdminUnderwritingRouter());
+  app.use("/api/v1/admin/analytics", createAdminAnalyticsRouter());
   app.use("/api/v1/admin", createAdminTenantCreditScoreRouter());
   app.use("/api/v1/admin", createSettlementAdminRouter());
   app.use(
@@ -817,7 +816,6 @@ export function createApp() {
       receiptRepo,
       conversionRateService,
     ),
-
   );
   app.use("/api/v1/webhooks", createWebhooksRouter(ngnWalletService));
   app.use("/api/v1/deposits", createDepositsRouter(conversionService));
