@@ -647,9 +647,6 @@ export function createApp() {
 
   app.use("/api/v1/auth", authRouter);
 
-  app.use("/", publicRouter);
-  app.use("/api/v1", createBalanceRouter(sorobanAdapter));
-  app.use("/api/v1", createReceiptsRouter(receiptRepo));
   app.use("/api/v1/support", createSupportRouter());
   app.use("/api/v1/property-issue-reports", createPropertyIssueReportsRouter());
 
