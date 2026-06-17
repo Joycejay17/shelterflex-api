@@ -95,6 +95,9 @@ export enum ErrorCode {
 
   // Deprecation
   API_VERSION_DEPRECATED = "API_VERSION_DEPRECATED",
+
+  // Inspector bond
+  INSPECTOR_NOT_BONDED = "INSPECTOR_NOT_BONDED",
 }
 
 /**
