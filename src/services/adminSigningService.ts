@@ -6,7 +6,7 @@ import { ConfigurationError, TransactionError } from '../soroban/errors.js'
  * Admin operations that require admin signing.
  * These operations have elevated privileges and should be carefully controlled.
  */
-export type AdminOperation = 
+export type AdminOperation =
   | 'pause'
   | 'unpause'
   | 'set_operator'
@@ -16,6 +16,8 @@ export type AdminOperation =
   | 'activate_deal'
   | 'complete_deal'
   | 'default_deal'
+  | 'stake_bond'
+  | 'unstake_bond'
 
 /**
  * Parameters for admin operations
@@ -108,6 +110,8 @@ export class AdminSigningService {
       'activate_deal',
       'complete_deal',
       'default_deal',
+      'stake_bond',
+      'unstake_bond',
     ]
     if (!allowedOperations.includes(params.operation)) {
       throw new ConfigurationError(

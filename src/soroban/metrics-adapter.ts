@@ -101,6 +101,22 @@ export class MetricsSorobanAdapter implements SorobanAdapter {
     );
   }
 
+  async stakeBond(inspectorId: string, amount: bigint): Promise<void> {
+    return this.trackCall('stakeBond', () => this.wrapped.stakeBond(inspectorId, amount))
+  }
+
+  async unstakeBond(inspectorId: string): Promise<void> {
+    return this.trackCall('unstakeBond', () => this.wrapped.unstakeBond(inspectorId))
+  }
+
+  async isBonded(inspectorId: string): Promise<boolean> {
+    return this.trackCall('isBonded', () => this.wrapped.isBonded(inspectorId))
+  }
+
+  async getBond(inspectorId: string): Promise<{ isBonded: boolean; amount: bigint }> {
+    return this.trackCall('getBond', () => this.wrapped.getBond(inspectorId))
+  }
+
   /**
    * Helper method to track RPC calls with metrics
    */

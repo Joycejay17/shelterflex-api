@@ -78,9 +78,6 @@ import { processWebhookDeliveryJob } from "./services/webhookDeliveryService.js"
 import { kycStatusEmitter } from "./services/index.js"
 import { WebhookEventType } from "./models/webhookSubscription.js"
 import { enqueueDelivery } from "./services/webhookDeliveryService.js"
-
-
-
 import { sanitizeRequest, detectMaliciousPatterns } from "./middleware/sanitization.js"
 import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js"
 import { createWhistleblowerApplicationsRouter } from "./routes/whistleblowerApplications.js"
@@ -97,6 +94,7 @@ import { createAdminAuditLogsRouter } from "./routes/adminAuditLogs.js"
 import { createAdminUnderwritingRouter } from "./routes/adminUnderwriting.js"
 import { PostgresRewardsDataLayer } from "./services/postgres-rewards-data-layer.js"
 import { createReceiptRepository, createTimelockRepository } from "./indexer/repositoryBootstrap.js"
+import { createInspectorJobsRouter } from "./routes/inspectorJobs.js"
 import { createLandlordPropertiesRouter } from "./routes/landlordProperties.js";
 import { createLandlordRouter } from "./routes/landlord.js";
 import { createAdminLandlordVerificationRouter, createLandlordVerificationRouter } from "./routes/landlordVerification.js";
@@ -776,6 +774,7 @@ export function createApp() {
   app.use("/api/v1/admin/risk", createAdminRiskRouter(ngnWalletService));
   app.use("/api/v1/admin", createAdminWithdrawalsRouter(ngnWalletService));
   app.use("/api/v1/payments", createPaymentsRouter(sorobanAdapter));
+  app.use("/api/v1/inspector", createInspectorJobsRouter(sorobanAdapter));
   app.use(
     "/api/v1/admin",
     createAdminRouter(

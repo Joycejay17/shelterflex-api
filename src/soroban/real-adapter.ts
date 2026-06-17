@@ -1186,4 +1186,60 @@ export class RealSorobanAdapter implements SorobanAdapter {
       server: this.server,
     })
   }
+
+  async stakeBond(inspectorId: string, amount: bigint): Promise<void> {
+    if (!this.config.inspectorBondId) {
+      throw new ConfigurationError('SOROBAN_INSPECTOR_BOND_ID not configured')
+    }
+    await this.adminSigningService.executeAdminOperation({
+      contractId: this.config.inspectorBondId,
+      operation: 'stake_bond',
+      args: [
+        nativeToScVal(Address.fromString(inspectorId)),
+        nativeToScVal(amount, { type: 'i128' }),
+      ],
+      networkPassphrase: this.config.networkPassphrase,
+      adminSecret: this.config.adminSecret!,
+      server: this.server,
+    })
+  }
+
+  async unstakeBond(inspectorId: string): Promise<void> {
+    if (!this.config.inspectorBondId) {
+      throw new ConfigurationError('SOROBAN_INSPECTOR_BOND_ID not configured')
+    }
+    await this.adminSigningService.executeAdminOperation({
+      contractId: this.config.inspectorBondId,
+      operation: 'unstake_bond',
+      args: [nativeToScVal(Address.fromString(inspectorId))],
+      networkPassphrase: this.config.networkPassphrase,
+      adminSecret: this.config.adminSecret!,
+      server: this.server,
+    })
+  }
+
+  async isBonded(inspectorId: string): Promise<boolean> {
+    if (!this.config.inspectorBondId) {
+      throw new ConfigurationError('SOROBAN_INSPECTOR_BOND_ID not configured')
+    }
+    const retval = await this.invokeReadOnly(
+      this.config.inspectorBondId,
+      'is_bonded',
+      [nativeToScVal(Address.fromString(inspectorId))],
+    )
+    return Boolean(scValToNative(retval))
+  }
+
+  async getBond(inspectorId: string): Promise<{ isBonded: boolean; amount: bigint }> {
+    if (!this.config.inspectorBondId) {
+      throw new ConfigurationError('SOROBAN_INSPECTOR_BOND_ID not configured')
+    }
+    const retval = await this.invokeReadOnly(
+      this.config.inspectorBondId,
+      'get_bond',
+      [nativeToScVal(Address.fromString(inspectorId))],
+    )
+    const native = scValToNative(retval)
+    return { isBonded: Boolean(native.is_bonded), amount: BigInt(native.amount ?? 0) }
+  }
 }
