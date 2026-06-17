@@ -856,6 +856,7 @@ export function createApp() {
   app.use("/api/kyc", createKycRouter());
   app.use("/api/admin/abuse", createAbuseRouter());
   app.use("/api/tenant/credit-scoring", createTenantCreditScoringRouter());
+  app.use("/api/tenant/credit-score", createCreditScoreRouter());
   app.use("/api/tenant/onboarding", createTenantOnboardingRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
   app.use("/api/listings", createListingsRouter());
