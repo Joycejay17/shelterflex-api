@@ -81,7 +81,7 @@ describe('publicTenantRatingRateLimit', () => {
     expect(next).toHaveBeenCalledWith(expect.any(AppError))
     const error = (next as any).mock.calls[0][0] as AppError
     expect(error.code).toBe(ErrorCode.TOO_MANY_REQUESTS)
-    expect(error.statusCode).toBe(429)
+    expect(error.status).toBe(429)
     expect(error.message).toBe('Too many requests. Please try again later.')
     
     expect(res.setHeader).toHaveBeenCalledWith('X-RateLimit-Limit', '20')
