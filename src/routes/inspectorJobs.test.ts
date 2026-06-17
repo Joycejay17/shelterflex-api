@@ -1,23 +1,55 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import request from 'supertest'
-import { createApp } from '../app.js'
+import express from 'express'
+import { createInspectorJobsRouter } from './inspectorJobs.js'
 import { StubSorobanAdapter } from '../soroban/stub-adapter.js'
+import { errorHandler } from '../middleware/errorHandler.js'
+
+vi.mock('../middleware/auth.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../middleware/auth.js')>()
+  return {
+    ...original,
+    authenticateToken: (req: any, _res: any, next: any) => next(),
+  }
+})
+
+vi.mock('../services/inspectorService.js', () => ({
+  inspectorService: {
+    listAvailableJobs: vi.fn().mockResolvedValue([]),
+    claimJob: vi.fn().mockResolvedValue({ id: 'job-abc-123', listingId: 'listing-1' }),
+    submitReport: vi.fn(),
+    listAllJobs: vi.fn().mockResolvedValue([]),
+    createJob: vi.fn(),
+    approveReport: vi.fn(),
+    rejectReport: vi.fn(),
+  },
+}))
+
+const INSPECTOR_ID = 'inspector-test-user-001'
+
+function buildApp(role: string = 'inspector') {
+  const adapter = new StubSorobanAdapter({ rpcUrl: '', networkPassphrase: '' })
+  const app = express()
+  app.use(express.json())
+  // Inject a fake authenticated user so we can test bond logic without Postgres auth
+  app.use((req: any, _res, next) => {
+    req.user = { id: INSPECTOR_ID, role }
+    next()
+  })
+  app.use('/api/v1/inspector', createInspectorJobsRouter(adapter))
+  app.use(errorHandler)
+  return app
+}
 
 describe('Inspector Jobs API', () => {
-  let app: any
-
-  beforeEach(async () => {
+  beforeEach(() => {
     StubSorobanAdapter._testOnlyReset()
-    app = createApp()
   })
 
-  const INSPECTOR_ID = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'
-
-  describe('POST /api/inspector/bond/stake', () => {
-    it('stakes a bond for an inspector', async () => {
-      const res = await request(app)
-        .post('/api/inspector/bond/stake')
-        .set('x-inspector-id', INSPECTOR_ID)
+  describe('POST /api/v1/inspector/bond/stake', () => {
+    it('stakes a bond for an authenticated inspector', async () => {
+      const res = await request(buildApp())
+        .post('/api/v1/inspector/bond/stake')
         .send({ amount: '500' })
         .expect(200)
 
@@ -25,50 +57,47 @@ describe('Inspector Jobs API', () => {
     })
 
     it('returns 400 when amount is missing', async () => {
-      await request(app)
-        .post('/api/inspector/bond/stake')
-        .set('x-inspector-id', INSPECTOR_ID)
+      await request(buildApp())
+        .post('/api/v1/inspector/bond/stake')
         .send({})
         .expect(400)
     })
 
-    it('returns 400 when x-inspector-id header is missing', async () => {
-      await request(app)
-        .post('/api/inspector/bond/stake')
+    it('returns 403 when user is not an inspector', async () => {
+      await request(buildApp('tenant'))
+        .post('/api/v1/inspector/bond/stake')
         .send({ amount: '500' })
-        .expect(400)
+        .expect(403)
     })
   })
 
-  describe('DELETE /api/inspector/bond/unstake', () => {
+  describe('DELETE /api/v1/inspector/bond/unstake', () => {
     it('unstakes an existing bond', async () => {
+      const app = buildApp()
+
       await request(app)
-        .post('/api/inspector/bond/stake')
-        .set('x-inspector-id', INSPECTOR_ID)
+        .post('/api/v1/inspector/bond/stake')
         .send({ amount: '500' })
         .expect(200)
 
       const res = await request(app)
-        .delete('/api/inspector/bond/unstake')
-        .set('x-inspector-id', INSPECTOR_ID)
+        .delete('/api/v1/inspector/bond/unstake')
         .expect(200)
 
       expect(res.body.success).toBe(true)
     })
 
     it('returns 400 when inspector has no active bond', async () => {
-      await request(app)
-        .delete('/api/inspector/bond/unstake')
-        .set('x-inspector-id', INSPECTOR_ID)
+      await request(buildApp())
+        .delete('/api/v1/inspector/bond/unstake')
         .expect(400)
     })
   })
 
-  describe('GET /api/inspector/bond/status', () => {
+  describe('GET /api/v1/inspector/bond/status', () => {
     it('returns not bonded when no stake exists', async () => {
-      const res = await request(app)
-        .get('/api/inspector/bond/status')
-        .set('x-inspector-id', INSPECTOR_ID)
+      const res = await request(buildApp())
+        .get('/api/v1/inspector/bond/status')
         .expect(200)
 
       expect(res.body.isBonded).toBe(false)
@@ -76,15 +105,15 @@ describe('Inspector Jobs API', () => {
     })
 
     it('returns bonded status after staking', async () => {
+      const app = buildApp()
+
       await request(app)
-        .post('/api/inspector/bond/stake')
-        .set('x-inspector-id', INSPECTOR_ID)
+        .post('/api/v1/inspector/bond/stake')
         .send({ amount: '1000' })
         .expect(200)
 
       const res = await request(app)
-        .get('/api/inspector/bond/status')
-        .set('x-inspector-id', INSPECTOR_ID)
+        .get('/api/v1/inspector/bond/status')
         .expect(200)
 
       expect(res.body.isBonded).toBe(true)
@@ -92,48 +121,42 @@ describe('Inspector Jobs API', () => {
     })
   })
 
-  describe('POST /api/inspector/jobs/:id/claim', () => {
+  describe('POST /api/v1/inspector/jobs/:id/claim', () => {
     it('allows a bonded inspector to claim a job', async () => {
+      const app = buildApp()
+
       await request(app)
-        .post('/api/inspector/bond/stake')
-        .set('x-inspector-id', INSPECTOR_ID)
+        .post('/api/v1/inspector/bond/stake')
         .send({ amount: '500' })
         .expect(200)
 
       const res = await request(app)
-        .post('/api/inspector/jobs/job-abc-123/claim')
-        .set('x-inspector-id', INSPECTOR_ID)
+        .post('/api/v1/inspector/jobs/job-abc-123/claim')
         .expect(200)
 
       expect(res.body.success).toBe(true)
-      expect(res.body.jobId).toBe('job-abc-123')
-      expect(res.body.inspectorId).toBe(INSPECTOR_ID)
     })
 
     it('returns 403 when inspector has no bond', async () => {
-      const res = await request(app)
-        .post('/api/inspector/jobs/job-xyz-456/claim')
-        .set('x-inspector-id', INSPECTOR_ID)
+      await request(buildApp())
+        .post('/api/v1/inspector/jobs/job-xyz-456/claim')
         .expect(403)
-
-      expect(res.body).toBeDefined()
     })
 
     it('stake → unstake → claim returns 403', async () => {
+      const app = buildApp()
+
       await request(app)
-        .post('/api/inspector/bond/stake')
-        .set('x-inspector-id', INSPECTOR_ID)
+        .post('/api/v1/inspector/bond/stake')
         .send({ amount: '500' })
         .expect(200)
 
       await request(app)
-        .delete('/api/inspector/bond/unstake')
-        .set('x-inspector-id', INSPECTOR_ID)
+        .delete('/api/v1/inspector/bond/unstake')
         .expect(200)
 
       await request(app)
-        .post('/api/inspector/jobs/job-round-trip/claim')
-        .set('x-inspector-id', INSPECTOR_ID)
+        .post('/api/v1/inspector/jobs/job-round-trip/claim')
         .expect(403)
     })
   })

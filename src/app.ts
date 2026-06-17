@@ -94,7 +94,6 @@ import { createAdminAuditLogsRouter } from "./routes/adminAuditLogs.js"
 import { createAdminUnderwritingRouter } from "./routes/adminUnderwriting.js"
 import { PostgresRewardsDataLayer } from "./services/postgres-rewards-data-layer.js"
 import { createReceiptRepository, createTimelockRepository } from "./indexer/repositoryBootstrap.js"
-import { createInspectorJobsRouter } from "./routes/inspectorJobs.js"
 import { createLandlordPropertiesRouter } from "./routes/landlordProperties.js";
 import { createLandlordRouter } from "./routes/landlord.js";
 import { createAdminLandlordVerificationRouter, createLandlordVerificationRouter } from "./routes/landlordVerification.js";
@@ -774,7 +773,6 @@ export function createApp() {
   app.use("/api/v1/admin/risk", createAdminRiskRouter(ngnWalletService));
   app.use("/api/v1/admin", createAdminWithdrawalsRouter(ngnWalletService));
   app.use("/api/v1/payments", createPaymentsRouter(sorobanAdapter));
-  app.use("/api/v1/inspector", createInspectorJobsRouter(sorobanAdapter));
   app.use(
     "/api/v1/admin",
     createAdminRouter(
@@ -870,7 +868,7 @@ export function createApp() {
   app.use("/api/v1", createAdminDataRetentionRouter());
 
   // Inspector job routes — gated by INSPECTOR_DASHBOARD_ENABLED flag
-  app.use('/api/v1/inspector', authenticateToken, requireFlag('INSPECTOR_DASHBOARD_ENABLED'), createInspectorJobsRouter())
+  app.use('/api/v1/inspector', authenticateToken, requireFlag('INSPECTOR_DASHBOARD_ENABLED'), createInspectorJobsRouter(sorobanAdapter))
   app.use('/api/v1/admin/inspector', authenticateToken, requireFlag('INSPECTOR_DASHBOARD_ENABLED'), createAdminInspectorJobsRouter())
 
   // Rent guarantee insurance routes
