@@ -8,5 +8,7 @@ export {
   sorobanError,
   internalError,
   serviceUnavailable,
+  chainUnavailable,
 } from './factories.js'
+export { isChainUnavailableError } from './chainUnavailable.js'
 export { formatZodIssues } from './utils.js'

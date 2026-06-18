@@ -13,10 +13,57 @@ export class TestSorobanAdapter extends StubSorobanAdapter {
   private recordedReceipts: RecordReceiptParams[] = []
   private shouldFailCount: number = 0
   private shouldSimulateDuplicate: boolean = false
+  private rpcTimeoutRemaining: number = 0
 
   constructor(config: SorobanConfig) {
     super(config)
     logger.info('Soroban adapter: test mode')
+  }
+
+  /**
+   * Simulates Soroban RPC timeouts on the next N chain read/write calls.
+   */
+  simulateRpcTimeout(count = 1): void {
+    this.rpcTimeoutRemaining = count
+    logger.debug('TestSorobanAdapter: configured to simulate RPC timeout', { count })
+  }
+
+  private maybeSimulateRpcTimeout(): void {
+    if (this.rpcTimeoutRemaining > 0) {
+      this.rpcTimeoutRemaining--
+      throw new Error('RPC request timed out after 30000ms')
+    }
+  }
+
+  async getBalance(account: string): Promise<bigint> {
+    this.maybeSimulateRpcTimeout()
+    return super.getBalance(account)
+  }
+
+  async getStakedBalance(account: string): Promise<bigint> {
+    this.maybeSimulateRpcTimeout()
+    return super.getStakedBalance(account)
+  }
+
+  async getClaimableRewards(account: string): Promise<bigint> {
+    this.maybeSimulateRpcTimeout()
+    return super.getClaimableRewards(account)
+  }
+
+  async executeTimelock(
+    txHash: string,
+    target: string,
+    functionName: string,
+    args: any[],
+    eta: number,
+  ): Promise<string> {
+    this.maybeSimulateRpcTimeout()
+    return super.executeTimelock(txHash, target, functionName, args, eta)
+  }
+
+  async cancelTimelock(txHash: string): Promise<string> {
+    this.maybeSimulateRpcTimeout()
+    return super.cancelTimelock(txHash)
   }
 
   /**
@@ -95,6 +142,7 @@ export class TestSorobanAdapter extends StubSorobanAdapter {
     this.recordedReceipts = []
     this.shouldFailCount = 0
     this.shouldSimulateDuplicate = false
+    this.rpcTimeoutRemaining = 0
     logger.debug('TestSorobanAdapter: reset complete')
   }
 }

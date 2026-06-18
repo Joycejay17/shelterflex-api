@@ -32,6 +32,12 @@ describe('AppError classification', () => {
     expect(err.classification).toBe('transient')
     expect(err.retryable).toBe(true)
   })
+
+  it('marks chain unavailable as transient', () => {
+    const err = new AppError(ErrorCode.CHAIN_UNAVAILABLE, 503, 'chain down')
+    expect(err.classification).toBe('transient')
+    expect(err.retryable).toBe(true)
+  })
 })
 
 describe('classifyError', () => {

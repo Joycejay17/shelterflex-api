@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { SorobanAdapter } from '../soroban/adapter.js';
 import { TimelockRepository } from '../indexer/timelock-repository.js';
 import { logger } from '../utils/logger.js';
@@ -10,13 +10,13 @@ export function createAdminTimelockRouter(sorobanAdapter: SorobanAdapter, repo: 
    * GET /api/admin/timelock/transactions
    * Returns all tracked governance transactions
    */
-  router.get('/transactions', async (_req: Request, res: Response) => {
+  router.get('/transactions', async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const transactions = await repo.findAll();
       res.json({ transactions });
     } catch (err) {
       logger.error('Failed to fetch timelock transactions', { error: err instanceof Error ? err.message : String(err) });
-      res.status(500).json({ error: 'Internal server error' });
+      next(err);
     }
   });
 
@@ -24,7 +24,7 @@ export function createAdminTimelockRouter(sorobanAdapter: SorobanAdapter, repo: 
    * POST /api/admin/timelock/execute
    * Executes a queued transaction. Looks up details by txHash.
    */
-  router.post('/execute', async (req: Request, res: Response) => {
+  router.post('/execute', async (req: Request, res: Response, next: NextFunction) => {
     const { txHash } = req.body;
     
     if (!txHash) {
@@ -55,7 +55,7 @@ export function createAdminTimelockRouter(sorobanAdapter: SorobanAdapter, repo: 
       res.json({ success: true, stellarTxHash });
     } catch (err) {
       logger.error('Failed to execute timelock transaction', { txHash, error: err instanceof Error ? err.message : String(err) });
-      res.status(500).json({ error: 'Failed to execute transaction' });
+      next(err);
     }
   });
 
@@ -63,7 +63,7 @@ export function createAdminTimelockRouter(sorobanAdapter: SorobanAdapter, repo: 
    * POST /api/admin/timelock/cancel
    * Cancels a queued transaction
    */
-  router.post('/cancel', async (req: Request, res: Response) => {
+  router.post('/cancel', async (req: Request, res: Response, next: NextFunction) => {
     const { txHash } = req.body;
 
     if (!txHash) {
@@ -75,7 +75,7 @@ export function createAdminTimelockRouter(sorobanAdapter: SorobanAdapter, repo: 
       res.json({ success: true, stellarTxHash });
     } catch (err) {
       logger.error('Failed to cancel timelock transaction', { txHash, error: err instanceof Error ? err.message : String(err) });
-      res.status(500).json({ error: 'Failed to cancel transaction' });
+      next(err);
     }
   });
 

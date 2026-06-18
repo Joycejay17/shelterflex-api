@@ -1,10 +1,10 @@
-import { Router } from 'express'
+import { Router, type NextFunction, type Request, type Response } from 'express'
 import { SorobanAdapter } from '../soroban/adapter.js'
 
 export function createBalanceRouter(adapter: SorobanAdapter) {
      const router = Router()
 
-     router.get('/balance/:account', async (req, res) => {
+     router.get('/balance/:account', async (req: Request, res: Response, next: NextFunction) => {
           try {
                const { account } = req.params
 
@@ -26,16 +26,12 @@ export function createBalanceRouter(adapter: SorobanAdapter) {
                     network: config.networkPassphrase
                })
           } catch (error) {
-               console.error('Error fetching balance:', error)
-               res.status(500).json({
-                    error: 'Failed to fetch balance',
-                    message: error instanceof Error ? error.message : 'Unknown error'
-               })
+               next(error)
           }
      })
 
      // Add endpoints for credit/debit operations
-     router.post('/balance/:account/credit', async (req, res) => {
+     router.post('/balance/:account/credit', async (req: Request, res: Response, next: NextFunction) => {
           try {
                const { account } = req.params
                const { amount } = req.body
@@ -60,15 +56,11 @@ export function createBalanceRouter(adapter: SorobanAdapter) {
                     adapter: 'stub'
                })
           } catch (error) {
-               console.error('Error crediting account:', error)
-               res.status(500).json({
-                    error: 'Failed to credit account',
-                    message: error instanceof Error ? error.message : 'Unknown error'
-               })
+               next(error)
           }
      })
 
-     router.post('/balance/:account/debit', async (req, res) => {
+     router.post('/balance/:account/debit', async (req: Request, res: Response, next: NextFunction) => {
           try {
                const { account } = req.params
                const { amount } = req.body
@@ -93,11 +85,7 @@ export function createBalanceRouter(adapter: SorobanAdapter) {
                     adapter: 'stub'
                })
           } catch (error) {
-               console.error('Error debiting account:', error)
-               res.status(500).json({
-                    error: 'Failed to debit account',
-                    message: error instanceof Error ? error.message : 'Unknown error'
-               })
+               next(error)
           }
      })
 
