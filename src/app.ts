@@ -719,6 +719,7 @@ export function createApp() {
     app.use("/api/admin/underwriting", createAdminUnderwritingRouter());
     app.use("/api/admin/analytics", createAdminAnalyticsRouter());
     app.use("/api/admin", createAdminTenantCreditScoreRouter());
+    app.use("/api/admin/credit-score", createAdminCreditScoreRouter());
     app.use("/api/admin", createSettlementAdminRouter());
     app.use("/api/config/feature-flags", createFeatureFlagsRouter());
     app.use(
@@ -804,6 +805,7 @@ export function createApp() {
   app.use("/api/v1/admin/underwriting", createAdminUnderwritingRouter());
   app.use("/api/v1/admin/analytics", createAdminAnalyticsRouter());
   app.use("/api/v1/admin", createAdminTenantCreditScoreRouter());
+  app.use("/api/v1/admin/credit-score", createAdminCreditScoreRouter());
   app.use("/api/v1/admin", createSettlementAdminRouter());
   app.use("/api/v1/config/feature-flags", createFeatureFlagsRouter());
 
