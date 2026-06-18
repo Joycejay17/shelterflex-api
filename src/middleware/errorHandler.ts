@@ -2,6 +2,8 @@ import type { Request, Response, NextFunction } from 'express'
 import { ZodError } from 'zod'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode, classifyError, type ErrorResponse } from '../errors/errorCodes.js'
+import { chainUnavailable } from '../errors/factories.js'
+import { isChainUnavailableError } from '../errors/chainUnavailable.js'
 import { formatZodIssues } from '../errors/utils.js'
 
 const isProduction = process.env.NODE_ENV === 'production'
@@ -54,7 +56,34 @@ export function errorHandler(
   }
 
   /**
-   * 2️⃣ Zod validation error
+   * 2️⃣ Chain / Soroban RPC unavailable (circuit open or timeout)
+   */
+  if (isChainUnavailableError(err)) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        requestId,
+        message: 'Chain unavailable',
+        errorName: err instanceof Error ? err.name : 'Unknown',
+        errorMessage: err instanceof Error ? err.message : String(err),
+        path: req.originalUrl,
+        method: req.method,
+        timestamp: new Date().toISOString(),
+      }),
+    )
+
+    const appErr = chainUnavailable()
+    send(appErr.status, {
+      error: {
+        code: appErr.code,
+        message: appErr.message,
+      },
+    })
+    return
+  }
+
+  /**
+   * 3️⃣ Zod validation error
    */
   if (err instanceof ZodError) {
     send(400, {
@@ -68,7 +97,7 @@ export function errorHandler(
   }
 
   /**
-   * 3️⃣ Malformed JSON body
+   * 4️⃣ Malformed JSON body
    */
   if (err instanceof SyntaxError && 'body' in err) {
     send(400, {
@@ -81,7 +110,7 @@ export function errorHandler(
   }
 
   /**
-   * 4️⃣ Unknown / Unhandled Error
+   * 5️⃣ Unknown / Unhandled Error
    */
   const safeMessage = 'An unexpected error occurred'
 

@@ -24,3 +24,7 @@ export const internalError = (message = 'An unexpected error occurred') =>
 
 export const serviceUnavailable = (message = 'Service temporarily unavailable') =>
   new AppError(ErrorCode.SERVICE_UNAVAILABLE, 503, message)
+
+export const chainUnavailable = (
+  message = 'The blockchain is temporarily unavailable. Please try again shortly.',
+) => new AppError(ErrorCode.CHAIN_UNAVAILABLE, 503, message)

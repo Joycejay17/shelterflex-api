@@ -70,6 +70,8 @@ export enum ErrorCode {
 
   // Blockchain / Soroban
   SOROBAN_ERROR = "SOROBAN_ERROR",
+  /** Soroban RPC unreachable or circuit breaker open — safe to retry. */
+  CHAIN_UNAVAILABLE = "CHAIN_UNAVAILABLE",
 
   // External services
   EXTERNAL_SERVICE_ERROR = "EXTERNAL_SERVICE_ERROR",
@@ -116,6 +118,7 @@ export const ERROR_CLASSIFICATION: Record<string, ErrorClassification> = {
   [ErrorCode.LISTING_ALREADY_RENTED]: "permanent",
   [ErrorCode.INVALID_STATE_TRANSITION]: "permanent",
   [ErrorCode.SOROBAN_ERROR]: "transient",
+  [ErrorCode.CHAIN_UNAVAILABLE]: "transient",
   [ErrorCode.EXTERNAL_SERVICE_ERROR]: "transient",
   [ErrorCode.PAYMENT_PROVIDER_ERROR]: "transient",
   [ErrorCode.INTERNAL_ERROR]: "transient",

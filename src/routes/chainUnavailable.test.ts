@@ -1,0 +1,175 @@
+import { describe, it, expect, beforeEach } from 'vitest'
+import express from 'express'
+import supertest, { type Response } from 'supertest'
+import { createBalanceRouter } from './balance.js'
+import { createAdminTimelockRouter } from './admin-timelock.js'
+import { errorHandler } from '../middleware/errorHandler.js'
+import { requestIdMiddleware } from '../middleware/requestId.js'
+import { CircuitBreakerAdapter } from '../soroban/circuit-breaker-adapter.js'
+import { TestSorobanAdapter } from '../soroban/test-adapter.js'
+import { StubSorobanAdapter } from '../soroban/stub-adapter.js'
+import { getSorobanConfigFromEnv } from '../soroban/client.js'
+import { SorobanAdapter } from '../soroban/adapter.js'
+import { StubTimelockRepository } from '../indexer/timelock-repository.js'
+import { ErrorCode } from '../errors/errorCodes.js'
+import { RawReceiptEvent } from '../indexer/event-parser.js'
+import { SorobanConfig } from '../soroban/client.js'
+import { RecordReceiptParams } from '../soroban/adapter.js'
+
+const SAFE_MESSAGE =
+  'The blockchain is temporarily unavailable. Please try again shortly.'
+
+function expectChainUnavailableResponse(res: Response) {
+  expect(res.status).toBe(503)
+  expect(res.body.error.code).toBe(ErrorCode.CHAIN_UNAVAILABLE)
+  expect(res.body.error.message).toBe(SAFE_MESSAGE)
+  expect(res.body.error.classification).toBe('transient')
+  expect(res.body.error.retryable).toBe(true)
+  expect(res.headers['retry-after']).toBe('5')
+  expect(JSON.stringify(res.body)).not.toMatch(/circuit breaker|timeout|stack/i)
+}
+
+class TimeoutSorobanAdapter implements SorobanAdapter {
+  constructor(private readonly config: SorobanConfig) {}
+
+  private fail(): never {
+    throw new Error('RPC request timed out after 30000ms')
+  }
+
+  async getBalance(): Promise<bigint> {
+    this.fail()
+  }
+
+  async credit(): Promise<void> {
+    this.fail()
+  }
+
+  async debit(): Promise<void> {
+    this.fail()
+  }
+
+  async getStakedBalance(): Promise<bigint> {
+    this.fail()
+  }
+
+  async getClaimableRewards(): Promise<bigint> {
+    this.fail()
+  }
+
+  async recordReceipt(): Promise<void> {
+    this.fail()
+  }
+
+  getConfig(): SorobanConfig {
+    return this.config
+  }
+
+  async getReceiptEvents(): Promise<RawReceiptEvent[]> {
+    this.fail()
+  }
+
+  async getTimelockEvents(): Promise<any[]> {
+    this.fail()
+  }
+
+  async executeTimelock(): Promise<string> {
+    this.fail()
+  }
+
+  async cancelTimelock(): Promise<string> {
+    this.fail()
+  }
+
+  async stakeBond(): Promise<void> {
+    this.fail()
+  }
+
+  async unstakeBond(): Promise<void> {
+    this.fail()
+  }
+
+  async isBonded(): Promise<boolean> {
+    this.fail()
+  }
+
+  async getBond(): Promise<{ isBonded: boolean; amount: bigint }> {
+    this.fail()
+  }
+}
+
+function buildBalanceApp(adapter: SorobanAdapter) {
+  const app = express()
+  app.use(requestIdMiddleware)
+  app.use('/api', createBalanceRouter(adapter))
+  app.use(errorHandler)
+  return app
+}
+
+function buildTimelockApp(adapter: SorobanAdapter, repo: StubTimelockRepository) {
+  const app = express()
+  app.use(express.json())
+  app.use(requestIdMiddleware)
+  app.use('/api/admin/timelock', createAdminTimelockRouter(adapter, repo))
+  app.use(errorHandler)
+  return app
+}
+
+describe('chain-dependent routes when Soroban RPC is unavailable', () => {
+  const config = getSorobanConfigFromEnv(process.env)
+
+  beforeEach(() => {
+    StubSorobanAdapter._testOnlyReset()
+  })
+
+  describe('GET /api/balance/:account', () => {
+    it('returns canonical 503 when the circuit breaker is open', async () => {
+      const failingAdapter = new TimeoutSorobanAdapter(config)
+      const adapter = new CircuitBreakerAdapter(failingAdapter, {
+        enabled: true,
+        failureThreshold: 1,
+        timeoutPeriod: 60_000,
+        halfOpenMaxRequests: 1,
+      })
+
+      await expect(adapter.getBalance('GABC')).rejects.toThrow()
+      const app = buildBalanceApp(adapter)
+
+      const res = await supertest(app).get('/api/balance/GABC')
+      expectChainUnavailableResponse(res)
+    })
+
+    it('returns canonical 503 on RPC timeout', async () => {
+      const adapter = new TestSorobanAdapter(config)
+      adapter.simulateRpcTimeout()
+      const app = buildBalanceApp(adapter)
+
+      const res = await supertest(app).get('/api/balance/GABC')
+      expectChainUnavailableResponse(res)
+    })
+  })
+
+  describe('POST /api/admin/timelock/execute', () => {
+    it('returns canonical 503 on RPC timeout', async () => {
+      const repo = new StubTimelockRepository()
+      await repo.upsert({
+        txHash: 'hash-queued-1',
+        target: 'StakingPool',
+        functionName: 'pause',
+        args: [],
+        eta: Math.floor(Date.now() / 1000) + 3600,
+        status: 'queued',
+        ledger: 100,
+      })
+
+      const adapter = new TestSorobanAdapter(config)
+      adapter.simulateRpcTimeout()
+      const app = buildTimelockApp(adapter, repo)
+
+      const res = await supertest(app)
+        .post('/api/admin/timelock/execute')
+        .send({ txHash: 'hash-queued-1' })
+
+      expectChainUnavailableResponse(res)
+    })
+  })
+})
