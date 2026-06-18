@@ -26,13 +26,31 @@ export interface SyncDealStatusParams {
   actor: string
 }
 
+/**
+ * Callback fired after a Stellar transaction is signed and hashed but *before*
+ * it is broadcast to the network. Persisting the hash at this point allows a
+ * worker that crashes between broadcast and result-recording to recover by
+ * querying the chain for the known hash rather than blindly resubmitting.
+ */
+export interface TxBroadcastHooks {
+  /** Called with the signed tx hash just before sendTransaction. */
+  onTxBuilt?: (txHash: string) => Promise<void>
+}
+
+/** On-chain status of a previously submitted Stellar transaction. */
+export interface TxOnChainStatus {
+  status: 'success' | 'failed' | 'not_found' | 'pending'
+  /** Ledger sequence in which the tx was applied (only set for 'success'). */
+  ledger?: number
+}
+
 export interface SorobanAdapter {
   getBalance(account: string): Promise<bigint>
   credit(account: string, amount: bigint): Promise<void>
   debit(account: string, amount: bigint): Promise<void>
   getStakedBalance(account: string): Promise<bigint>
   getClaimableRewards(account: string): Promise<bigint>
-  recordReceipt(params: RecordReceiptParams): Promise<void>
+  recordReceipt(params: RecordReceiptParams, hooks?: TxBroadcastHooks): Promise<void>
   getConfig(): SorobanConfig
   getReceiptEvents(fromLedger: number | null): Promise<RawReceiptEvent[]>
   getTimelockEvents(fromLedger: number | null): Promise<any[]>
@@ -44,6 +62,16 @@ export interface SorobanAdapter {
   unstakeBond(inspectorId: string): Promise<void>
   isBonded(inspectorId: string): Promise<boolean>
   getBond(inspectorId: string): Promise<{ isBonded: boolean; amount: bigint }>
+
+  /**
+   * Query the current on-chain status of a previously submitted transaction.
+   * Used for crash recovery: if a worker persisted a txHash but crashed before
+   * recording the result, the next worker queries this instead of resubmitting.
+   *
+   * Optional: adapters that do not support status queries (e.g. simple stubs)
+   * may omit this method; the sender will fall back to blind resubmission.
+   */
+  getTransactionStatus?(txHash: string): Promise<TxOnChainStatus>
 
   // Admin operations (require SOROBAN_ADMIN_SIGNING_ENABLED=true)
   pause?(contractId: string): Promise<string>

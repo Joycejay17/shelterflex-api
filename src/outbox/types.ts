@@ -8,6 +8,10 @@ export enum OutboxStatus {
   SENT = 'sent',
   FAILED = 'failed',
   DEAD = 'dead',
+  /** Broadcast succeeded; waiting for confirmation_depth ledger closes. */
+  CONFIRMING = 'confirming',
+  /** Previously confirmed tx not found on chain after reorg; re-queued. */
+  REOPENED = 'reopened',
 }
 
 export enum TxType {
@@ -48,6 +52,16 @@ export interface OutboxItem {
   retryCount: number
   nextRetryAt: Date | null
   processedAt: Date | null
+
+  // Exactly-once settlement fields (migration 041)
+  /** Stellar tx hash set before broadcast so a crash can be recovered without double-submit. */
+  submittedTxHash?: string
+  /** Ledger sequence where the tx was confirmed; used with confirmationDepth. */
+  submittedLedger?: number
+  /** Ledger closes required after submittedLedger before marking SENT. */
+  confirmationDepth: number
+  /** Worker instance UUID holding an advisory claim on this row. */
+  claimedBy?: string
 
   createdAt: Date
   updatedAt: Date

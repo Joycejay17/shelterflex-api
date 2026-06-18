@@ -29,6 +29,7 @@ import {
 import { AdminSigningService } from '../services/adminSigningService.js'
 import { env } from '../schemas/env.js'
 import { trace, SpanStatusCode, Span } from '@opentelemetry/api'
+import type { TxBroadcastHooks, TxOnChainStatus } from './adapter.js'
 
 const tracer = trace.getTracer('soroban-adapter')
 
@@ -130,6 +131,38 @@ export class RealSorobanAdapter implements SorobanAdapter {
     })
   }
 
+  async getTransactionStatus(txHash: string): Promise<TxOnChainStatus> {
+    const inner = async (span: Span): Promise<TxOnChainStatus> => {
+      span.setAttribute('soroban.tx_hash', txHash)
+      try {
+        const result = await this.withBackoff(
+          () => this.server.getTransaction(txHash),
+          { op: 'getTransaction' }
+        )
+        const status = result.status as string
+        if (status === 'SUCCESS') {
+          const ledger = typeof (result as any).ledger === 'number' ? (result as any).ledger as number : undefined
+          span.setStatus({ code: SpanStatusCode.OK })
+          return { status: 'success', ledger }
+        }
+        if (status === 'FAILED') {
+          span.setStatus({ code: SpanStatusCode.OK })
+          return { status: 'failed' }
+        }
+        span.setStatus({ code: SpanStatusCode.OK })
+        return { status: status === 'NOT_FOUND' ? 'not_found' : 'pending' }
+      } catch (err: any) {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message || String(err) })
+        if (err instanceof Error) span.recordException(err)
+        if (isTransientRpcError(err)) return { status: 'pending' }
+        return { status: 'not_found' }
+      } finally {
+        span.end()
+      }
+    }
+    return tracer.startActiveSpan('RealSorobanAdapter.getTransactionStatus', inner)
+  }
+
   async getClaimableRewards(account: string): Promise<bigint> {
     return tracer.startActiveSpan('RealSorobanAdapter.getClaimableRewards', async (span) => {
       span.setAttribute('soroban.account', account)
@@ -181,7 +214,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
    * 
    * This ensures duplicate calls don't break confirm/finalize flows.
    */
-  async recordReceipt(params: RecordReceiptParams): Promise<void> {
+  async recordReceipt(params: RecordReceiptParams, hooks?: TxBroadcastHooks): Promise<void> {
     return tracer.startActiveSpan('RealSorobanAdapter.recordReceipt', async (span) => {
       span.setAttribute('soroban.tx_id', params.txId)
       span.setAttribute('soroban.deal_id', params.dealId)
@@ -202,11 +235,12 @@ export class RealSorobanAdapter implements SorobanAdapter {
         // Build the receipt parameters for the contract call
         const receiptArgs = this.buildReceiptArgs(params, txIdBytes)
 
-        // Submit the transaction
+        // Submit the transaction (onTxBuilt fires before broadcast for durable intent)
         await this.invokeTransaction(
           this.config.contractId,
           'record_receipt',
-          receiptArgs
+          receiptArgs,
+          hooks,
         )
 
         logger.info('Receipt recorded on-chain', {
@@ -688,6 +722,7 @@ export class RealSorobanAdapter implements SorobanAdapter {
     contractId: string,
     method: string,
     args: xdr.ScVal[],
+    hooks?: TxBroadcastHooks,
   ): Promise<xdr.ScVal> {
     return tracer.startActiveSpan(`Soroban.invokeTransaction:${method}`, async (span: Span) => {
       span.setAttribute('soroban.contract_id', contractId)
@@ -740,6 +775,15 @@ export class RealSorobanAdapter implements SorobanAdapter {
 
         // Sign the transaction
         tx.sign(adminKeypair)
+
+        // Persist intent: fire onTxBuilt with the signed tx hash BEFORE
+        // calling sendTransaction so a crash between broadcast and result-recording
+        // can be recovered by querying the chain for this known hash.
+        if (hooks?.onTxBuilt) {
+          const txHashHex = Buffer.from(tx.hash()).toString('hex')
+          span.setAttribute('soroban.tx_hash_pre_broadcast', txHashHex)
+          await hooks.onTxBuilt(txHashHex)
+        }
 
         // Submit the transaction
         const response = await this.withBackoff(
