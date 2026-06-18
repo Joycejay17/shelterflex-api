@@ -20,6 +20,12 @@ export const outboxConfig = {
    * Final jitter added = Math.random() * jitterFactor * computedDelay  (full-jitter strategy).
    */
   jitterFactor: parseFloat(process.env.OUTBOX_JITTER_FACTOR ?? '0.2'),
+
+  /**
+   * Ledger closes required after a tx lands before the item is marked SENT.
+   * Stellar ledgers close every ~5 s; default 3 ≈ 15 s finality window.
+   */
+  confirmationDepth: parseInt(process.env.OUTBOX_CONFIRMATION_DEPTH ?? '3', 10),
 } as const
 
 export type OutboxConfig = typeof outboxConfig

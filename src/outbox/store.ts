@@ -37,6 +37,33 @@ export interface IOutboxStore {
   listAll(limit?: number): Promise<OutboxItem[]>
   getHealthSummary(): Promise<OutboxHealthSummary>
   clear(): Promise<void>
+
+  /**
+   * Atomically claim up to `limit` PENDING items for exclusive processing by
+   * `workerId`.  Uses SELECT … FOR UPDATE SKIP LOCKED so two concurrent workers
+   * never claim the same row.  Stale claims (>5 min) are automatically released
+   * and eligible for reclaim on the next poll cycle.
+   */
+  lockForProcessing(limit: number, workerId: string): Promise<OutboxItem[]>
+
+  /**
+   * Persist the Stellar tx hash immediately after signing but before broadcast.
+   * Allows crash recovery without double-submission.
+   */
+  persistSubmittedTxHash(id: string, txHash: string): Promise<void>
+
+  /**
+   * Transition an item to CONFIRMING: tx has been broadcast and the hash is
+   * known; waiting for `confirmationDepth` additional ledger closes.
+   */
+  markConfirming(id: string, txHash: string, ledger: number, confirmationDepth: number): Promise<OutboxItem | null>
+
+  /**
+   * Re-open a previously SENT or CONFIRMING item whose tx is no longer on
+   * chain (reorg / ledger rollback detected).  Sets status back to PENDING and
+   * clears the submitted-tx fields so the item can be reprocessed.
+   */
+  reopenItem(id: string, reason: string): Promise<OutboxItem | null>
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +85,11 @@ function mapRow(row: Record<string, unknown>): OutboxItem {
     retryCount: Number(row.retry_count),
     nextRetryAt: row.next_retry_at ? new Date(row.next_retry_at as string) : null,
     processedAt: row.processed_at ? new Date(row.processed_at as string) : null,
+    // Exactly-once settlement fields (migration 041)
+    submittedTxHash: (row.submitted_tx_hash as string) ?? undefined,
+    submittedLedger: row.submitted_ledger != null ? Number(row.submitted_ledger) : undefined,
+    confirmationDepth: row.confirmation_depth != null ? Number(row.confirmation_depth) : 3,
+    claimedBy: (row.claimed_by as string) ?? undefined,
     createdAt: new Date(row.created_at as string),
     updatedAt: new Date(row.updated_at as string),
   }
@@ -69,6 +101,7 @@ function mapRow(row: Record<string, unknown>): OutboxItem {
 class InMemoryOutboxStore implements IOutboxStore {
   public items = new Map<string, OutboxItem>()
   private refIndex = new Map<CanonicalExternalRefV1, string>()
+  private claims = new Map<string, { workerId: string; claimedAt: Date }>()
 
   async create(input: CreateOutboxItemInput): Promise<OutboxItem> {
     const canonicalExternalRefV1 = buildCanonicalString(input.source, input.ref)
@@ -95,6 +128,7 @@ class InMemoryOutboxStore implements IOutboxStore {
       nextRetryAt: null,
       processedAt: null,
       retryCount: 0,
+      confirmationDepth: 3,
       createdAt: now,
       updatedAt: now,
     }
@@ -130,8 +164,10 @@ class InMemoryOutboxStore implements IOutboxStore {
     item.retryCount += 1
     item.updatedAt = new Date()
     item.processedAt = new Date()
+    item.claimedBy = undefined
     if (options?.error !== undefined) item.lastError = options.error
     if (options?.nextRetryAt !== undefined) item.nextRetryAt = options.nextRetryAt
+    this.claims.delete(id)
     this.items.set(id, item)
     return item
   }
@@ -142,7 +178,9 @@ class InMemoryOutboxStore implements IOutboxStore {
     item.status = OutboxStatus.DEAD
     item.lastError = reason
     item.nextRetryAt = null
+    item.claimedBy = undefined
     item.updatedAt = new Date()
+    this.claims.delete(id)
     this.items.set(id, item)
     return item
   }
@@ -186,6 +224,62 @@ class InMemoryOutboxStore implements IOutboxStore {
   async clear() {
     this.items.clear()
     this.refIndex.clear()
+    this.claims.clear()
+  }
+
+  async lockForProcessing(limit: number, workerId: string): Promise<OutboxItem[]> {
+    const STALE_CLAIM_MS = 5 * 60 * 1000
+    const now = Date.now()
+    const results: OutboxItem[] = []
+
+    for (const item of [...this.items.values()]
+      .filter((i) => i.status === OutboxStatus.PENDING)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())) {
+      if (results.length >= limit) break
+      const existing = this.claims.get(item.id)
+      if (existing && now - existing.claimedAt.getTime() < STALE_CLAIM_MS) continue
+      this.claims.set(item.id, { workerId, claimedAt: new Date() })
+      item.claimedBy = workerId
+      this.items.set(item.id, item)
+      results.push(item)
+    }
+    return results
+  }
+
+  async persistSubmittedTxHash(id: string, txHash: string): Promise<void> {
+    const item = this.items.get(id)
+    if (!item) return
+    item.submittedTxHash = txHash
+    item.updatedAt = new Date()
+    this.items.set(id, item)
+  }
+
+  async markConfirming(id: string, txHash: string, ledger: number, confirmationDepth: number): Promise<OutboxItem | null> {
+    const item = this.items.get(id)
+    if (!item) return null
+    item.status = OutboxStatus.CONFIRMING
+    item.submittedTxHash = txHash
+    item.submittedLedger = ledger
+    item.confirmationDepth = confirmationDepth
+    item.claimedBy = undefined
+    item.updatedAt = new Date()
+    this.claims.delete(id)
+    this.items.set(id, item)
+    return item
+  }
+
+  async reopenItem(id: string, reason: string): Promise<OutboxItem | null> {
+    const item = this.items.get(id)
+    if (!item) return null
+    item.status = OutboxStatus.REOPENED
+    item.lastError = reason
+    item.submittedTxHash = undefined
+    item.submittedLedger = undefined
+    item.claimedBy = undefined
+    item.updatedAt = new Date()
+    this.claims.delete(id)
+    this.items.set(id, item)
+    return item
   }
 }
 
@@ -275,6 +369,8 @@ export class PostgresOutboxStore implements IOutboxStore {
            last_error    = COALESCE($3, last_error),
            next_retry_at = $4,
            processed_at  = NOW(),
+           claimed_by    = NULL,
+           claimed_at    = NULL,
            updated_at    = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -290,6 +386,8 @@ export class PostgresOutboxStore implements IOutboxStore {
        SET status        = $2,
            last_error    = $3,
            next_retry_at = NULL,
+           claimed_by    = NULL,
+           claimed_at    = NULL,
            updated_at    = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -345,6 +443,80 @@ export class PostgresOutboxStore implements IOutboxStore {
   async clear(): Promise<void> {
     const pool = await this.pool()
     await pool.query(`DELETE FROM outbox_items`)
+  }
+
+  /**
+   * Atomically claim up to `limit` PENDING items for `workerId`.
+   * Uses a CTE with SELECT … FOR UPDATE SKIP LOCKED so concurrent workers
+   * never receive the same row.  Stale claims (>5 min) are re-eligible.
+   */
+  async lockForProcessing(limit: number, workerId: string): Promise<OutboxItem[]> {
+    const pool = await this.pool()
+    const { rows } = await pool.query(
+      `WITH to_claim AS (
+         SELECT id FROM outbox_items
+         WHERE status = 'pending'
+           AND (claimed_by IS NULL
+                OR claimed_at < NOW() - INTERVAL '5 minutes')
+         ORDER BY created_at ASC
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED
+       )
+       UPDATE outbox_items
+       SET claimed_by = $2,
+           claimed_at = NOW()
+       FROM to_claim
+       WHERE outbox_items.id = to_claim.id
+       RETURNING outbox_items.*`,
+      [limit, workerId],
+    )
+    return rows.map(mapRow)
+  }
+
+  async persistSubmittedTxHash(id: string, txHash: string): Promise<void> {
+    const pool = await this.pool()
+    await pool.query(
+      `UPDATE outbox_items
+       SET submitted_tx_hash = $2, updated_at = NOW()
+       WHERE id = $1`,
+      [id, txHash],
+    )
+  }
+
+  async markConfirming(id: string, txHash: string, ledger: number, confirmationDepth: number): Promise<OutboxItem | null> {
+    const pool = await this.pool()
+    const { rows } = await pool.query(
+      `UPDATE outbox_items
+       SET status             = 'confirming',
+           submitted_tx_hash  = $2,
+           submitted_ledger   = $3,
+           confirmation_depth = $4,
+           claimed_by         = NULL,
+           claimed_at         = NULL,
+           updated_at         = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id, txHash, ledger, confirmationDepth],
+    )
+    return rows.length ? mapRow(rows[0]) : null
+  }
+
+  async reopenItem(id: string, reason: string): Promise<OutboxItem | null> {
+    const pool = await this.pool()
+    const { rows } = await pool.query(
+      `UPDATE outbox_items
+       SET status            = 'reopened',
+           last_error        = $2,
+           submitted_tx_hash = NULL,
+           submitted_ledger  = NULL,
+           claimed_by        = NULL,
+           claimed_at        = NULL,
+           updated_at        = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id, reason],
+    )
+    return rows.length ? mapRow(rows[0]) : null
   }
 }
 
