@@ -212,6 +212,30 @@ export class CircuitBreakerAdapter implements SorobanAdapter {
     )
   }
 
+  async stakeBond(inspectorId: string, amount: bigint): Promise<void> {
+    return this.executeWithCircuitBreaker('stakeBond', () =>
+      this.wrappedAdapter.stakeBond(inspectorId, amount),
+    )
+  }
+
+  async unstakeBond(inspectorId: string): Promise<void> {
+    return this.executeWithCircuitBreaker('unstakeBond', () =>
+      this.wrappedAdapter.unstakeBond(inspectorId),
+    )
+  }
+
+  async isBonded(inspectorId: string): Promise<boolean> {
+    return this.executeWithCircuitBreaker('isBonded', () =>
+      this.wrappedAdapter.isBonded(inspectorId),
+    )
+  }
+
+  async getBond(inspectorId: string): Promise<{ isBonded: boolean; amount: bigint }> {
+    return this.executeWithCircuitBreaker('getBond', () =>
+      this.wrappedAdapter.getBond(inspectorId),
+    )
+  }
+
   /**
    * Set operator (admin operation)
    */

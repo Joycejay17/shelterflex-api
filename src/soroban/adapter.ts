@@ -39,6 +39,12 @@ export interface SorobanAdapter {
   executeTimelock(txHash: string, target: string, functionName: string, args: any[], eta: number): Promise<string>
   cancelTimelock(txHash: string): Promise<string>
 
+  // Inspector bond operations (inspector_bond contract)
+  stakeBond(inspectorId: string, amount: bigint): Promise<void>
+  unstakeBond(inspectorId: string): Promise<void>
+  isBonded(inspectorId: string): Promise<boolean>
+  getBond(inspectorId: string): Promise<{ isBonded: boolean; amount: bigint }>
+
   // Admin operations (require SOROBAN_ADMIN_SIGNING_ENABLED=true)
   pause?(contractId: string): Promise<string>
   unpause?(contractId: string): Promise<string>

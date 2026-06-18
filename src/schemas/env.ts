@@ -17,6 +17,7 @@ export const envSchema = z.object({
   // Soroban contract IDs are StrKey-encoded, always starting with 'C' and 56 characters long (base32).
   USDC_TOKEN_ADDRESS: z.string().optional(),
   SOROBAN_USDC_TOKEN_ID: z.string().optional(),
+  SOROBAN_INSPECTOR_BOND_ID: z.string().optional(),
   ENCRYPTION_KEY: z.string().min(32, 'Encryption key must be at least 32 characters'),
   CUSTODIAL_WALLET_MASTER_KEY_V1: z.string().optional(),
   CUSTODIAL_WALLET_MASTER_KEY_V2: z.string().optional(),

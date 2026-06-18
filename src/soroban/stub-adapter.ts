@@ -6,6 +6,7 @@ import { logger } from '../utils/logger.js'
 
 export class StubSorobanAdapter implements SorobanAdapter {
      private static stubBalances = new Map<string, bigint>()
+     private static stubBonds = new Map<string, bigint>()
      private config: SorobanConfig
 
      constructor(config: SorobanConfig) {
@@ -22,7 +23,8 @@ export class StubSorobanAdapter implements SorobanAdapter {
       */
      public static _testOnlyReset(): void {
           this.stubBalances.clear()
-          logger.debug('Soroban stub: static reset complete (balances cleared)')
+          this.stubBonds.clear()
+          logger.debug('Soroban stub: static reset complete (balances and bonds cleared)')
      }
 
      /**
@@ -167,6 +169,29 @@ export class StubSorobanAdapter implements SorobanAdapter {
   async cancelTimelock(txHash: string): Promise<string> {
     logger.info('Soroban stub: cancelTimelock', { txHash })
     return `stub_stellar_tx_hash_cancel_${txHash}`
+  }
+
+  async stakeBond(inspectorId: string, amount: bigint): Promise<void> {
+       StubSorobanAdapter.stubBonds.set(inspectorId, amount)
+       logger.debug('Soroban stub: stakeBond', { inspectorId, amount: amount.toString() })
+  }
+
+  async unstakeBond(inspectorId: string): Promise<void> {
+       StubSorobanAdapter.stubBonds.delete(inspectorId)
+       logger.debug('Soroban stub: unstakeBond', { inspectorId })
+  }
+
+  async isBonded(inspectorId: string): Promise<boolean> {
+       const bonded = StubSorobanAdapter.stubBonds.has(inspectorId)
+       logger.debug('Soroban stub: isBonded', { inspectorId, bonded })
+       return bonded
+  }
+
+  async getBond(inspectorId: string): Promise<{ isBonded: boolean; amount: bigint }> {
+       const amount = StubSorobanAdapter.stubBonds.get(inspectorId) ?? 0n
+       const bonded = StubSorobanAdapter.stubBonds.has(inspectorId)
+       logger.debug('Soroban stub: getBond', { inspectorId, bonded, amount: amount.toString() })
+       return { isBonded: bonded, amount }
   }
 
   // Admin operations (stub implementations)

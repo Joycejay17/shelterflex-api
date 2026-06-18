@@ -78,9 +78,6 @@ import { processWebhookDeliveryJob } from "./services/webhookDeliveryService.js"
 import { kycStatusEmitter } from "./services/index.js"
 import { WebhookEventType } from "./models/webhookSubscription.js"
 import { enqueueDelivery } from "./services/webhookDeliveryService.js"
-
-
-
 import { sanitizeRequest, detectMaliciousPatterns } from "./middleware/sanitization.js"
 import { createComprehensiveRateLimiter } from "./middleware/comprehensiveRateLimit.js"
 import { createWhistleblowerApplicationsRouter } from "./routes/whistleblowerApplications.js"
@@ -871,7 +868,7 @@ export function createApp() {
   app.use("/api/v1", createAdminDataRetentionRouter());
 
   // Inspector job routes — gated by INSPECTOR_DASHBOARD_ENABLED flag
-  app.use('/api/v1/inspector', authenticateToken, requireFlag('INSPECTOR_DASHBOARD_ENABLED'), createInspectorJobsRouter())
+  app.use('/api/v1/inspector', authenticateToken, requireFlag('INSPECTOR_DASHBOARD_ENABLED'), createInspectorJobsRouter(sorobanAdapter))
   app.use('/api/v1/admin/inspector', authenticateToken, requireFlag('INSPECTOR_DASHBOARD_ENABLED'), createAdminInspectorJobsRouter())
 
   // Rent guarantee insurance routes

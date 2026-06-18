@@ -1,9 +1,12 @@
 import { Router } from 'express'
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth.js'
 import { inspectorService } from '../services/inspectorService.js'
+import { SorobanAdapter } from '../soroban/adapter.js'
+import { InspectorBondService } from '../services/inspectorBondService.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { auditLog, extractAuditContext } from '../utils/auditLogger.js'
+import { logger } from '../utils/logger.js'
 
 function assertInspector(req: AuthenticatedRequest) {
   if (req.user?.role !== 'inspector' && req.user?.role !== 'admin') {
@@ -18,9 +21,50 @@ function assertAdmin(req: AuthenticatedRequest) {
 }
 
 // Inspector-facing router — mounted at /api/inspector
-export function createInspectorJobsRouter(): Router {
+export function createInspectorJobsRouter(adapter: SorobanAdapter): Router {
   const router = Router()
+  const bondService = new InspectorBondService(adapter)
 
+  // Bond management routes
+  router.post('/bond/stake', authenticateToken, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      assertInspector(req)
+      const { amount } = req.body
+      if (!amount) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, 400, 'amount is required')
+      }
+      const inspectorId = req.user!.id
+      await bondService.stake(inspectorId, BigInt(amount))
+      logger.info('Inspector bond staked', { inspectorId, amount })
+      res.json({ success: true, message: 'Bond staked successfully' })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  router.delete('/bond/unstake', authenticateToken, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      assertInspector(req)
+      const inspectorId = req.user!.id
+      await bondService.unstake(inspectorId)
+      logger.info('Inspector bond unstaked', { inspectorId })
+      res.json({ success: true, message: 'Bond unstaked successfully' })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  router.get('/bond/status', authenticateToken, async (req: AuthenticatedRequest, res, next) => {
+    try {
+      assertInspector(req)
+      const status = await bondService.getStatus(req.user!.id)
+      res.json({ success: true, ...status })
+    } catch (error) {
+      next(error)
+    }
+  })
+
+  // Job routes
   router.get('/jobs', authenticateToken, async (req: AuthenticatedRequest, res, next) => {
     try {
       assertInspector(req)
@@ -34,7 +78,9 @@ export function createInspectorJobsRouter(): Router {
   router.post('/jobs/:id/claim', authenticateToken, async (req: AuthenticatedRequest, res, next) => {
     try {
       assertInspector(req)
-      const job = await inspectorService.claimJob(req.params.id, req.user!.id)
+      const inspectorId = req.user!.id
+      await bondService.assertBonded(inspectorId)
+      const job = await inspectorService.claimJob(req.params.id, inspectorId)
       auditLog('INSPECTOR_JOB_CLAIMED' as any, extractAuditContext(req, 'user'), {
         jobId: job.id,
         listingId: job.listingId,
