@@ -32,6 +32,11 @@ import { createDepositsRouter } from "./routes/deposits.js"
 import { EarningsServiceImpl } from "./services/earnings.js"
 import { StubConversionProvider } from "./services/conversionProvider.js"
 import { ConversionService } from "./services/conversionService.js"
+import {
+  ConversionSagaService,
+  createOutboxOnchainLeg,
+  createNgnWalletFiatLeg,
+} from "./services/conversionSagaService.js"
 import { createWalletRouter } from "./routes/wallet.js"
 import { createNgnWalletRouter } from "./routes/ngnWallet.js"
 import { createAdminRiskRouter } from "./routes/adminRisk.js"
@@ -320,6 +325,17 @@ export function createApp() {
   const conversionService = new ConversionService(conversionProvider, "onramp");
   app.set("conversionService", conversionService);
   app.set("conversionRateService", conversionRateService);
+
+  // Atomic fiat <-> on-chain conversion saga (FX-rate lock + saga compensation).
+  // Reuses the existing exactly-once outbox sender for the on-chain leg and the
+  // existing NgnWalletService reversal mechanism for compensating refunds.
+  const conversionSagaService = new ConversionSagaService(
+    conversionProvider,
+    "onramp",
+    createNgnWalletFiatLeg(ngnWalletService),
+    createOutboxOnchainLeg(new OutboxSender(sorobanAdapter)),
+  );
+  app.set("conversionSagaService", conversionSagaService);
 
   const earningsService = new EarningsServiceImpl(rewardsDataLayer, conversionRateService);
   const stakingService = new StakingService(sorobanAdapter);
