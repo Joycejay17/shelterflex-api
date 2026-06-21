@@ -2,10 +2,11 @@
  * Bounded-drift accounting for the reconciliation engine.
  *
  * Tolerance rules let the engine treat a small ledger/provider amount difference
- * as a clean match instead of flagging an `amount_mismatch`. Evaluated *per
- * event* that is safe, but it is also exactly how systematic drift hides: a rail
- * that is consistently 50 minor units short on every settlement looks fine
- * event-by-event while quietly leaking money in aggregate.
+ * as a clean match instead of flagging an `amount_mismatch`. Judged one event at
+ * a time that is locally safe, but per-event evaluation is also exactly how
+ * systematic drift hides: a rail that is consistently 50 minor units short on
+ * every settlement looks fine event-by-event while quietly leaking money in
+ * aggregate.
  *
  * This accountant makes absorption **summed and capped, not per-event**
  * (issue #1101):
@@ -97,6 +98,10 @@ export function tryAbsorbDrift(
   }
 
   bucket.absorbedMinor += amountMinor
+  // The exact running total is the bigint above; the Prometheus counter only
+  // accepts a JS number. A single absorbed difference is always within a
+  // tolerance rule (tens/hundreds of minor units), so this conversion is exact —
+  // only an absurd cap above Number.MAX_SAFE_INTEGER (2^53) could lose precision.
   recordToleranceAbsorbed(rail, currency, Number(amountMinor))
   return true
 }

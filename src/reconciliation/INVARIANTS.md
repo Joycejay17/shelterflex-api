@@ -50,11 +50,22 @@ Config: `RECON_DRIFT_WINDOW_MS` (default 1h), `RECON_DRIFT_CAP_MINOR`
 > Auto-repair of a `missing_credit` is idempotent — retries never double-credit.
 
 The resolver re-attempts an open mismatch on every pass until it succeeds or hits
-`maxResolutionAttempts`, so the repair effect can fire many times for one
-mismatch. `applyIdempotentRepair` (`repair.ts`) keys the repair by a
-deterministic, mismatch-derived key (`repairKey`) and runs the credit-posting
-effect **at most once per key**. A failed effect is not recorded, so genuine
-transient failures can still be retried; a succeeded effect never runs again.
+`maxResolutionAttempts`, and the worker fires passes on a fixed interval with no
+overlap guard — so the repair effect can be invoked many times for one mismatch,
+including from two passes at once. `applyIdempotentRepair` (`repair.ts`) keys the
+repair by a deterministic, mismatch-derived key (`repairKey`) and runs the
+credit-posting effect **at most once per key**, even under concurrency:
+
+- a completed key short-circuits (the `applied` cache is bounded by size and TTL,
+  so a long-running worker cannot grow it without limit);
+- an *in-flight* key makes concurrent callers await the same promise instead of
+  launching a second effect;
+- a failed effect is recorded nowhere, so a genuine transient failure can retry.
+
+Once the credit is confirmed posted, `runResolutionPass` transitions the
+mismatch to `auto_resolved` rather than leaving it open to be retried until it
+needlessly escalates. The durable cross-process guarantee is a DB unique
+constraint on `repairKey`.
 
 ## I4 — Deterministic class assignment
 

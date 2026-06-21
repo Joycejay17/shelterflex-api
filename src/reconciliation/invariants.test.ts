@@ -268,6 +268,28 @@ describe('I3 idempotent repair', () => {
     expect(posted).toBe(1)
   })
 
+  it('coalesces concurrent repairs of the same key onto a single effect', async () => {
+    // Two passes overlapping (the worker has no overlap guard) must not both run
+    // the effect. Hold the effect open so both calls are in flight at once.
+    let calls = 0
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const effect = async () => {
+      calls++
+      await gate
+    }
+
+    const p1 = applyIdempotentRepair('missing_credit:concurrent', effect)
+    const p2 = applyIdempotentRepair('missing_credit:concurrent', effect)
+    release()
+    const [r1, r2] = await Promise.all([p1, p2])
+
+    expect(calls).toBe(1)
+    expect([r1.applied, r2.applied].sort()).toEqual([false, true])
+  })
+
   it('does not double-credit missing_credit under a resolution-pass retry storm', async () => {
     const mismatch = makeMismatch({ mismatchClass: 'missing_credit', resolutionAttempts: 0 })
     let credited = 0
@@ -275,13 +297,15 @@ describe('I3 idempotent repair', () => {
       credited++
     })
     vi.spyOn(store, 'listMismatches').mockResolvedValue([mismatch])
-    vi.spyOn(store, 'updateMismatchStatus').mockResolvedValue()
+    const update = vi.spyOn(store, 'updateMismatchStatus').mockResolvedValue()
     vi.spyOn(store, 'listOpenMismatchesPastSla').mockResolvedValue([])
 
     for (let i = 0; i < 5; i++) await runResolutionPass()
 
     expect(credited).toBe(1)
     expect(hasRepairBeenApplied(repairKey(mismatch))).toBe(true)
+    // A confirmed repair resolves the mismatch — it is not left to escalate.
+    expect(update).toHaveBeenCalledWith('m-1', 'auto_resolved', expect.objectContaining({}))
   })
 })
 
