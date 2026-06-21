@@ -36,9 +36,33 @@ export const latePaymentEscalationTotal = new client.Counter({
   registers: [metricsRegister],
 })
 
+export const reconciliationToleranceAbsorbedMinorTotal = new client.Counter({
+  name: 'reconciliation_tolerance_absorbed_minor_total',
+  help: 'Total amount (minor units) auto-absorbed by reconciliation tolerance rules. Rising fast = systematic drift being silently absorbed.',
+  labelNames: ['rail', 'currency'] as const,
+  registers: [metricsRegister],
+})
+
+export const reconciliationDriftCapBreachTotal = new client.Counter({
+  name: 'reconciliation_drift_cap_breach_total',
+  help: 'Times the windowed tolerance-absorption cap was hit, forcing a mismatch to escalate instead of being silently absorbed.',
+  labelNames: ['rail', 'currency'] as const,
+  registers: [metricsRegister],
+})
+
 export function recordPaymentInitiated(provider: string, status: string): void {
   if (isTestEnv) return
   paymentInitiatedTotal.inc({ provider, status })
+}
+
+export function recordToleranceAbsorbed(rail: string, currency: string, minor: number): void {
+  if (isTestEnv) return
+  reconciliationToleranceAbsorbedMinorTotal.inc({ rail, currency }, minor)
+}
+
+export function recordDriftCapBreach(rail: string, currency: string): void {
+  if (isTestEnv) return
+  reconciliationDriftCapBreachTotal.inc({ rail, currency })
 }
 
 export function recordDealActivationDuration(durationMs: number): void {

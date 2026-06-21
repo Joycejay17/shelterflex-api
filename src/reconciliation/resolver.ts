@@ -8,6 +8,7 @@ import { logger } from '../utils/logger.js'
 import { listMismatches, updateMismatchStatus, listOpenMismatchesPastSla } from './store.js'
 import type { Mismatch } from './types.js'
 import { DEFAULT_TOLERANCE_RULES } from './types.js'
+import { applyIdempotentRepair, repairKey } from './repair.js'
 
 const MAX_AUTO_ATTEMPTS_DEFAULT = 3
 
@@ -18,14 +19,34 @@ function getMaxAttempts(mismatch: Mismatch): number {
   return rule?.maxResolutionAttempts ?? MAX_AUTO_ATTEMPTS_DEFAULT
 }
 
+// ── Repair effect (injectable) ────────────────────────────────────────────────
+
+/**
+ * Posts the missing credit for a `missing_credit` mismatch. In production this
+ * re-queries the PSP (`provider.fetchSettlement()`) and credits the ledger.
+ * Injectable so it can be wired to the real poster and asserted in tests.
+ */
+export type MissingCreditPoster = (mismatch: Mismatch) => Promise<void>
+
+let postMissingCredit: MissingCreditPoster = async (mismatch) => {
+  // Placeholder until the PSP reconciliation integration lands.
+  logger.info('[resolver] (placeholder) would post missing credit', { id: mismatch.id })
+}
+
+export function setMissingCreditPoster(fn: MissingCreditPoster): void {
+  postMissingCredit = fn
+}
+
 // ── Per-class resolution handlers ─────────────────────────────────────────────
 
 async function resolveMissingCredit(mismatch: Mismatch): Promise<boolean> {
-  // Resolution: re-query the PSP for the settlement status and update the
-  // provider event table. In production this would call provider.fetchSettlement().
-  // Here we record the attempt and surface it for manual review if unresolvable.
-  logger.info('[resolver] Attempting missing_credit resolution', { id: mismatch.id })
-  // Placeholder: real implementation would call PSP reconciliation API
+  // The credit posting is guarded by a deterministic repair key so that retries
+  // (the resolver re-attempts an open mismatch every pass) never post the credit
+  // twice. The effect runs at most once per mismatch; a failed effect is not
+  // recorded, so genuine transient failures can still be retried.
+  const key = repairKey(mismatch)
+  const { applied } = await applyIdempotentRepair(key, () => postMissingCredit(mismatch))
+  logger.info('[resolver] missing_credit repair', { id: mismatch.id, key, applied })
   return true
 }
 
