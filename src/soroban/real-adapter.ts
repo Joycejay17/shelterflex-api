@@ -27,6 +27,7 @@ import {
   isTransientRpcError,
 } from './errors.js'
 import { AdminSigningService } from '../services/adminSigningService.js'
+import { getStellarSequenceAllocator, type AllocationResult } from '../services/stellarSequenceAllocator.js'
 import { env } from '../schemas/env.js'
 import { trace, SpanStatusCode, Span } from '@opentelemetry/api'
 import type { TxBroadcastHooks, TxOnChainStatus } from './adapter.js'
@@ -729,6 +730,8 @@ export class RealSorobanAdapter implements SorobanAdapter {
       span.setAttribute('soroban.method', method)
       span.setAttribute('soroban.rpc_url', this.config.rpcUrl)
 
+      let allocation: AllocationResult | null = null
+
       try {
         if (!this.config.adminSecret) {
           throw new ConfigurationError('Admin secret key not configured for transaction submission')
@@ -744,15 +747,17 @@ export class RealSorobanAdapter implements SorobanAdapter {
 
         const adminPublicKey = adminKeypair.publicKey()
 
-        // Get the admin's account info from the network
-        const accountResponse = await this.withBackoff(
-          () => this.server.getAccount(adminPublicKey),
-          { op: 'getAccount' }
-        )
+        // Allocate sequence number using the sequence allocator
+        const allocator = getStellarSequenceAllocator()
+        
+        // Extract allocationId from hooks if provided (for idempotent retries)
+        const allocationId = (hooks as any)?.allocationId
+        allocation = await allocator.allocateSequence(adminPublicKey, allocationId)
 
-        // Build the transaction using account from RPC
+        // Build the transaction with the allocated sequence number
+        const account = new Account(adminPublicKey, allocation.sequence.toString())
         const tx = new TransactionBuilder(
-          accountResponse,
+          account,
           {
             fee: BASE_FEE,
             networkPassphrase: this.config.networkPassphrase,
@@ -794,6 +799,11 @@ export class RealSorobanAdapter implements SorobanAdapter {
         span.setAttribute('soroban.tx_hash', response.hash)
 
         if (response.status !== 'PENDING') {
+          // Mark allocation as failed
+          if (allocation) {
+            await allocator.markFailed(allocation.allocationId)
+          }
+
           // Transaction failed immediately - check for duplicate or other errors
           const errorResult = response as any
           const resultXdr = errorResult.errorResultXdr
@@ -826,6 +836,11 @@ export class RealSorobanAdapter implements SorobanAdapter {
         if (response.status === 'PENDING') {
           const confirmedTx = await this.waitForTransaction(response.hash)
           if (!confirmedTx) {
+            // Mark allocation as failed
+            if (allocation) {
+              await allocator.markFailed(allocation.allocationId)
+            }
+
             throw new TransactionError(
               'Transaction not confirmed within timeout',
               response.hash,
@@ -835,10 +850,20 @@ export class RealSorobanAdapter implements SorobanAdapter {
 
           // Check if transaction was successful
           if (confirmedTx.status === 'SUCCESS') {
+            // Mark allocation as confirmed
+            if (allocation) {
+              await allocator.markConfirmed(allocation.allocationId, response.hash)
+            }
+
             span.setStatus({ code: SpanStatusCode.OK })
             // Return success - no specific return value for write operations
             return xdr.ScVal.scvVoid()
           } else {
+            // Mark allocation as failed
+            if (allocation) {
+              await allocator.markFailed(allocation.allocationId)
+            }
+
             throw new TransactionError(
               `Transaction failed: ${confirmedTx.status}`,
               response.hash,
@@ -850,6 +875,20 @@ export class RealSorobanAdapter implements SorobanAdapter {
         span.setStatus({ code: SpanStatusCode.OK })
         return xdr.ScVal.scvVoid()
       } catch (err) {
+        // Mark allocation as failed on error
+        if (allocation) {
+          try {
+            const allocator = getStellarSequenceAllocator()
+            await allocator.markFailed(allocation.allocationId)
+          } catch (markErr) {
+            // Log but don't throw - the original error is more important
+            logger.error('Failed to mark allocation as failed', {
+              allocationId: allocation.allocationId,
+              error: markErr instanceof Error ? markErr.message : String(markErr),
+            })
+          }
+        }
+
         span.setStatus({
           code: SpanStatusCode.ERROR,
           message: err instanceof Error ? err.message : String(err),

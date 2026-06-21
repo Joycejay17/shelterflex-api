@@ -1,6 +1,7 @@
-import { Keypair, TransactionBuilder, Operation, xdr, Address, rpc } from '@stellar/stellar-sdk'
+import { Keypair, TransactionBuilder, Operation, xdr, Address, rpc, Account } from '@stellar/stellar-sdk'
 import { logger } from '../utils/logger.js'
 import { ConfigurationError, TransactionError } from '../soroban/errors.js'
+import { getStellarSequenceAllocator, type AllocationResult } from './stellarSequenceAllocator.js'
 
 /**
  * Admin operations that require admin signing.
@@ -29,6 +30,7 @@ export interface AdminOperationParams {
   networkPassphrase: string
   adminSecret: string
   server: rpc.Server
+  allocationId?: string // Optional allocation ID for idempotent retries
 }
 
 /**
@@ -139,13 +141,20 @@ export class AdminSigningService {
       success: false, // Will be updated on success
     })
 
+    let allocation: AllocationResult | null = null
+
     try {
-      // Get the admin's account info from the network
+      // Allocate sequence number using the sequence allocator
+      const allocator = getStellarSequenceAllocator()
+      allocation = await allocator.allocateSequence(adminPublicKey, params.allocationId)
+
+      // Get the admin's account info from the network (for other account data)
       const accountResponse = await this.server.getAccount(adminPublicKey)
 
-      // Build the transaction
+      // Build the transaction with the allocated sequence number
+      const account = new Account(adminPublicKey, allocation.sequence.toString())
       const tx = new TransactionBuilder(
-        accountResponse,
+        account,
         {
           fee: '100', // BASE_FEE as string
           networkPassphrase: this.networkPassphrase,
@@ -176,6 +185,11 @@ export class AdminSigningService {
         const errorResult = response as any
         const resultXdr = errorResult.errorResultXdr
 
+        // Mark allocation as failed
+        if (allocation) {
+          await allocator.markFailed(allocation.allocationId)
+        }
+
         // Audit log: operation failed
         this.logAdminOperation({
           timestamp: new Date().toISOString(),
@@ -198,6 +212,11 @@ export class AdminSigningService {
       const confirmedTx = await this.waitForTransaction(response.hash)
 
       if (!confirmedTx) {
+        // Mark allocation as failed
+        if (allocation) {
+          await allocator.markFailed(allocation.allocationId)
+        }
+
         // Audit log: timeout
         this.logAdminOperation({
           timestamp: new Date().toISOString(),
@@ -217,6 +236,11 @@ export class AdminSigningService {
       }
 
       if (confirmedTx.status === 'SUCCESS') {
+        // Mark allocation as confirmed
+        if (allocation) {
+          await allocator.markConfirmed(allocation.allocationId, response.hash)
+        }
+
         // Audit log: operation succeeded
         this.logAdminOperation({
           timestamp: new Date().toISOString(),
@@ -229,6 +253,11 @@ export class AdminSigningService {
 
         return response.hash
       } else {
+        // Mark allocation as failed
+        if (allocation) {
+          await allocator.markFailed(allocation.allocationId)
+        }
+
         // Audit log: operation failed
         this.logAdminOperation({
           timestamp: new Date().toISOString(),
@@ -247,6 +276,20 @@ export class AdminSigningService {
         )
       }
     } catch (err) {
+      // Mark allocation as failed on error
+      if (allocation) {
+        try {
+          const allocator = getStellarSequenceAllocator()
+          await allocator.markFailed(allocation.allocationId)
+        } catch (markErr) {
+          // Log but don't throw - the original error is more important
+          logger.error('Failed to mark allocation as failed', {
+            allocationId: allocation.allocationId,
+            error: markErr instanceof Error ? markErr.message : String(markErr),
+          })
+        }
+      }
+
       // Audit log: operation error
       this.logAdminOperation({
         timestamp: new Date().toISOString(),
