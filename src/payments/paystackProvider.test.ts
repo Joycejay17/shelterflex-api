@@ -35,8 +35,21 @@ function makeReq(
   } as any
 }
 
-function paystackHmac(secret: string, payload: string): string {
-  return crypto.createHmac('sha512', secret).update(payload, 'utf8').digest('hex')
+function signedPaystackReq(secret: string, body: unknown) {
+  const rawBody = JSON.stringify(body)
+  const timestamp = String(Date.now())
+  const signature = crypto
+    .createHmac('sha512', secret)
+    .update(`${timestamp}.${rawBody}`, 'utf8')
+    .digest('hex')
+  return makeReq(
+    {
+      'x-paystack-signature': signature,
+      'x-webhook-timestamp': timestamp,
+    },
+    body,
+    rawBody,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -247,10 +260,7 @@ describe('PaystackProvider', () => {
         event: 'charge.success',
         data: { reference: 'ref-pay-001', status: 'success' },
       }
-      const rawBody = JSON.stringify(body)
-      const sig = paystackHmac('webhook_secret', rawBody)
-
-      const req = makeReq({ 'x-paystack-signature': sig }, body, rawBody)
+      const req = signedPaystackReq('webhook_secret', body)
 
       const result = await provider.parseAndValidateWebhook(req)
 
@@ -267,9 +277,7 @@ describe('PaystackProvider', () => {
         event: 'charge.success',
         data: { reference: 'ref-pay-ida', status: 'success' },
       }
-      const rawBody = JSON.stringify(body)
-      const sig = paystackHmac('webhook_secret', rawBody)
-      const req = makeReq({ 'x-paystack-signature': sig }, body, rawBody)
+      const req = signedPaystackReq('webhook_secret', body)
       const result = await provider.parseAndValidateWebhook(req)
       expect(result.providerEventId).toBe('99000000')
     })
@@ -279,10 +287,7 @@ describe('PaystackProvider', () => {
         event: 'charge.failed',
         data: { reference: 'ref-pay-002', status: 'failed' },
       }
-      const rawBody = JSON.stringify(body)
-      const sig = paystackHmac('webhook_secret', rawBody)
-
-      const req = makeReq({ 'x-paystack-signature': sig }, body, rawBody)
+      const req = signedPaystackReq('webhook_secret', body)
       const result = await provider.parseAndValidateWebhook(req)
 
       expect(result.rawStatus).toBe('charge.failed')
@@ -299,9 +304,7 @@ describe('PaystackProvider', () => {
 
     it('throws 400 when event field is missing', async () => {
       const body = { data: { reference: 'r' } }
-      const rawBody = JSON.stringify(body)
-      const sig = paystackHmac('webhook_secret', rawBody)
-      const req = makeReq({ 'x-paystack-signature': sig }, body, rawBody)
+      const req = signedPaystackReq('webhook_secret', body)
 
       await expect(provider.parseAndValidateWebhook(req)).rejects.toMatchObject({
         status: 400,
@@ -310,9 +313,7 @@ describe('PaystackProvider', () => {
 
     it('throws 400 when reference field is missing', async () => {
       const body = { event: 'charge.success', data: {} }
-      const rawBody = JSON.stringify(body)
-      const sig = paystackHmac('webhook_secret', rawBody)
-      const req = makeReq({ 'x-paystack-signature': sig }, body, rawBody)
+      const req = signedPaystackReq('webhook_secret', body)
 
       await expect(provider.parseAndValidateWebhook(req)).rejects.toMatchObject({
         status: 400,

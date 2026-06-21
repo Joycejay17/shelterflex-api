@@ -35,8 +35,21 @@ function makeReq(
   } as any
 }
 
-function flwHmac(secret: string, payload: string): string {
-  return crypto.createHmac('sha256', secret).update(payload, 'utf8').digest('hex')
+function signedFlutterwaveReq(secret: string, body: unknown) {
+  const rawBody = JSON.stringify(body)
+  const timestamp = String(Date.now())
+  const signature = crypto
+    .createHmac('sha256', secret)
+    .update(`${timestamp}.${rawBody}`, 'utf8')
+    .digest('hex')
+  return makeReq(
+    {
+      'verif-hash': signature,
+      'x-webhook-timestamp': timestamp,
+    },
+    body,
+    rawBody,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -240,10 +253,7 @@ describe('FlutterwaveProvider', () => {
         event: 'charge.completed',
         data: { tx_ref: 'flw-ref-002', status: 'successful' },
       }
-      const rawBody = JSON.stringify(body)
-      const sig = flwHmac('flw_webhook_secret', rawBody)
-
-      const req = makeReq({ 'verif-hash': sig }, body, rawBody)
+      const req = signedFlutterwaveReq('flw_webhook_secret', body)
       const result = await provider.parseAndValidateWebhook(req)
 
       expect(result.externalRefSource).toBe('flutterwave')
@@ -257,10 +267,7 @@ describe('FlutterwaveProvider', () => {
         event: 'transfer.reversed',
         data: { tx_ref: 'flw-ref-003', status: 'reversed' },
       }
-      const rawBody = JSON.stringify(body)
-      const sig = flwHmac('flw_webhook_secret', rawBody)
-
-      const req = makeReq({ 'verif-hash': sig }, body, rawBody)
+      const req = signedFlutterwaveReq('flw_webhook_secret', body)
       const result = await provider.parseAndValidateWebhook(req)
 
       expect(result.rawStatus).toBe('transfer.reversed')
@@ -277,9 +284,7 @@ describe('FlutterwaveProvider', () => {
 
     it('throws 400 when event field is missing', async () => {
       const body = { data: { tx_ref: 'r' } }
-      const rawBody = JSON.stringify(body)
-      const sig = flwHmac('flw_webhook_secret', rawBody)
-      const req = makeReq({ 'verif-hash': sig }, body, rawBody)
+      const req = signedFlutterwaveReq('flw_webhook_secret', body)
 
       await expect(provider.parseAndValidateWebhook(req)).rejects.toMatchObject({
         status: 400,
@@ -288,9 +293,7 @@ describe('FlutterwaveProvider', () => {
 
     it('throws 400 when tx_ref is missing', async () => {
       const body = { event: 'charge.completed', data: {} }
-      const rawBody = JSON.stringify(body)
-      const sig = flwHmac('flw_webhook_secret', rawBody)
-      const req = makeReq({ 'verif-hash': sig }, body, rawBody)
+      const req = signedFlutterwaveReq('flw_webhook_secret', body)
 
       await expect(provider.parseAndValidateWebhook(req)).rejects.toMatchObject({
         status: 400,
