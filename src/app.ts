@@ -161,6 +161,7 @@ import { createRentGuaranteeRouter } from "./routes/rentGuarantee.js";
 import { createTenantRatingCardRouter } from "./routes/tenantRatingCard.js";
 import { createRentGuaranteeProviderFromEnv } from "./services/insurance/rentGuaranteeProviderFactory.js";
 import { createAdminCreditScoreRouter, createCreditScoreRouter } from "./routes/creditScore.js";
+import { createSorobanContractsRouter } from "./routes/sorobanContracts.js";
 
 import { initFraudStore, PostgresFraudStore } from "./fraud/index.js";
 import { createAdminFraudRouter } from "./routes/adminFraud.js";
@@ -635,6 +636,7 @@ export function createApp() {
   app.use(createPublicRateLimiter(env))
 
   app.use("/", publicRouter)
+  app.use("/soroban", createSorobanContractsRouter())
   app.use('/api/v1', createBalanceRouter(sorobanAdapter))
   app.use('/api/v1', createReceiptsRouter(receiptRepo))
   app.use('/api/v1/wallet', createWalletRateLimiter(env), createWalletRouter(walletService))

@@ -1,20 +1,43 @@
-/**
- * Contract addresses for Soroban event indexing
- * These are the contract IDs to monitor for events
- */
+import { StrKey } from '@stellar/stellar-sdk'
 
-export const CONTRACT_ADDRESSES = {
-  // Add contract IDs as they are deployed
-  // Example:
-  // RENT_PAYMENTS: 'CD...',
-  // DEAL_ESCROW: 'CD...',
-  // REWARD_DISTRIBUTION: 'CD...',
-  // WHISTLEBLOWER_VALIDATION: 'CD...',
-  // STAKING_POOL: 'CD...',
+export const CONTRACT_ENV_VARS = {
+  core: 'SOROBAN_CONTRACT_ID',
+  rentPayments: 'SOROBAN_RENT_PAYMENTS_ID',
+  dealEscrow: 'SOROBAN_DEAL_ESCROW_ID',
+  rewardDistribution: 'SOROBAN_REWARD_DISTRIBUTION_ID',
+  whistleblowerValidation: 'SOROBAN_WHISTLEBLOWER_VALIDATION_ID',
+  stakingPool: 'SOROBAN_STAKING_POOL_ID',
+  stakingRewards: 'SOROBAN_STAKING_REWARDS_ID',
+  timelock: 'SOROBAN_TIMELOCK_ID',
+  inspectorBond: 'SOROBAN_INSPECTOR_BOND_ID',
+  tenantReputation: 'SOROBAN_TENANT_REPUTATION_ID',
+  usdcToken: 'SOROBAN_USDC_TOKEN_ID',
 } as const
 
-export type ContractName = keyof typeof CONTRACT_ADDRESSES
+export type ContractName = keyof typeof CONTRACT_ENV_VARS
+export type ContractAddresses = Readonly<Record<ContractName, string | undefined>>
+
+export function loadContractAddresses(
+  env: NodeJS.ProcessEnv,
+): ContractAddresses {
+  return Object.fromEntries(
+    Object.entries(CONTRACT_ENV_VARS).map(([name, envVar]) => {
+      const raw = env[envVar]?.trim()
+      if (!raw) return [name, undefined]
+      if (!StrKey.isValidContract(raw)) {
+        throw new Error(
+          `Invalid Soroban contract ID in ${envVar}: expected a valid Stellar contract StrKey (C...).`,
+        )
+      }
+      return [name, raw]
+    }),
+  ) as unknown as ContractAddresses
+}
+
+export const contractAddresses = loadContractAddresses(process.env)
 
 export function getContractAddresses(): string[] {
-  return Object.values(CONTRACT_ADDRESSES).filter((addr): addr is string => typeof addr === 'string' && addr.length > 0)
+  return Object.values(contractAddresses).filter(
+    (address): address is string => address !== undefined,
+  )
 }

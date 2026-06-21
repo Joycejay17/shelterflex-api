@@ -1,3 +1,5 @@
+import { loadContractAddresses } from '../config/contractAddresses.js'
+
 export type SorobanConfig = {
   rpcUrl: string
   networkPassphrase: string
@@ -13,16 +15,17 @@ export type SorobanConfig = {
 }
 
 export function getSorobanConfigFromEnv(env: NodeJS.ProcessEnv): SorobanConfig {
+  const addresses = loadContractAddresses(env)
   return {
     rpcUrl: env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org",
     networkPassphrase: env.SOROBAN_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015",
-    contractId: env.SOROBAN_CONTRACT_ID,
-    timelockId: env.SOROBAN_TIMELOCK_ID,
-    stakingPoolId: env.SOROBAN_STAKING_POOL_ID,
-    stakingRewardsId: env.SOROBAN_STAKING_REWARDS_ID,
-    usdcTokenId: env.SOROBAN_USDC_TOKEN_ID,
-    dealEscrowId: env.SOROBAN_DEAL_ESCROW_ID,
-    inspectorBondId: env.SOROBAN_INSPECTOR_BOND_ID,
+    contractId: addresses.core,
+    timelockId: addresses.timelock,
+    stakingPoolId: addresses.stakingPool,
+    stakingRewardsId: addresses.stakingRewards,
+    usdcTokenId: addresses.usdcToken,
+    dealEscrowId: addresses.dealEscrow,
+    inspectorBondId: addresses.inspectorBond,
     adminSecret: env.SOROBAN_ADMIN_SECRET,
     seed: env.SOROBAN_STUB_SEED,
   }

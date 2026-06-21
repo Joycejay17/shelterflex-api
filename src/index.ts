@@ -11,6 +11,7 @@ import { validatePiiEncryptionKey } from "./utils/piiEncryption.js"
 import { startBackupJob } from "./jobs/backupJob.js"
 import { ReconciliationWorker } from "./reconciliation/index.js"
 import { notificationWSS } from "./services/websocket/NotificationWebSocketServer.js"
+import { loadContractAddresses } from "./config/contractAddresses.js"
 
 const require = createRequire(import.meta.url)
 const { version } = require("../package.json") as { version: string }
@@ -37,6 +38,7 @@ if (env.NODE_ENV === 'production') {
 
 async function main() {
   try {
+    loadContractAddresses(process.env)
     validatePiiEncryptionKey(env.ENCRYPTION_KEY, env.NODE_ENV)
     const { validateLatePaymentConfig } = await import('./config/latePayment.js')
     validateLatePaymentConfig()
@@ -57,4 +59,3 @@ async function main() {
 }
 
 void main()
-
