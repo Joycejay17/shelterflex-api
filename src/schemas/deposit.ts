@@ -18,6 +18,8 @@ export const paymentsWebhookSchema = z.object({
   externalRef: z.string().min(1),
   status: z.enum(['confirmed', 'failed', 'reversed']).default('confirmed'),
   providerStatus: z.string().optional().describe('Provider-specific status code for mapping'),
+  providerEventId: z.string().min(1).optional(),
+  timestamp: z.string().optional(),
 })
 
 export type PaymentsWebhookRequest = z.infer<typeof paymentsWebhookSchema>

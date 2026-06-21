@@ -8,6 +8,10 @@ import {
   _testOnlyClearWebhookReplayCache,
 } from '../middleware/webhookSignature.js'
 import { AppError } from '../errors/AppError.js'
+import {
+  constantTimeEqual,
+  timestampedWebhookPayload,
+} from '../payments/webhookSecurity.js'
 
 function mockReq(
   overrides: Partial<Request> & { rawBody?: Buffer | string; body?: unknown } = {},
@@ -39,9 +43,13 @@ describe('webhookSignature middleware', () => {
 
   it('accepts valid Paystack signature', () => {
     const payload = Buffer.from(JSON.stringify({ event: 'charge.success', data: { id: 'evt-1' } }))
-    const signature = crypto.createHmac('sha512', secret).update(payload).digest('hex')
+    const timestamp = String(Date.now())
+    const signature = crypto
+      .createHmac('sha512', secret)
+      .update(timestampedWebhookPayload(timestamp, payload))
+      .digest('hex')
     const req = mockReq({
-      headers: { 'x-paystack-signature': signature },
+      headers: { 'x-paystack-signature': signature, 'x-webhook-timestamp': timestamp },
       rawBody: payload,
     })
     const next = vi.fn()
@@ -52,9 +60,13 @@ describe('webhookSignature middleware', () => {
 
   it('rejects tampered Paystack body', () => {
     const payload = Buffer.from(JSON.stringify({ event: 'charge.success' }))
-    const signature = crypto.createHmac('sha512', secret).update(payload).digest('hex')
+    const timestamp = String(Date.now())
+    const signature = crypto
+      .createHmac('sha512', secret)
+      .update(timestampedWebhookPayload(timestamp, payload))
+      .digest('hex')
     const req = mockReq({
-      headers: { 'x-paystack-signature': signature },
+      headers: { 'x-paystack-signature': signature, 'x-webhook-timestamp': timestamp },
       rawBody: Buffer.from(JSON.stringify({ event: 'charge.failed' })),
     })
     const next = vi.fn()
@@ -72,17 +84,58 @@ describe('webhookSignature middleware', () => {
   })
 
   it('accepts valid Flutterwave verif-hash', () => {
-    const req = mockReq({ headers: { 'verif-hash': flwHash } })
+    const timestamp = String(Date.now())
+    const signature = crypto
+      .createHmac('sha256', flwHash)
+      .update(timestampedWebhookPayload(timestamp, Buffer.from('{}')))
+      .digest('hex')
+    const req = mockReq({
+      headers: { 'verif-hash': signature, 'x-webhook-timestamp': timestamp },
+      rawBody: Buffer.from('{}'),
+    })
     const next = vi.fn()
     verifyFlutterwaveSignature(req, mockRes(), next)
     expect(next).toHaveBeenCalledWith()
   })
 
   it('rejects invalid Flutterwave verif-hash', () => {
-    const req = mockReq({ headers: { 'verif-hash': 'wrong' } })
+    const req = mockReq({
+      headers: { 'verif-hash': 'wrong', 'x-webhook-timestamp': String(Date.now()) },
+    })
     const next = vi.fn()
     verifyFlutterwaveSignature(req, mockRes(), next)
     expect(next).toHaveBeenCalledWith(expect.any(AppError))
+  })
+
+  it('rejects a correctly signed event outside the freshness window', () => {
+    const payload = Buffer.from('{}')
+    const timestamp = String(Date.now() - 10 * 60 * 1000)
+    const signature = crypto
+      .createHmac('sha512', secret)
+      .update(timestampedWebhookPayload(timestamp, payload))
+      .digest('hex')
+    const next = vi.fn()
+
+    verifyPaystackSignature(
+      mockReq({
+        headers: { 'x-paystack-signature': signature, 'x-webhook-timestamp': timestamp },
+        rawBody: payload,
+      }),
+      mockRes(),
+      next,
+    )
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 401 }))
+  })
+
+  it('uses timingSafeEqual even when signature lengths differ', () => {
+    const timingSafeEqual = vi.spyOn(crypto, 'timingSafeEqual')
+    expect(constantTimeEqual('short', 'a much longer expected value')).toBe(false)
+    expect(timingSafeEqual).toHaveBeenCalledOnce()
+    expect(timingSafeEqual.mock.calls[0][0].length).toBe(
+      timingSafeEqual.mock.calls[0][1].length,
+    )
+    timingSafeEqual.mockRestore()
   })
 
   it('returns 200 for duplicate event id without re-processing', () => {

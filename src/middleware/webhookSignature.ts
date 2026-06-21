@@ -4,6 +4,12 @@ import { LRUCache } from 'lru-cache'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { logger } from '../utils/logger.js'
+import {
+  assertFreshWebhookTimestamp,
+  constantTimeEqual,
+  getSignedWebhookTimestamp,
+  timestampedWebhookPayload,
+} from '../payments/webhookSecurity.js'
 
 declare global {
   namespace Express {
@@ -61,13 +67,15 @@ export function verifyPaystackSignature(
       throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Missing x-paystack-signature header')
     }
 
+    const timestamp = getSignedWebhookTimestamp(req)
+    assertFreshWebhookTimestamp(timestamp)
     const rawBody = getRawBodyBuffer(req)
-    const expected = crypto.createHmac('sha512', secret).update(rawBody).digest('hex')
+    const expected = crypto
+      .createHmac('sha512', secret)
+      .update(timestampedWebhookPayload(timestamp, rawBody))
+      .digest('hex')
 
-    if (
-      signature.length !== expected.length ||
-      !crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))
-    ) {
+    if (!constantTimeEqual(signature, expected, 'hex')) {
       throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid Paystack signature')
     }
 
@@ -91,14 +99,18 @@ export function verifyFlutterwaveSignature(
       return next()
     }
 
-    const verifHash = req.headers['verif-hash'] as string | undefined
-    if (!verifHash) {
+    const signature = req.headers['verif-hash'] as string | undefined
+    if (!signature) {
       throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Missing verif-hash header')
     }
 
-    const a = Buffer.from(verifHash, 'utf8')
-    const b = Buffer.from(secretHash, 'utf8')
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    const timestamp = getSignedWebhookTimestamp(req)
+    assertFreshWebhookTimestamp(timestamp)
+    const expected = crypto
+      .createHmac('sha256', secretHash)
+      .update(timestampedWebhookPayload(timestamp, getRawBodyBuffer(req)))
+      .digest('hex')
+    if (!constantTimeEqual(signature, expected, 'hex')) {
       throw new AppError(ErrorCode.UNAUTHORIZED, 401, 'Invalid Flutterwave signature')
     }
 

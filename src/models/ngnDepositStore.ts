@@ -6,6 +6,7 @@ import type {
   NgnDeposit,
   NgnDepositStatus,
 } from './ngnDeposit.js'
+import { canAdvancePaymentStatus } from '../payments/paymentState.js'
 
 function mapRow(row: any): NgnDeposit {
   return {
@@ -198,14 +199,29 @@ class NgnDepositStore {
     if (!pool) {
       const existing = this.byId.get(depositId)
       if (!existing) return null
-      if (existing.status === status) return existing
+      if (!canAdvancePaymentStatus(existing.status, status)) return null
       const updated: NgnDeposit = { ...existing, status, updatedAt: new Date() }
       this.byId.set(depositId, updated)
       return updated
     }
 
     const { rows } = await pool.query(
-      `UPDATE ngn_deposits SET status=$2, updated_at=NOW() WHERE deposit_id=$1 RETURNING *`,
+      `UPDATE ngn_deposits
+       SET status=$2, updated_at=NOW()
+       WHERE deposit_id=$1
+         AND CASE status
+           WHEN 'pending' THEN 0
+           WHEN 'failed' THEN 1
+           WHEN 'confirmed' THEN 2
+           WHEN 'reversed' THEN 3
+         END
+         < CASE $2
+           WHEN 'pending' THEN 0
+           WHEN 'failed' THEN 1
+           WHEN 'confirmed' THEN 2
+           WHEN 'reversed' THEN 3
+         END
+       RETURNING *`,
       [depositId, status],
     )
     const row = rows[0]

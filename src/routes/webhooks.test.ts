@@ -44,7 +44,6 @@ describe('Payments webhook', () => {
       .set('x-user-id', 'user-001')
       .send({ quoteId: quote.quoteId, paymentRail: 'paystack' })
       .expect(201)
-
     const { depositId, externalRef } = init.body
 
     const payload = {
@@ -101,6 +100,7 @@ describe('Payments webhook', () => {
     await request(app)
       .post('/api/webhooks/payments/paystack')
       .set('x-paystack-signature', 'wrong')
+      .set('x-webhook-timestamp', String(Date.now()))
       .send(payload)
       .expect(401)
   })
@@ -136,16 +136,101 @@ describe('Payments webhook', () => {
 
     // Generate valid HMAC-SHA512 signature
     const rawBody = JSON.stringify(payload)
+    const timestamp = String(Date.now())
     const validSignature = crypto
       .createHmac('sha512', secret)
-      .update(rawBody, 'utf8')
+      .update(`${timestamp}.${rawBody}`, 'utf8')
       .digest('hex')
 
     await request(app)
       .post('/api/webhooks/payments/paystack')
       .set('x-paystack-signature', validSignature)
+      .set('x-webhook-timestamp', timestamp)
       .send(payload)
       .expect(200)
+  })
+
+  it('applies concurrent deliveries of one provider event exactly once', async () => {
+    const quote = await quoteStore.create({
+      userId: 'user-concurrent',
+      amountNgn: 64000,
+      paymentRail: 'paystack',
+      fxRateNgnPerUsdc: 1600,
+      feePercent: 0,
+      slippagePercent: 0,
+      expiryMs: 3600000,
+    })
+    const init = await request(app)
+      .post('/api/staking/deposit/initiate')
+      .set('x-user-id', 'user-concurrent')
+      .send({ quoteId: quote.quoteId, paymentRail: 'paystack' })
+      .expect(201)
+
+    const payload = {
+      externalRefSource: 'paystack',
+      externalRef: init.body.externalRef,
+      status: 'confirmed',
+      providerEventId: 'evt-concurrent-1',
+    }
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        request(app).post('/api/webhooks/payments/paystack').send(payload),
+      ),
+    )
+
+    expect(responses.every((response) => response.status === 200)).toBe(true)
+    expect(responses.filter((response) => response.body.deduped).length).toBe(7)
+    const stakeItems = (await outboxStore.listAll(20)).filter(
+      (item) => item.txType === TxType.STAKE,
+    )
+    expect(stakeItems).toHaveLength(1)
+  })
+
+  it('keeps reversal terminal when capture arrives afterward', async () => {
+    const userId = 'user-reversal-first'
+    const quote = await quoteStore.create({
+      userId,
+      amountNgn: 45000,
+      paymentRail: 'paystack',
+      fxRateNgnPerUsdc: 1600,
+      feePercent: 0,
+      slippagePercent: 0,
+      expiryMs: 3600000,
+    })
+    const init = await request(app)
+      .post('/api/staking/deposit/initiate')
+      .set('x-user-id', userId)
+      .send({ quoteId: quote.quoteId, paymentRail: 'paystack' })
+      .expect(201)
+    const walletService = new NgnWalletService()
+    const balanceBefore = await walletService.getBalance(userId)
+
+    await request(app)
+      .post('/api/webhooks/payments/paystack')
+      .send({
+        externalRefSource: 'paystack',
+        externalRef: init.body.externalRef,
+        status: 'reversed',
+        providerEventId: 'evt-reversal-first',
+      })
+      .expect(200)
+
+    await request(app)
+      .post('/api/webhooks/payments/paystack')
+      .send({
+        externalRefSource: 'paystack',
+        externalRef: init.body.externalRef,
+        status: 'confirmed',
+        providerEventId: 'evt-capture-late',
+      })
+      .expect(200)
+
+    const deposit = await depositStore.getByCanonical('paystack', init.body.externalRef)
+    expect(deposit?.status).toBe('reversed')
+    expect((await walletService.getBalance(userId)).totalNgn).toBe(balanceBefore.totalNgn)
+    expect(
+      (await outboxStore.listAll(20)).filter((item) => item.txType === TxType.STAKE),
+    ).toHaveLength(0)
   })
 
   it('credits NGN wallet on confirmation', async () => {

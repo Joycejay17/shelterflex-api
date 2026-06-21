@@ -6,6 +6,7 @@ import { NgnWalletService } from '../services/ngnWalletService.js'
 import { depositStore } from '../models/depositStore.js'
 import { userRiskStateStore } from '../models/userRiskStateStore.js'
 import { errorHandler } from '../middleware/errorHandler.js'
+import { webhookEventDedupeStore } from '../models/webhookEventDedupeStore.js'
 
 describe('Webhooks - Deposit Reversal', () => {
   let app: Express
@@ -16,6 +17,7 @@ describe('Webhooks - Deposit Reversal', () => {
   beforeEach(async () => {
     ngnWalletService = new NgnWalletService()
     await depositStore.clear()
+    webhookEventDedupeStore.clear()
     userRiskStateStore.clear()
 
     // Setup Express app
@@ -88,36 +90,25 @@ describe('Webhooks - Deposit Reversal', () => {
 
       const balanceBeforeFirst = await ngnWalletService.getBalance(testUserId)
 
-      // Act: Send reversal webhook twice
-      await request(app)
-        .post('/api/webhooks/reversals/onramp')
-        .send({
+      // Act: Send the same reversal concurrently
+      const payload = {
           provider: 'onramp',
           providerRef: 'ONRAMP-WEBHOOK-REF-2',
           reversalRef: 'REVERSAL-WEBHOOK-2',
           eventType: 'deposit.reversed',
           timestamp: new Date().toISOString(),
-        })
-        .expect(200)
-
-      const balanceAfterFirst = await ngnWalletService.getBalance(testUserId)
-
-      await request(app)
-        .post('/api/webhooks/reversals/onramp')
-        .send({
-          provider: 'onramp',
-          providerRef: 'ONRAMP-WEBHOOK-REF-2',
-          reversalRef: 'REVERSAL-WEBHOOK-2',
-          eventType: 'deposit.reversed',
-          timestamp: new Date().toISOString(),
-        })
-        .expect(200)
+      }
+      const responses = await Promise.all([
+        request(app).post('/api/webhooks/reversals/onramp').send(payload),
+        request(app).post('/api/webhooks/reversals/onramp').send(payload),
+      ])
+      expect(responses.every((response) => response.status === 200)).toBe(true)
+      expect(responses.filter((response) => response.body.deduped)).toHaveLength(1)
 
       const balanceAfterSecond = await ngnWalletService.getBalance(testUserId)
 
       // Assert: Balance should only be debited once
-      expect(balanceAfterFirst.totalNgn).toBe(balanceBeforeFirst.totalNgn - 10000)
-      expect(balanceAfterSecond.totalNgn).toBe(balanceAfterFirst.totalNgn)
+      expect(balanceAfterSecond.totalNgn).toBe(balanceBeforeFirst.totalNgn - 10000)
     })
 
     it('should return 200 even if deposit not found (prevent webhook retries)', async () => {
@@ -186,16 +177,24 @@ describe('Webhooks - Deposit Reversal', () => {
         providerRef: 'TEST-REF-SIG',
       })
 
+      const body = {
+        provider: 'onramp',
+        providerRef: 'TEST-REF-SIG',
+        reversalRef: 'REVERSAL-WEBHOOK-7',
+        eventType: 'deposit.reversed',
+        timestamp: new Date().toISOString(),
+      }
+      const signedTimestamp = String(Date.now())
+      const signature = (await import('node:crypto'))
+        .createHmac('sha256', 'test-secret-key')
+        .update(`${signedTimestamp}.${JSON.stringify(body)}`)
+        .digest('hex')
+
       await request(app)
         .post('/api/webhooks/reversals/onramp')
-        .set('x-webhook-signature', 'test-secret-key')
-        .send({
-          provider: 'onramp',
-          providerRef: 'TEST-REF-SIG',
-          reversalRef: 'REVERSAL-WEBHOOK-7',
-          eventType: 'deposit.reversed',
-          timestamp: new Date().toISOString(),
-        })
+        .set('x-webhook-signature', signature)
+        .set('x-webhook-timestamp', signedTimestamp)
+        .send(body)
         .expect(200)
 
       process.env.WEBHOOK_SIGNATURE_ENABLED = 'false'
