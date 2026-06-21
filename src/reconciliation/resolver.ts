@@ -8,6 +8,7 @@ import { logger } from '../utils/logger.js'
 import { listMismatches, updateMismatchStatus, listOpenMismatchesPastSla } from './store.js'
 import type { Mismatch } from './types.js'
 import { DEFAULT_TOLERANCE_RULES } from './types.js'
+import { applyIdempotentRepair, repairKey, hasRepairBeenApplied } from './repair.js'
 
 const MAX_AUTO_ATTEMPTS_DEFAULT = 3
 
@@ -18,26 +19,61 @@ function getMaxAttempts(mismatch: Mismatch): number {
   return rule?.maxResolutionAttempts ?? MAX_AUTO_ATTEMPTS_DEFAULT
 }
 
+// ── Repair effect (injectable) ────────────────────────────────────────────────
+
+/**
+ * Posts the missing credit for a `missing_credit` mismatch. In production this
+ * re-queries the PSP (`provider.fetchSettlement()`) and credits the ledger.
+ * Injectable so it can be wired to the real poster and asserted in tests.
+ */
+export type MissingCreditPoster = (mismatch: Mismatch) => Promise<void>
+
+let postMissingCredit: MissingCreditPoster = async (mismatch) => {
+  // Placeholder until the PSP reconciliation integration lands.
+  logger.info('[resolver] (placeholder) would post missing credit', { id: mismatch.id })
+}
+
+export function setMissingCreditPoster(fn: MissingCreditPoster): void {
+  postMissingCredit = fn
+}
+
 // ── Per-class resolution handlers ─────────────────────────────────────────────
 
-async function resolveMissingCredit(mismatch: Mismatch): Promise<boolean> {
-  // Resolution: re-query the PSP for the settlement status and update the
-  // provider event table. In production this would call provider.fetchSettlement().
-  // Here we record the attempt and surface it for manual review if unresolvable.
-  logger.info('[resolver] Attempting missing_credit resolution', { id: mismatch.id })
-  // Placeholder: real implementation would call PSP reconciliation API
-  return true
+/**
+ * Outcome of a resolution handler. `resolved: true` means the mismatch was
+ * actually fixed and should transition to `auto_resolved`; `false` means an
+ * attempt was made but the mismatch stays `open` (and escalates once attempts
+ * run out).
+ */
+interface ResolutionOutcome {
+  resolved: boolean
 }
 
-async function resolveDuplicateDebit(mismatch: Mismatch): Promise<boolean> {
+async function resolveMissingCredit(mismatch: Mismatch): Promise<ResolutionOutcome> {
+  // The credit posting is guarded by a deterministic repair key so that retries
+  // (the resolver re-attempts an open mismatch every pass, and passes can
+  // overlap) never post the credit twice. The effect runs at most once per
+  // mismatch; a failed effect is not recorded, so transient failures can retry.
+  const key = repairKey(mismatch)
+  await applyIdempotentRepair(key, () => postMissingCredit(mismatch))
+  const posted = hasRepairBeenApplied(key)
+  logger.info('[resolver] missing_credit repair', { id: mismatch.id, key, posted })
+  // Once the credit is confirmed posted the mismatch is genuinely fixed, so it
+  // resolves rather than looping until it escalates to finance.
+  return { resolved: posted }
+}
+
+async function resolveDuplicateDebit(mismatch: Mismatch): Promise<ResolutionOutcome> {
   // Resolution: flag the duplicate provider events and request a PSP reversal.
+  // No automated terminal fix yet — stays open until reversal confirms / it
+  // escalates for manual review.
   logger.info('[resolver] Attempting duplicate_debit resolution', { id: mismatch.id })
-  return true
+  return { resolved: false }
 }
 
-async function resolveAmountMismatch(mismatch: Mismatch): Promise<boolean> {
+async function resolveAmountMismatch(mismatch: Mismatch): Promise<ResolutionOutcome> {
   // Resolution: if the difference is within a secondary tolerance, auto-close.
-  // Otherwise flag for finance team review.
+  // Otherwise flag for finance team review. No automated terminal fix yet.
   const diff =
     mismatch.expectedAmountMinor != null && mismatch.actualAmountMinor != null
       ? mismatch.expectedAmountMinor > mismatch.actualAmountMinor
@@ -49,21 +85,16 @@ async function resolveAmountMismatch(mismatch: Mismatch): Promise<boolean> {
     id: mismatch.id,
     diffMinor: diff?.toString(),
   })
-  return true
+  return { resolved: false }
 }
 
-async function resolveDelayedSettlement(mismatch: Mismatch): Promise<boolean> {
-  // Delayed settlement already matched on amount — auto-close after logging.
+async function resolveDelayedSettlement(mismatch: Mismatch): Promise<ResolutionOutcome> {
+  // Delayed settlement already matched on amount — auto-close.
   logger.info('[resolver] Auto-closing delayed_settlement', { id: mismatch.id })
-  await updateMismatchStatus(mismatch.id, 'auto_resolved', {
-    resolutionWorkflow: 'delayed_settlement_auto_close',
-    lastResolutionAt: new Date(),
-    resolutionAttempts: mismatch.resolutionAttempts + 1,
-  })
-  return true
+  return { resolved: true }
 }
 
-const HANDLERS: Record<Mismatch['mismatchClass'], (m: Mismatch) => Promise<boolean>> = {
+const HANDLERS: Record<Mismatch['mismatchClass'], (m: Mismatch) => Promise<ResolutionOutcome>> = {
   missing_credit:    resolveMissingCredit,
   duplicate_debit:   resolveDuplicateDebit,
   amount_mismatch:   resolveAmountMismatch,
@@ -96,18 +127,23 @@ export async function runResolutionPass(): Promise<{ resolved: number; escalated
 
     try {
       const handler = HANDLERS[mismatch.mismatchClass]
-      const attempted = await handler(mismatch)
+      const { resolved } = await handler(mismatch)
 
-      if (attempted) {
-        if (mismatch.mismatchClass === 'delayed_settlement') {
-          result.resolved++
-        } else {
-          await updateMismatchStatus(mismatch.id, 'open', {
-            resolutionWorkflow: mismatch.mismatchClass,
-            lastResolutionAt: new Date(),
-            resolutionAttempts: mismatch.resolutionAttempts + 1,
-          })
-        }
+      if (resolved) {
+        // Terminally fixed — transition to auto_resolved so it stops being
+        // retried (and never needlessly escalates a credit that already posted).
+        await updateMismatchStatus(mismatch.id, 'auto_resolved', {
+          resolutionWorkflow: mismatch.mismatchClass,
+          lastResolutionAt: new Date(),
+          resolutionAttempts: mismatch.resolutionAttempts + 1,
+        })
+        result.resolved++
+      } else {
+        await updateMismatchStatus(mismatch.id, 'open', {
+          resolutionWorkflow: mismatch.mismatchClass,
+          lastResolutionAt: new Date(),
+          resolutionAttempts: mismatch.resolutionAttempts + 1,
+        })
       }
     } catch (err) {
       logger.error('[resolver] Resolution handler threw', {
