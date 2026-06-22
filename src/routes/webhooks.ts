@@ -23,7 +23,6 @@ import { requireValidWebhookSignature } from "../payments/webhookSignature.js";
 import {
   verifyPaystackSignature,
   verifyFlutterwaveSignature,
-  preventWebhookReplay,
 } from "../middleware/webhookSignature.js";
 import { jsonPayloadSha256Hex, sha256Hex, generateRandomSecretHex } from "../utils/sha256.js";
 import { z } from "zod";
@@ -62,19 +61,8 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
       next()
     },
     validate(paymentsWebhookSchema),
-    (req: Request, res: Response, next: NextFunction) => {
-      const rail = String(req.params.rail)
-      if (rail === 'paystack' || rail === 'flutterwave') {
-        return preventWebhookReplay(rail)(req, res, next)
-      }
-      next()
-    },
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        if (req.webhookReplaySkipped) {
-          return
-        }
-
         const rail = String(req.params.rail);
 
         const provider = getPaymentProvider(rail);
@@ -151,6 +139,9 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
 
         // Handle reversed/chargeback status
         if (internalStatus === "reversed") {
+          const wasCredited =
+            existingStakingDeposit?.status === "confirmed" ||
+            existingWalletDeposit?.status === "confirmed";
           const reversed = existingStakingDeposit
             ? await depositStore.reverseByCanonical(rail, externalRef)
             : await ngnDepositStore.setStatusByCanonical(
@@ -159,7 +150,7 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
                 "reversed",
               );
 
-          if (reversed) {
+          if (reversed && wasCredited) {
             // Debit wallet balance (idempotent - won't double-debit)
             const result = await ngnWalletService.reverseTopUp(
               userId,
@@ -339,6 +330,20 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
             400,
             "Invalid event type",
           );
+        }
+
+        const claim = await webhookEventDedupeStore.tryClaim({
+          rail: provider,
+          providerEventId: reversalRef,
+          payloadHash: jsonPayloadSha256Hex(req.body),
+        });
+        if (claim === "duplicate") {
+          recordKPI("webhookEventDeduped");
+          return res.status(200).json({
+            success: true,
+            deduped: true,
+            providerEventId: reversalRef,
+          });
         }
 
         logger.info("Processing deposit reversal webhook", {
@@ -546,4 +551,3 @@ export function createWebhooksRouter(ngnWalletService: NgnWalletService) {
 
   return router;
 }
-

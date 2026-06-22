@@ -278,18 +278,23 @@ describe('webhookSignature', () => {
     })
 
     it('returns secret as-is for manual_admin', () => {
-      expect(generateTestSignature('manual_admin', payload, secret)).toBe(secret)
+      const crypto = require('node:crypto')
+      const expected = crypto.createHmac('sha256', secret).update(payload, 'utf8').digest('hex')
+      expect(generateTestSignature('manual_admin', payload, secret)).toBe(expected)
     })
 
-    it('returns secret as-is for psp (legacy)', () => {
-      expect(generateTestSignature('psp', payload, secret)).toBe(secret)
+    it('generates HMAC-SHA256 for psp (legacy)', () => {
+      const crypto = require('node:crypto')
+      const expected = crypto.createHmac('sha256', secret).update(payload, 'utf8').digest('hex')
+      expect(generateTestSignature('psp', payload, secret)).toBe(expected)
     })
   })
 
   describe('requireValidWebhookSignature', () => {
     const createMockRequest = (headers: Record<string, string>, body?: unknown) => {
+      const timestamp = String(Date.now())
       return {
-        headers,
+        headers: { 'x-webhook-timestamp': timestamp, ...headers },
         body,
         rawBody: body ? JSON.stringify(body) : undefined,
       } as any
@@ -366,11 +371,15 @@ describe('webhookSignature', () => {
       const crypto = require('node:crypto')
       const secret = 'paystack_secret'
       const payload = '{"event":"charge.success"}'
-      const validSignature = crypto.createHmac('sha512', secret).update(payload, 'utf8').digest('hex')
+      const timestamp = String(Date.now())
+      const validSignature = crypto
+        .createHmac('sha512', secret)
+        .update(`${timestamp}.${payload}`, 'utf8')
+        .digest('hex')
 
       process.env.PAYSTACK_SECRET = secret
       const req = createMockRequest(
-        { 'x-paystack-signature': validSignature },
+        { 'x-paystack-signature': validSignature, 'x-webhook-timestamp': timestamp },
         { event: 'charge.success' }
       )
 
@@ -382,11 +391,15 @@ describe('webhookSignature', () => {
       const crypto = require('node:crypto')
       const secret = 'flutterwave_secret'
       const payload = '{"event":"charge.completed"}'
-      const validSignature = crypto.createHmac('sha256', secret).update(payload, 'utf8').digest('hex')
+      const timestamp = String(Date.now())
+      const validSignature = crypto
+        .createHmac('sha256', secret)
+        .update(`${timestamp}.${payload}`, 'utf8')
+        .digest('hex')
 
       process.env.FLUTTERWAVE_SECRET = secret
       const req = createMockRequest(
-        { 'verif-hash': validSignature },
+        { 'verif-hash': validSignature, 'x-webhook-timestamp': timestamp },
         { event: 'charge.completed' }
       )
 

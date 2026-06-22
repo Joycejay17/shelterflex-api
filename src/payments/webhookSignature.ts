@@ -3,6 +3,12 @@ import type { Request } from 'express'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 import { getValidSecretVersions } from '../services/rotatingSecretProvider.js'
+import {
+  assertFreshWebhookTimestamp,
+  constantTimeEqual,
+  getSignedWebhookTimestamp,
+  timestampedWebhookPayload,
+} from './webhookSecurity.js'
 
 // Extend Express Request to support rawBody middleware
 declare global {
@@ -125,19 +131,8 @@ export function verifyPaystackSignature(
 
     // Use timing-safe comparison to prevent timing attacks
     // Handle length mismatch gracefully
-    if (signature.length === expectedSignature.length) {
-      try {
-        const isValid = crypto.timingSafeEqual(
-          Buffer.from(signature, 'hex'),
-          Buffer.from(expectedSignature, 'hex')
-        )
-
-        if (isValid) {
-          return { valid: true }
-        }
-      } catch {
-        // Continue to next secret version
-      }
+    if (constantTimeEqual(signature, expectedSignature, 'hex')) {
+      return { valid: true }
     }
   }
 
@@ -174,17 +169,8 @@ export function verifyFlutterwaveSignature(
       .digest('hex')
 
     // Use timing-safe comparison
-    try {
-      const isValid = crypto.timingSafeEqual(
-        Buffer.from(signature, 'hex'),
-        Buffer.from(expectedSignature, 'hex')
-      )
-
-      if (isValid) {
-        return { valid: true }
-      }
-    } catch {
-      // Continue to next secret version
+    if (constantTimeEqual(signature, expectedSignature, 'hex')) {
+      return { valid: true }
     }
   }
 
@@ -211,17 +197,8 @@ export function verifyManualAdminSignature(
 
   // Try each valid secret version
   for (const secret of secrets) {
-    try {
-      const isValid = crypto.timingSafeEqual(
-        Buffer.from(signature, 'utf8'),
-        Buffer.from(secret, 'utf8')
-      )
-
-      if (isValid) {
-        return { valid: true }
-      }
-    } catch {
-      // Continue to next secret version
+    if (constantTimeEqual(signature, secret)) {
+      return { valid: true }
     }
   }
 
@@ -260,7 +237,7 @@ export function verifyLegacySignature(
 
   // Try each valid secret version
   for (const secret of secrets) {
-    if (signature === secret) {
+    if (constantTimeEqual(signature, secret)) {
       return { valid: true }
     }
   }
@@ -316,26 +293,29 @@ export function requireValidWebhookSignature(req: Request, rail: PaymentRail): v
     return
   }
 
+  const timestamp = getSignedWebhookTimestamp(req)
+  assertFreshWebhookTimestamp(timestamp)
+  const timestampedPayload = timestampedWebhookPayload(timestamp, getRawBody(req)).toString('utf8')
+
   let result: WebhookValidationResult
 
   switch (rail) {
     case 'paystack': {
       const signature = req.headers['x-paystack-signature'] as string
-      const rawBody = getRawBody(req)
-      result = verifyPaystackSignature(rawBody, signature, secrets)
+      result = verifyPaystackSignature(timestampedPayload, signature, secrets)
       break
     }
 
     case 'flutterwave': {
       const signature = req.headers['verif-hash'] as string
-      const rawBody = getRawBody(req)
-      result = verifyFlutterwaveSignature(rawBody, signature, secrets)
+      result = verifyFlutterwaveSignature(timestampedPayload, signature, secrets)
       break
     }
 
     case 'manual_admin': {
       const signature = req.headers['x-admin-signature'] as string
-      result = verifyManualAdminSignature(signature, secrets)
+      result = verifyFlutterwaveSignature(timestampedPayload, signature, secrets)
+      if (!result.valid) result.error = 'Invalid admin signature'
       break
     }
 
@@ -343,7 +323,8 @@ export function requireValidWebhookSignature(req: Request, rail: PaymentRail): v
     default: {
       // Legacy fallback
       const signature = req.headers['x-webhook-signature'] as string
-      result = verifyLegacySignature(signature, secrets)
+      result = verifyFlutterwaveSignature(timestampedPayload, signature, secrets)
+      if (!result.valid) result.error = 'Invalid webhook signature'
       break
     }
   }
@@ -359,20 +340,24 @@ export function requireValidWebhookSignature(req: Request, rail: PaymentRail): v
 export function generateTestSignature(
   rail: PaymentRail,
   payload: string,
-  secret: string
+  secret: string,
+  timestamp?: string,
 ): string {
+  const signedPayload = timestamp
+    ? timestampedWebhookPayload(timestamp, payload)
+    : Buffer.from(payload, 'utf8')
   switch (rail) {
     case 'paystack':
-      return crypto.createHmac('sha512', secret).update(payload, 'utf8').digest('hex')
+      return crypto.createHmac('sha512', secret).update(signedPayload).digest('hex')
 
     case 'flutterwave':
-      return crypto.createHmac('sha256', secret).update(payload, 'utf8').digest('hex')
+      return crypto.createHmac('sha256', secret).update(signedPayload).digest('hex')
 
     case 'manual_admin':
-      return secret
+      return crypto.createHmac('sha256', secret).update(signedPayload).digest('hex')
 
     case 'psp':
     default:
-      return secret
+      return crypto.createHmac('sha256', secret).update(signedPayload).digest('hex')
   }
 }

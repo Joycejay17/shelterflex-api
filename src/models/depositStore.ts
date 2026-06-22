@@ -6,6 +6,7 @@ import {
   type DepositRecord,
   type ConfirmDepositRecordInput,
 } from './deposit.js'
+import { canAdvancePaymentStatus } from '../payments/paymentState.js'
 
 class DepositStore {
   // Initiation (pending deposits tracked by external refs)
@@ -96,7 +97,7 @@ class DepositStore {
   async confirmByCanonical(rail: string, externalRef: string): Promise<Deposit | null> {
     const deposit = await this.getByCanonical(rail, externalRef)
     if (!deposit) return null
-    if (deposit.status === DepositStatus.CONFIRMED) return deposit
+    if (!canAdvancePaymentStatus(deposit.status, DepositStatus.CONFIRMED)) return null
     deposit.status = DepositStatus.CONFIRMED
     deposit.confirmedAt = new Date()
     deposit.updatedAt = new Date()
@@ -107,6 +108,7 @@ class DepositStore {
   async fail(depositId: string): Promise<Deposit | null> {
     const deposit = this.initiationsById.get(depositId)
     if (!deposit) return null
+    if (!canAdvancePaymentStatus(deposit.status, DepositStatus.FAILED)) return null
     deposit.status = DepositStatus.FAILED
     deposit.updatedAt = new Date()
     this.initiationsById.set(depositId, deposit)
@@ -116,7 +118,7 @@ class DepositStore {
   async reverseByCanonical(rail: string, externalRef: string): Promise<Deposit | null> {
     const deposit = await this.getByCanonical(rail, externalRef)
     if (!deposit) return null
-    if (deposit.status === DepositStatus.REVERSED) return deposit
+    if (!canAdvancePaymentStatus(deposit.status, DepositStatus.REVERSED)) return null
     deposit.status = DepositStatus.REVERSED
     deposit.updatedAt = new Date()
     this.initiationsById.set(deposit.depositId, deposit)
