@@ -76,6 +76,13 @@ export class OutboxSender {
             throw new Error('Deal status sync not supported by adapter')
           }
           break
+        case TxType.TENANT_REPUTATION_UPDATE:
+          if (this.adapter.updateTenantReputation) {
+            await this.sendTenantReputationUpdate(item)
+          } else {
+            throw new Error('Tenant reputation update not supported by adapter')
+          }
+          break
         default:
           throw new Error(`Unknown tx type: ${item.txType}`)
       }
@@ -251,6 +258,35 @@ export class OutboxSender {
       contractDealId: String(payload.contractDealId ?? payload.dealId),
       newStatus,
       actor: String(payload.actor ?? 'system'),
+    })
+  }
+
+  private async sendTenantReputationUpdate(item: OutboxItem): Promise<void> {
+    if (!this.adapter.updateTenantReputation) {
+      throw new Error('Adapter does not support updateTenantReputation')
+    }
+    const { payload } = item
+    if (
+      !payload.tenantId ||
+      payload.compositeScore == null ||
+      payload.paymentScore == null ||
+      payload.propertyCareScore == null ||
+      payload.communicationScore == null ||
+      payload.totalRatings == null
+    ) {
+      throw new Error('Invalid tenant reputation payload: missing required fields')
+    }
+    await this.adapter.updateTenantReputation(String(payload.tenantId), {
+      compositeScore: Number(payload.compositeScore),
+      paymentScore: Number(payload.paymentScore),
+      propertyCareScore: Number(payload.propertyCareScore),
+      communicationScore: Number(payload.communicationScore),
+      totalRatings: Number(payload.totalRatings),
+      lastUpdated: 0n,
+    })
+    logger.debug('Tenant reputation anchored on-chain', {
+      tenantId: String(payload.tenantId),
+      compositeScore: Number(payload.compositeScore),
     })
   }
 

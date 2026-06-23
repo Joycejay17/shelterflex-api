@@ -4,7 +4,7 @@
  * Wraps any SorobanAdapter to automatically track RPC call metrics
  */
 
-import { SorobanAdapter, RecordReceiptParams } from './adapter.js';
+import { SorobanAdapter, RecordReceiptParams, TenantReputationRecord } from './adapter.js';
 import { SorobanConfig } from './client.js';
 import { RawReceiptEvent } from '../indexer/event-parser.js';
 import { recordSorobanRpcCall } from '../utils/metrics.js';
@@ -98,6 +98,24 @@ export class MetricsSorobanAdapter implements SorobanAdapter {
     }
     return this.trackCall('init', () =>
       this.wrapped.init!(contractId, adminAddress, operatorAddress)
+    );
+  }
+
+  async updateTenantReputation?(tenantId: string, record: TenantReputationRecord): Promise<void> {
+    if (!this.wrapped.updateTenantReputation) {
+      throw new Error('updateTenantReputation not implemented');
+    }
+    return this.trackCall('updateTenantReputation', () =>
+      this.wrapped.updateTenantReputation!(tenantId, record)
+    );
+  }
+
+  async getTenantReputation?(tenantId: string): Promise<TenantReputationRecord | null> {
+    if (!this.wrapped.getTenantReputation) {
+      throw new Error('getTenantReputation not implemented');
+    }
+    return this.trackCall('getTenantReputation', () =>
+      this.wrapped.getTenantReputation!(tenantId)
     );
   }
 

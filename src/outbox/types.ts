@@ -24,6 +24,7 @@ export enum TxType {
   STAKE_REWARD_CLAIM = 'stake_reward_claim',
   CONVERSION = 'conversion',
   DEAL_STATUS_CHANGED = 'deal_status_changed',
+  TENANT_REPUTATION_UPDATE = 'tenant_reputation_update',
 }
 
 /**
