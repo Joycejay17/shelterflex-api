@@ -2,6 +2,7 @@ import { Keypair, TransactionBuilder, Operation, xdr, Address, rpc, Account } fr
 import { logger } from '../utils/logger.js'
 import { ConfigurationError, TransactionError } from '../soroban/errors.js'
 import { getStellarSequenceAllocator, type AllocationResult } from './stellarSequenceAllocator.js'
+import { getSigningKeyRotationService, type KeyType } from './signingKeyRotationService.js'
 
 /**
  * Admin operations that require admin signing.
@@ -64,6 +65,7 @@ export class AdminSigningService {
   private readonly adminSecret?: string
   private readonly networkPassphrase: string
   private readonly server: rpc.Server
+  private readonly keyType: KeyType = 'admin'
 
   constructor(config: {
     enabled: boolean
@@ -82,6 +84,39 @@ export class AdminSigningService {
    */
   isEnabled(): boolean {
     return this.enabled && !!this.adminSecret
+  }
+
+  /**
+   * Get the admin signing key, respecting rotation state
+   * If a rotation is in progress, uses the active_key_id pointer
+   */
+  private async getSigningKey(accountAddress: string): Promise<{ secret: string; publicKey: string }> {
+    // Check if there's an active rotation
+    const rotationService = getSigningKeyRotationService()
+    const activeKeyId = await rotationService.getActiveKey(this.keyType, accountAddress)
+
+    if (activeKeyId) {
+      // Rotation in progress - use the active key from rotation service
+      const secret = await rotationService.retrieveKeyMaterial(activeKeyId, this.keyType)
+      const keypair = Keypair.fromSecret(secret)
+      return {
+        secret,
+        publicKey: keypair.publicKey(),
+      }
+    }
+
+    // No rotation in progress - use the configured admin secret
+    if (!this.adminSecret) {
+      throw new ConfigurationError(
+        'SOROBAN_ADMIN_SECRET not configured. Admin operations require admin secret key.'
+      )
+    }
+
+    const keypair = Keypair.fromSecret(this.adminSecret)
+    return {
+      secret: this.adminSecret,
+      publicKey: keypair.publicKey(),
+    }
   }
 
   /**
@@ -122,15 +157,16 @@ export class AdminSigningService {
       )
     }
 
-    // Load admin keypair
+    // Load admin keypair (respecting rotation state)
     let adminKeypair: Keypair
+    let adminPublicKey: string
     try {
-      adminKeypair = Keypair.fromSecret(this.adminSecret)
+      const signingKey = await this.getSigningKey(params.contractId)
+      adminKeypair = Keypair.fromSecret(signingKey.secret)
+      adminPublicKey = signingKey.publicKey
     } catch (err) {
       throw new ConfigurationError('Invalid admin secret key configured')
     }
-
-    const adminPublicKey = adminKeypair.publicKey()
 
     // Audit log: operation initiated (no secrets)
     this.logAdminOperation({
