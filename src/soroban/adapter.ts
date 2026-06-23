@@ -44,6 +44,19 @@ export interface TxOnChainStatus {
   ledger?: number
 }
 
+/**
+ * On-chain representation of a tenant's aggregated reputation.
+ * Scores are on a 0–1000 scale (off-chain 1–5 avg × 200).
+ */
+export interface TenantReputationRecord {
+  compositeScore: number
+  paymentScore: number
+  propertyCareScore: number
+  communicationScore: number
+  totalRatings: number
+  lastUpdated: bigint
+}
+
 export interface SorobanAdapter {
   getBalance(account: string): Promise<bigint>
   credit(account: string, amount: bigint): Promise<void>
@@ -72,6 +85,10 @@ export interface SorobanAdapter {
    * may omit this method; the sender will fall back to blind resubmission.
    */
   getTransactionStatus?(txHash: string): Promise<TxOnChainStatus>
+
+  // Tenant reputation contract (tenant_reputation)
+  updateTenantReputation?(tenantId: string, record: TenantReputationRecord): Promise<void>
+  getTenantReputation?(tenantId: string): Promise<TenantReputationRecord | null>
 
   // Admin operations (require SOROBAN_ADMIN_SIGNING_ENABLED=true)
   pause?(contractId: string): Promise<string>
