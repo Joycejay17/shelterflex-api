@@ -9,6 +9,7 @@ import {
 import type { LedgerEvent, ProviderEvent, ToleranceRule, MismatchClass } from './types.js'
 import { DEFAULT_TOLERANCE_RULES } from './types.js'
 import { tryAbsorbDrift } from './drift.js'
+import { recordReconciliationMismatch } from '../metrics.js'
 
 export type ReconciliationResult = {
   matched: number
@@ -170,6 +171,7 @@ async function reconcileLedgerEvent(
             traceContext: { ...trace, ageMs: now - ledger.occurredAt.getTime() },
           })
           await markLedgerEventStatus(ledger.id, 'unmatched')
+          recordReconciliationMismatch('missing_credit')
           logger.warn('[reconciliation] Missing credit detected', trace)
           break
 
@@ -184,6 +186,7 @@ async function reconcileLedgerEvent(
             traceContext: { ...trace, duplicateCount: providerEvents.length },
           })
           await markLedgerEventStatus(ledger.id, 'unmatched')
+          recordReconciliationMismatch('duplicate_debit')
           logger.warn('[reconciliation] Duplicate debit detected', trace)
           break
 
@@ -198,6 +201,7 @@ async function reconcileLedgerEvent(
             traceContext: trace,
           })
           await markLedgerEventStatus(ledger.id, 'unmatched')
+          recordReconciliationMismatch('amount_mismatch')
           logger.warn('[reconciliation] Amount mismatch detected', {
             ...trace,
             expected: ledger.amountMinor.toString(),
@@ -221,6 +225,7 @@ async function reconcileLedgerEvent(
           })
           // Delayed settlement still matches on amount — mark matched.
           await markLedgerEventStatus(ledger.id, 'matched')
+          recordReconciliationMismatch('delayed_settlement')
           logger.warn('[reconciliation] Delayed settlement detected', trace)
           break
       }
