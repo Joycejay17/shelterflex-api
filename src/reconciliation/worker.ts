@@ -2,6 +2,12 @@ import { logger } from '../utils/logger.js'
 import { runReconciliationPass } from './engine.js'
 import { runResolutionPass } from './resolver.js'
 import type { ToleranceRule } from './types.js'
+import {
+  recordReconciliationPending,
+  recordReconciliationProcessed,
+  recordReconciliationMismatch,
+  recordReconciliationProcessingDuration,
+} from '../metrics.js'
 
 const RECON_INTERVAL_MS = parseInt(process.env.RECONCILIATION_INTERVAL_MS ?? '60000', 10)
 const RECON_BATCH_SIZE  = parseInt(process.env.RECONCILIATION_BATCH_SIZE  ?? '200',   10)
@@ -35,12 +41,31 @@ export class ReconciliationWorker {
   }
 
   async poll() {
+    const startTime = Date.now()
     try {
       const reconResult = await runReconciliationPass(this.toleranceRules, RECON_BATCH_SIZE)
       logger.info('[ReconciliationWorker] Reconciliation pass done', reconResult)
 
+      // Record pending count (matched + mismatches + skipped = total processed)
+      recordReconciliationPending(reconResult.matched + reconResult.mismatches + reconResult.skipped)
+
+      // Record processed counts by status
+      recordReconciliationProcessed('matched')
+      for (let i = 1; i < reconResult.matched; i++) {
+        recordReconciliationProcessed('matched')
+      }
+      for (let i = 0; i < reconResult.mismatches; i++) {
+        recordReconciliationProcessed('mismatch')
+      }
+      for (let i = 0; i < reconResult.skipped; i++) {
+        recordReconciliationProcessed('skipped')
+      }
+
       const resolveResult = await runResolutionPass()
       logger.info('[ReconciliationWorker] Resolution pass done', resolveResult)
+
+      const duration = Date.now() - startTime
+      recordReconciliationProcessingDuration(duration)
     } catch (err) {
       logger.error('[ReconciliationWorker] Poll failed', {
         error: err instanceof Error ? err.message : String(err),
