@@ -6,6 +6,12 @@ import { OutboxStatus, type OutboxItem } from './types.js'
 import { outboxProcessor } from '../services/outboxProcessor.js'
 import { outboxConfig } from '../config/outboxConfig.js'
 import { logger } from '../utils/logger.js'
+import {
+  recordOutboxPending,
+  recordOutboxProcessed,
+  recordOutboxFailed,
+  recordOutboxProcessingDuration,
+} from '../metrics.js'
 
 export class OutboxWorker {
   private intervalId: NodeJS.Timeout | null = null
@@ -44,18 +50,25 @@ export class OutboxWorker {
   }
 
   async process() {
+    const startTime = Date.now()
+
     // -------------------------------------------------------------------
     // Phase 1: Atomically claim PENDING items (SELECT FOR UPDATE SKIP LOCKED)
     // so that two concurrent workers never process the same row.
     // -------------------------------------------------------------------
     const pending = await outboxStore.lockForProcessing(50, this.workerId)
+    recordOutboxPending(pending.length)
+
     for (const item of pending) {
       logger.info('Processing pending outbox item', {
         outboxId: item.id,
         txType: item.txType,
         txId: item.txId,
       })
+      const itemStartTime = Date.now()
       await this.attemptSend(item)
+      const itemDuration = Date.now() - itemStartTime
+      recordOutboxProcessingDuration(itemDuration)
     }
 
     // -------------------------------------------------------------------
@@ -77,6 +90,7 @@ export class OutboxWorker {
     for (const item of failed) {
       if (item.retryCount >= outboxConfig.maxAttempts) {
         await outboxProcessor.promoteToDeadLetter(item, 'Max retry count reached')
+        recordOutboxFailed('max_retry_count_reached')
         continue
       }
       if (!outboxProcessor.shouldRetry(item)) continue
@@ -87,8 +101,15 @@ export class OutboxWorker {
         retryCount: item.retryCount,
         lastError: item.lastError,
       })
+      const itemStartTime = Date.now()
       await this.attemptSend(item)
+      const itemDuration = Date.now() - itemStartTime
+      recordOutboxProcessingDuration(itemDuration)
     }
+
+    // Record overall processing duration
+    const totalDuration = Date.now() - startTime
+    recordOutboxProcessingDuration(totalDuration)
   }
 
   /**
