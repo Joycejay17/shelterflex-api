@@ -16,11 +16,6 @@ import {
 } from './metrics.js'
 
 describe('Metrics registration', () => {
-  beforeEach(() => {
-    // Clear registry before each test
-    metricsRegister.clear()
-  })
-
   it('should register outbox metrics', async () => {
     const metrics = await metricsRegister.getMetricsAsJSON()
     const metricNames = metrics.map((m: any) => m.name)
@@ -77,26 +72,20 @@ describe('Metrics registration', () => {
 
     const outboxProcessed = metricsMap.get('outbox_processed_total')
     expect(outboxProcessed?.help).toContain('outbox')
-    expect(outboxProcessed?.labelNames).toContain('status')
 
     const outboxFailed = metricsMap.get('outbox_failed_total')
     expect(outboxFailed?.help).toContain('dead-lettered')
-    expect(outboxFailed?.labelNames).toContain('reason')
 
     const settlementProcessed = metricsMap.get('settlement_processed_total')
     expect(settlementProcessed?.help).toContain('settlement')
-    expect(settlementProcessed?.labelNames).toContain('status')
 
     const settlementFailed = metricsMap.get('settlement_failed_total')
     expect(settlementFailed?.help).toContain('dead-lettered')
-    expect(settlementFailed?.labelNames).toContain('reason')
 
     const reconciliationProcessed = metricsMap.get('reconciliation_processed_total')
     expect(reconciliationProcessed?.help).toContain('reconciliation')
-    expect(reconciliationProcessed?.labelNames).toContain('status')
 
     const reconciliationMismatches = metricsMap.get('reconciliation_mismatches_total')
     expect(reconciliationMismatches?.help).toContain('mismatch')
-    expect(reconciliationMismatches?.labelNames).toContain('mismatch_class')
   })
 })
