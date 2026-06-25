@@ -1,6 +1,8 @@
 import { tenantRatingRepository, TenantRating, RatingAggregate, RatingCardToken } from '../repositories/TenantRatingRepository.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
+import { logger } from '../utils/logger.js'
+import { TenantReputationOnChainService } from './tenantReputationOnChainService.js'
 
 export interface SubmitRatingInput {
   paymentTimeliness: number
@@ -11,6 +13,12 @@ export interface SubmitRatingInput {
 }
 
 export class TenantRatingService {
+  private onChainService?: TenantReputationOnChainService
+
+  setOnChainService(svc: TenantReputationOnChainService): void {
+    this.onChainService = svc
+  }
+
   async submitRating(
     landlordId: string,
     tenantId: string,
@@ -24,7 +32,7 @@ export class TenantRatingService {
       throw new AppError(ErrorCode.DUPLICATE_REQUEST, 409, 'You have already rated this tenant for this deal')
     }
 
-    return tenantRatingRepository.create({
+    const rating = await tenantRatingRepository.create({
       tenantId,
       landlordId,
       dealId,
@@ -34,6 +42,29 @@ export class TenantRatingService {
       overall: input.overall,
       comment: input.comment,
     })
+
+    this.anchorReputationAsync(tenantId, rating.id)
+
+    return rating
+  }
+
+  private anchorReputationAsync(tenantId: string, ratingId: string): void {
+    if (!this.onChainService) return
+
+    const svc = this.onChainService
+    tenantRatingRepository
+      .getAggregate(tenantId)
+      .then((aggregate) => {
+        if (!aggregate) return
+        return svc.enqueueReputationUpdate(tenantId, aggregate, ratingId)
+      })
+      .catch((err) => {
+        logger.error('Failed to enqueue on-chain reputation update', {
+          tenantId,
+          ratingId,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      })
   }
 
   async getCard(tenantId: string): Promise<{

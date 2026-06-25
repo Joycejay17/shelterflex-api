@@ -2,6 +2,12 @@ import { getPool } from '../db.js'
 import { logger } from '../utils/logger.js'
 import { executeSettlementEvent, getSettlementMemoryQueue, type SettlementOutboxRow } from './enqueueSideEffects.js'
 import { recordKPI } from '../utils/appMetrics.js'
+import {
+  recordSettlementPending,
+  recordSettlementProcessed,
+  recordSettlementFailed,
+  recordSettlementProcessingDuration,
+} from '../metrics.js'
 
 const MAX_ATTEMPTS = 5
 const BASE_BACKOFF_MS = 2000
@@ -26,25 +32,37 @@ export class SettlementOutboxWorker {
   }
 
   async tick() {
+    const startTime = Date.now()
     const pool = await getPool()
     if (pool) {
+      let processedCount = 0
       for (let i = 0; i < 8; i++) {
         const done = await this.claimAndProcessOne(pool)
         if (!done) break
+        processedCount++
       }
+      recordSettlementPending(processedCount)
     } else {
       const q = getSettlementMemoryQueue()
-      for (const row of q.filter((r) => r.status === 'pending')) {
+      const pendingRows = q.filter((r) => r.status === 'pending')
+      recordSettlementPending(pendingRows.length)
+      for (const row of pendingRows) {
         try {
           await executeSettlementEvent(mapMemRow(row))
           row.status = 'done'
+          recordSettlementProcessed('done')
         } catch (e) {
           row.attempts += 1
           row.status = row.attempts >= MAX_ATTEMPTS ? 'dead' : 'pending'
-          if (row.status === 'dead') recordKPI('settlementOutboxDead')
+          if (row.status === 'dead') {
+            recordKPI('settlementOutboxDead')
+            recordSettlementFailed('max_attempts_reached')
+          }
         }
       }
     }
+    const duration = Date.now() - startTime
+    recordSettlementProcessingDuration(duration)
   }
 
   private async claimAndProcessOne(pool: NonNullable<Awaited<ReturnType<typeof getPool>>>): Promise<boolean> {
@@ -83,6 +101,7 @@ export class SettlementOutboxWorker {
     try {
       await executeSettlementEvent(row)
       await pool.query(`UPDATE settlement_outbox SET status = 'done', updated_at = NOW() WHERE id = $1`, [row.id])
+      recordSettlementProcessed('done')
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       const attempts = row.attempts + 1
@@ -94,6 +113,7 @@ export class SettlementOutboxWorker {
         )
         await pool.query(`DELETE FROM settlement_outbox WHERE id = $1`, [row.id])
         recordKPI('settlementOutboxDead')
+        recordSettlementFailed(msg.substring(0, 50)) // Truncate reason to avoid high cardinality
         logger.error('settlement outbox dead', { id: row.id, idempotencyKey: row.idempotencyKey, msg })
       } else {
         const next = new Date(Date.now() + BASE_BACKOFF_MS * Math.pow(2, attempts - 1))
@@ -103,6 +123,7 @@ export class SettlementOutboxWorker {
            WHERE id = $1`,
           [row.id, attempts, msg, next.toISOString()],
         )
+        recordSettlementFailed('retry_scheduled')
       }
     }
     return true

@@ -1,4 +1,4 @@
-import { SorobanAdapter, RecordReceiptParams, SyncDealStatusParams } from './adapter.js'
+import { SorobanAdapter, RecordReceiptParams, SyncDealStatusParams, TenantReputationRecord } from './adapter.js'
 import { SorobanConfig } from './client.js'
 import { RawReceiptEvent } from '../indexer/event-parser.js'
 import { logger } from '../utils/logger.js'
@@ -7,6 +7,7 @@ import { logger } from '../utils/logger.js'
 export class StubSorobanAdapter implements SorobanAdapter {
      private static stubBalances = new Map<string, bigint>()
      private static stubBonds = new Map<string, bigint>()
+     private static stubReputations = new Map<string, TenantReputationRecord>()
      private config: SorobanConfig
 
      constructor(config: SorobanConfig) {
@@ -24,7 +25,8 @@ export class StubSorobanAdapter implements SorobanAdapter {
      public static _testOnlyReset(): void {
           this.stubBalances.clear()
           this.stubBonds.clear()
-          logger.debug('Soroban stub: static reset complete (balances and bonds cleared)')
+          this.stubReputations.clear()
+          logger.debug('Soroban stub: static reset complete (balances, bonds, and reputations cleared)')
      }
 
      /**
@@ -217,5 +219,20 @@ export class StubSorobanAdapter implements SorobanAdapter {
 
      async syncDealStatus(params: SyncDealStatusParams): Promise<void> {
           logger.info('Soroban stub: syncDealStatus', { ...params })
+     }
+
+     async updateTenantReputation(tenantId: string, record: TenantReputationRecord): Promise<void> {
+          const updated: TenantReputationRecord = {
+               ...record,
+               lastUpdated: BigInt(Math.floor(Date.now() / 1000)),
+          }
+          StubSorobanAdapter.stubReputations.set(tenantId, updated)
+          logger.info('Soroban stub: updateTenantReputation', { tenantId, compositeScore: record.compositeScore })
+     }
+
+     async getTenantReputation(tenantId: string): Promise<TenantReputationRecord | null> {
+          const record = StubSorobanAdapter.stubReputations.get(tenantId) ?? null
+          logger.debug('Soroban stub: getTenantReputation', { tenantId, found: record !== null })
+          return record
      }
 }
