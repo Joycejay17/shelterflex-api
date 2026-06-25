@@ -9,10 +9,13 @@ export interface PriceFeed {
 }
 
 export interface OracleClient {
+  init(admin: string, operator: string, stalenessThreshold: bigint, maxDeviationBps: bigint): Promise<string>
   updatePrice(pair: string, price: bigint, sequence: bigint): Promise<string>
   getPrice(pair: string): Promise<PriceFeed>
   getPriceUnsafe(pair: string): Promise<PriceFeed>
   isStale(pair: string): Promise<boolean>
+  setStalenessThreshold(threshold: bigint): Promise<string>
+  setMaxDeviationBps(maxDeviationBps: bigint): Promise<string>
 }
 
 /**
@@ -24,6 +27,10 @@ export class OracleSorobanClient implements OracleClient {
     private readonly adapter: SorobanAdapter,
     private readonly contractId: string,
   ) {}
+
+  async init(admin: string, operator: string, stalenessThreshold: bigint, maxDeviationBps: bigint): Promise<string> {
+    return this.invoke('init', [admin, operator, stalenessThreshold.toString(), maxDeviationBps.toString()])
+  }
 
   async updatePrice(pair: string, price: bigint, sequence: bigint): Promise<string> {
     return this.invoke('update_price', [pair, price.toString(), sequence.toString()])
@@ -42,6 +49,14 @@ export class OracleSorobanClient implements OracleClient {
   async isStale(pair: string): Promise<boolean> {
     const raw = await this.simulate('is_stale', [pair])
     return Boolean(raw)
+  }
+
+  async setStalenessThreshold(threshold: bigint): Promise<string> {
+    return this.invoke('set_staleness_threshold', [threshold.toString()])
+  }
+
+  async setMaxDeviationBps(maxDeviationBps: bigint): Promise<string> {
+    return this.invoke('set_max_deviation_bps', [maxDeviationBps.toString()])
   }
 
   private async invoke(fn: string, args: string[]): Promise<string> {
