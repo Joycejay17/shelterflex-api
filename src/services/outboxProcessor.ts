@@ -19,6 +19,7 @@ import { OutboxStatus, type OutboxItem } from '../outbox/types.js'
 import { outboxRepository } from '../repositories/OutboxRepository.js'
 import { computeRetryDelay, outboxConfig, type OutboxConfig } from '../config/outboxConfig.js'
 import { logger } from '../utils/logger.js'
+import { recordOutboxFailed, recordOutboxProcessed } from '../metrics.js'
 
 export class OutboxProcessor {
   private config: OutboxConfig
@@ -86,6 +87,9 @@ export class OutboxProcessor {
       // (e.g., dead_lettered_at column not yet migrated in a dev environment)
       await outboxStore.markDead(item.id, reason)
     }
+
+    // Record the dead-letter promotion with the reason
+    recordOutboxFailed(reason)
   }
 }
 

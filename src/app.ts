@@ -896,7 +896,7 @@ export function createApp() {
   app.use('/api/v1', createRentGuaranteeRouter(rentGuaranteeProvider))
 
   // Tenant rating card routes
-  app.use('/api/v1', createTenantRatingCardRouter())
+  app.use('/api/v1', createTenantRatingCardRouter(sorobanAdapter))
 
   // Interactive API documentation
   app.use("/docs", createDocsRouter());
