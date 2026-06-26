@@ -10,19 +10,37 @@ export class InMemoryNgnWalletStore implements NgnWalletStore {
     private wallets: Map<string, NgnWallet> = new Map()
     private ledger: LedgerEntry[] = []
     private locks: Map<string, Promise<void>> = new Map()
+    private walletCreationByUser: Map<string, Promise<NgnWallet>> = new Map()
 
     async createWallet(userId: string): Promise<NgnWallet> {
         const existing = await this.getWalletByUserId(userId)
         if (existing) return existing
 
-        const wallet: NgnWallet = {
-            walletId: crypto.randomUUID(),
-            userId,
-            currency: 'NGN',
-            createdAt: new Date(),
+        const inflight = this.walletCreationByUser.get(userId)
+        if (inflight) {
+            return inflight
         }
-        this.wallets.set(wallet.walletId, wallet)
-        return wallet
+
+        const creation = (async () => {
+            const again = await this.getWalletByUserId(userId)
+            if (again) return again
+
+            const wallet: NgnWallet = {
+                walletId: crypto.randomUUID(),
+                userId,
+                currency: 'NGN',
+                createdAt: new Date(),
+            }
+            this.wallets.set(wallet.walletId, wallet)
+            return wallet
+        })()
+
+        this.walletCreationByUser.set(userId, creation)
+        try {
+            return await creation
+        } finally {
+            this.walletCreationByUser.delete(userId)
+        }
     }
 
     async getWalletByUserId(userId: string): Promise<NgnWallet | null> {
@@ -77,6 +95,7 @@ export class InMemoryNgnWalletStore implements NgnWalletStore {
         this.wallets.clear()
         this.ledger = []
         this.locks.clear()
+        this.walletCreationByUser.clear()
     }
 }
 
