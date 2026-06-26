@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import request from 'supertest'
 import express from 'express'
-import { createInspectorJobsRouter } from './inspectorJobs.js'
+import { createInspectorJobsRouter, createAdminInspectorJobsRouter } from './inspectorJobs.js'
 import { StubSorobanAdapter } from '../soroban/stub-adapter.js'
 import { errorHandler } from '../middleware/errorHandler.js'
 
@@ -16,86 +16,90 @@ vi.mock('../middleware/auth.js', async (importOriginal) => {
 // State management for job lifecycle testing
 const jobStateStore = new Map<string, { status: string; claimedBy: string | null; report: unknown }>()
 
-vi.mock('../services/inspectorService.js', () => ({
-  inspectorService: {
-    listAvailableJobs: vi.fn(async () => {
-      const available = Array.from(jobStateStore.entries())
-        .filter(([, state]) => state.status === 'open' && state.claimedBy === null)
-        .map(([id]) => ({ id, status: 'open' }))
-      return available
-    }),
-    claimJob: vi.fn(async (jobId: string, inspectorId: string) => {
-      const job = jobStateStore.get(jobId)
-      if (!job) {
-        throw new Error(`Job ${jobId} not found`)
-      }
-      if (job.claimedBy !== null && job.claimedBy !== inspectorId) {
-        throw new Error(`Job ${jobId} already claimed by another inspector`)
-      }
-      if (job.status !== 'open') {
-        throw new Error(`Job ${jobId} is not open`)
-      }
-      job.claimedBy = inspectorId
-      job.status = 'claimed'
-      return { id: jobId, status: 'claimed', claimedBy: inspectorId }
-    }),
-    submitReport: vi.fn(async (jobId: string, inspectorId: string, reportData: any) => {
-      const job = jobStateStore.get(jobId)
-      if (!job) {
-        throw new Error(`Job ${jobId} not found`)
-      }
-      if (job.claimedBy !== inspectorId) {
-        throw new Error(`Job ${jobId} was not claimed by inspector ${inspectorId}`)
-      }
-      if (job.status !== 'claimed') {
-        throw new Error(`Job ${jobId} is not in claimed state`)
-      }
-      job.status = 'reported'
-      job.report = reportData
-      return { job: { id: jobId, status: 'reported' }, report: reportData }
-    }),
-    listAllJobs: vi.fn(async () => {
-      return Array.from(jobStateStore.entries()).map(([id, state]) => ({
-        id,
-        ...state,
-      }))
-    }),
-    createJob: vi.fn(async (jobData: any) => {
-      const jobId = `job-${Date.now()}`
-      jobStateStore.set(jobId, {
-        status: 'open',
-        claimedBy: null,
-        report: null,
-      })
-      return { id: jobId, ...jobData }
-    }),
-    approveReport: vi.fn(async (jobId: string) => {
-      const job = jobStateStore.get(jobId)
-      if (!job) {
-        throw new Error(`Job ${jobId} not found`)
-      }
-      if (job.status !== 'reported') {
-        throw new Error(`Job ${jobId} is not in reported state`)
-      }
-      if (job.status === 'approved') {
-        throw new Error(`Job ${jobId} already approved`)
-      }
-      job.status = 'approved'
-      return { id: jobId, status: 'approved' }
-    }),
-    rejectReport: vi.fn(async (jobId: string, reason: string) => {
-      const job = jobStateStore.get(jobId)
-      if (!job) {
-        throw new Error(`Job ${jobId} not found`)
-      }
-      if (job.status !== 'reported') {
-        throw new Error(`Job ${jobId} is not in reported state`)
-      }
-      job.status = 'rejected'
-      return { id: jobId, status: 'rejected', reason }
-    }),
-  },
-}))
+vi.mock('../services/inspectorService.js', async () => {
+  const { AppError } = await import('../errors/AppError.js')
+  const { ErrorCode } = await import('../errors/errorCodes.js')
+  return {
+    inspectorService: {
+      listAvailableJobs: vi.fn(async () => {
+        const available = Array.from(jobStateStore.entries())
+          .filter(([, state]) => state.status === 'open' && state.claimedBy === null)
+          .map(([id]) => ({ id, status: 'open' }))
+        return available
+      }),
+      claimJob: vi.fn(async (jobId: string, inspectorId: string) => {
+        const job = jobStateStore.get(jobId)
+        if (!job) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, `Job ${jobId} not found`)
+        }
+        if (job.claimedBy !== null && job.claimedBy !== inspectorId) {
+          throw new AppError(ErrorCode.CONFLICT, 409, `Job ${jobId} already claimed by another inspector`)
+        }
+        if (job.status !== 'open') {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, `Job ${jobId} is not open`)
+        }
+        job.claimedBy = inspectorId
+        job.status = 'claimed'
+        return { id: jobId, status: 'claimed', claimedBy: inspectorId }
+      }),
+      submitReport: vi.fn(async (jobId: string, inspectorId: string, reportData: any) => {
+        const job = jobStateStore.get(jobId)
+        if (!job) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, `Job ${jobId} not found`)
+        }
+        if (job.claimedBy !== inspectorId) {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, `Job ${jobId} was not claimed by inspector ${inspectorId}`)
+        }
+        if (job.status !== 'claimed') {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, `Job ${jobId} is not in claimed state`)
+        }
+        job.status = 'reported'
+        job.report = reportData
+        return { job: { id: jobId, status: 'reported' }, report: reportData }
+      }),
+      listAllJobs: vi.fn(async () => {
+        return Array.from(jobStateStore.entries()).map(([id, state]) => ({
+          id,
+          ...state,
+        }))
+      }),
+      createJob: vi.fn(async (jobData: any) => {
+        const jobId = `job-${Date.now()}`
+        jobStateStore.set(jobId, {
+          status: 'open',
+          claimedBy: null,
+          report: null,
+        })
+        return { id: jobId, ...jobData }
+      }),
+      approveReport: vi.fn(async (jobId: string) => {
+        const job = jobStateStore.get(jobId)
+        if (!job) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, `Job ${jobId} not found`)
+        }
+        if (job.status !== 'reported') {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, `Job ${jobId} is not in reported state`)
+        }
+        if (job.status === 'approved') {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, `Job ${jobId} already approved`)
+        }
+        job.status = 'approved'
+        return { id: jobId, status: 'approved' }
+      }),
+      rejectReport: vi.fn(async (jobId: string, reason: string) => {
+        const job = jobStateStore.get(jobId)
+        if (!job) {
+          throw new AppError(ErrorCode.NOT_FOUND, 404, `Job ${jobId} not found`)
+        }
+        if (job.status !== 'reported') {
+          throw new AppError(ErrorCode.VALIDATION_ERROR, 400, `Job ${jobId} is not in reported state`)
+        }
+        job.status = 'rejected'
+        return { id: jobId, status: 'rejected', reason }
+      }),
+    },
+  }
+})
 
 const INSPECTOR_ID = 'inspector-test-user-001'
 const ADMIN_ID = 'admin-user-001'
@@ -111,6 +115,7 @@ function buildApp(role: string = 'inspector', userId: string = INSPECTOR_ID) {
     next()
   })
   app.use('/api/v1/inspector', createInspectorJobsRouter(adapter))
+  app.use('/api/v1/admin/inspector', createAdminInspectorJobsRouter())
   app.use(errorHandler)
   return app
 }
@@ -200,6 +205,8 @@ describe('Inspector Jobs API', () => {
     it('allows a bonded inspector to claim a job', async () => {
       const app = buildApp()
 
+      jobStateStore.set('job-abc-123', { status: 'open', claimedBy: null, report: null })
+
       await request(app)
         .post('/api/v1/inspector/bond/stake')
         .send({ amount: '500' })
@@ -261,7 +268,7 @@ describe('Inspector Jobs API', () => {
 
       await request(app2)
         .post('/api/v1/inspector/jobs/job-contested-1/claim')
-        .expect(400)
+        .expect(409)
     })
   })
 
@@ -322,7 +329,7 @@ describe('Inspector Jobs API', () => {
       const res = await request(app)
         .post('/api/v1/inspector/jobs/job-to-report/report')
         .send({ findings: 'Property condition is excellent' })
-        .expect(200)
+        .expect(201)
 
       expect(res.body.success).toBe(true)
       expect(res.body.data.job.status).toBe('reported')
@@ -368,7 +375,7 @@ describe('Inspector Jobs API', () => {
       jobStateStore.set('job-to-approve', { status: 'reported', claimedBy: INSPECTOR_ID, report: { findings: 'good' } })
 
       const res = await request(app)
-        .post('/api/v1/inspector/jobs/job-to-approve/approve')
+        .post('/api/v1/admin/inspector/jobs/job-to-approve/approve')
         .expect(200)
 
       expect(res.body.success).toBe(true)
@@ -379,7 +386,7 @@ describe('Inspector Jobs API', () => {
       jobStateStore.set('job-for-reject', { status: 'reported', claimedBy: INSPECTOR_ID, report: {} })
 
       await request(buildApp('inspector'))
-        .post('/api/v1/inspector/jobs/job-for-reject/approve')
+        .post('/api/v1/admin/inspector/jobs/job-for-reject/approve')
         .expect(403)
     })
 
@@ -389,7 +396,7 @@ describe('Inspector Jobs API', () => {
       jobStateStore.set('job-wrong-state', { status: 'open', claimedBy: null, report: null })
 
       await request(app)
-        .post('/api/v1/inspector/jobs/job-wrong-state/approve')
+        .post('/api/v1/admin/inspector/jobs/job-wrong-state/approve')
         .expect(400)
     })
 
@@ -399,12 +406,12 @@ describe('Inspector Jobs API', () => {
       jobStateStore.set('job-double-approve', { status: 'reported', claimedBy: INSPECTOR_ID, report: {} })
 
       await request(app)
-        .post('/api/v1/inspector/jobs/job-double-approve/approve')
+        .post('/api/v1/admin/inspector/jobs/job-double-approve/approve')
         .expect(200)
 
       // Try to approve again — should fail
       await request(app)
-        .post('/api/v1/inspector/jobs/job-double-approve/approve')
+        .post('/api/v1/admin/inspector/jobs/job-double-approve/approve')
         .expect(400)
     })
   })
@@ -416,7 +423,7 @@ describe('Inspector Jobs API', () => {
       jobStateStore.set('job-to-reject', { status: 'reported', claimedBy: INSPECTOR_ID, report: { findings: 'bad' } })
 
       const res = await request(app)
-        .post('/api/v1/inspector/jobs/job-to-reject/reject')
+        .post('/api/v1/admin/inspector/jobs/job-to-reject/reject')
         .send({ reason: 'Incomplete report' })
         .expect(200)
 
@@ -429,7 +436,7 @@ describe('Inspector Jobs API', () => {
       jobStateStore.set('job-for-reject', { status: 'reported', claimedBy: INSPECTOR_ID, report: {} })
 
       await request(buildApp('inspector'))
-        .post('/api/v1/inspector/jobs/job-for-reject/reject')
+        .post('/api/v1/admin/inspector/jobs/job-for-reject/reject')
         .send({ reason: 'test' })
         .expect(403)
     })
@@ -440,7 +447,7 @@ describe('Inspector Jobs API', () => {
       jobStateStore.set('job-not-reported', { status: 'claimed', claimedBy: INSPECTOR_ID, report: null })
 
       await request(app)
-        .post('/api/v1/inspector/jobs/job-not-reported/reject')
+        .post('/api/v1/admin/inspector/jobs/job-not-reported/reject')
         .send({ reason: 'test' })
         .expect(400)
     })
@@ -468,11 +475,11 @@ describe('Inspector Jobs API', () => {
       await request(inspectorApp)
         .post('/api/v1/inspector/jobs/job-lifecycle/report')
         .send({ findings: 'Property is in good condition' })
-        .expect(200)
+        .expect(201)
 
       // Admin approves
       const res = await request(adminApp)
-        .post('/api/v1/inspector/jobs/job-lifecycle/approve')
+        .post('/api/v1/admin/inspector/jobs/job-lifecycle/approve')
         .expect(200)
 
       expect(res.body.data.status).toBe('approved')
@@ -497,7 +504,7 @@ describe('Inspector Jobs API', () => {
       jobStateStore.set('job-early-approve', { status: 'claimed', claimedBy: INSPECTOR_ID, report: null })
 
       await request(adminApp)
-        .post('/api/v1/inspector/jobs/job-early-approve/approve')
+        .post('/api/v1/admin/inspector/jobs/job-early-approve/approve')
         .expect(400)
     })
   })
