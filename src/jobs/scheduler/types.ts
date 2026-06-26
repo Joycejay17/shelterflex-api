@@ -28,6 +28,8 @@ export interface ScheduledJob {
   leaseHolder: string | null
   leaseAcquiredAt: Date | null
   leaseExpiresAt: Date | null
+  /** Monotonic fencing token to prevent stale lease holders from executing */
+  fencingToken: number | null
 }
 
 export interface CreateJobInput {
@@ -61,5 +63,7 @@ export interface JobRunHistory {
   durationMs: number | null
   errorMessage: string | null
   payload: Record<string, unknown>
+  /** Fencing token used for this execution to prevent stale holder execution */
+  fencingToken: number | null
   createdAt: Date
 }
