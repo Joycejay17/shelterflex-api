@@ -3,7 +3,11 @@
  * Abstract interface with stub provider for local development
  */
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+
+export function computeDocumentHash(documentKey: string): string {
+  return createHash('sha256').update(documentKey).digest('hex')
+}
 
 export interface Signer {
   id: string
@@ -15,6 +19,7 @@ export interface Signer {
 export interface SigningRequest {
   requestId: string
   documentKey: string
+  documentHash: string
   signers: Signer[]
   status: 'pending' | 'completed' | 'expired'
   createdAt: Date
@@ -26,10 +31,26 @@ export interface SigningUrl {
 }
 
 export interface ESignatureProvider {
-  createSigningRequest(documentKey: string, signers: Signer[]): Promise<SigningRequest>
+  createSigningRequest(documentKey: string, documentHash: string, signers: Signer[]): Promise<SigningRequest>
   getSigningUrl(requestId: string, signerId: string): Promise<SigningUrl>
   handleWebhook(payload: unknown): Promise<{ requestId: string; signerId: string; signed: boolean }>
   verifySignature(requestId: string, signerId: string): Promise<boolean>
+}
+
+interface SignerState {
+  token: string
+  expiresAt: Date
+  signed: boolean
+}
+
+interface StoredRequest {
+  requestId: string
+  documentKey: string
+  documentHash: string
+  signers: Signer[]
+  status: 'pending' | 'completed' | 'expired'
+  createdAt: Date
+  signerState: Map<string, SignerState>
 }
 
 /**
@@ -37,27 +58,29 @@ export interface ESignatureProvider {
  * Uses in-memory tokens instead of real e-signature service
  */
 export class StubESignatureProvider implements ESignatureProvider {
-  private requests = new Map<string, SigningRequest & { tokens: Map<string, string> }>()
+  private requests = new Map<string, StoredRequest>()
 
-  async createSigningRequest(documentKey: string, signers: Signer[]): Promise<SigningRequest> {
+  async createSigningRequest(documentKey: string, documentHash: string, signers: Signer[]): Promise<SigningRequest> {
     const requestId = randomUUID()
-    const tokens = new Map<string, string>()
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000)
+    const signerState = new Map<string, SignerState>()
 
     for (const signer of signers) {
-      tokens.set(signer.id, randomUUID())
+      signerState.set(signer.id, { token: randomUUID(), expiresAt, signed: false })
     }
 
-    const request: SigningRequest & { tokens: Map<string, string> } = {
+    const stored: StoredRequest = {
       requestId,
       documentKey,
+      documentHash,
       signers,
       status: 'pending',
       createdAt: new Date(),
-      tokens,
+      signerState,
     }
 
-    this.requests.set(requestId, request)
-    return { ...request, tokens: undefined as any }
+    this.requests.set(requestId, stored)
+    return { requestId, documentKey, documentHash, signers, status: 'pending', createdAt: stored.createdAt }
   }
 
   async getSigningUrl(requestId: string, signerId: string): Promise<SigningUrl> {
@@ -66,15 +89,14 @@ export class StubESignatureProvider implements ESignatureProvider {
       throw new Error(`Signing request ${requestId} not found`)
     }
 
-    const token = request.tokens.get(signerId)
-    if (!token) {
+    const state = request.signerState.get(signerId)
+    if (!state) {
       throw new Error(`Signer ${signerId} not found in request ${requestId}`)
     }
 
-    // In stub mode, return a URL that points to the stub webhook
     return {
-      url: `/api/webhooks/esignature/stub?token=${token}&signer=${signerId}&requestId=${requestId}`,
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes
+      url: `/api/webhooks/esignature/stub?token=${state.token}&signer=${signerId}&requestId=${requestId}`,
+      expiresAt: state.expiresAt,
     }
   }
 
@@ -90,10 +112,20 @@ export class StubESignatureProvider implements ESignatureProvider {
       throw new Error(`Signing request ${requestId} not found`)
     }
 
-    const expectedToken = request.tokens.get(signer)
-    if (!expectedToken || expectedToken !== token) {
+    const state = request.signerState.get(signer)
+    if (!state || state.token !== token) {
       throw new Error('Invalid signing token')
     }
+
+    if (Date.now() > state.expiresAt.getTime()) {
+      throw new Error('Signing token has expired')
+    }
+
+    if (state.signed) {
+      throw new Error('Token has already been used')
+    }
+
+    state.signed = true
 
     return { requestId, signerId: signer, signed: true }
   }
@@ -102,7 +134,8 @@ export class StubESignatureProvider implements ESignatureProvider {
     const request = this.requests.get(requestId)
     if (!request) return false
 
-    return request.tokens.has(signerId)
+    const state = request.signerState.get(signerId)
+    return state?.signed === true
   }
 }
 

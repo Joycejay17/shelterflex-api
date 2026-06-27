@@ -8,7 +8,7 @@ import { leaseAgreementStore } from '../models/leaseAgreementStore.js'
 import { LeaseStatus } from '../models/leaseAgreement.js'
 import { dealStore } from '../models/dealStore.js'
 import { generateLeaseDraft, buildLeaseTemplateData } from '../services/leaseDocumentService.js'
-import { createESignatureProvider } from '../services/eSignatureService.js'
+import { createESignatureProvider, computeDocumentHash } from '../services/eSignatureService.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 
@@ -75,7 +75,7 @@ router.post(
       }
 
       // Create signing request with stub provider
-      await esignProvider.createSigningRequest(lease.documentKey, [
+      await esignProvider.createSigningRequest(lease.documentKey, computeDocumentHash(lease.documentKey), [
         { id: deal.tenantId, name: `Tenant ${deal.tenantId}`, email: '', role: 'tenant' },
         { id: deal.landlordId, name: `Landlord ${deal.landlordId}`, email: '', role: 'landlord' },
       ])
@@ -126,7 +126,7 @@ router.get(
 
       // Get signing URL from provider
       // In stub mode, we create a new request for each URL request
-      const signingRequest = await esignProvider.createSigningRequest(lease.documentKey, [
+      const signingRequest = await esignProvider.createSigningRequest(lease.documentKey, computeDocumentHash(lease.documentKey), [
         { id: deal.tenantId, name: '', email: '', role: 'tenant' },
         { id: deal.landlordId, name: '', email: '', role: 'landlord' },
       ])
