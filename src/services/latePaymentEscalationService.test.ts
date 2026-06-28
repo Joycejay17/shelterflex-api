@@ -9,7 +9,13 @@ import { lateFeeService } from './lateFeeService.js'
 import * as latePaymentNotifier from './latePaymentNotifier.js'
 
 vi.mock('./latePaymentNotifier.js')
-vi.mock('./lateFeeService.js')
+vi.mock('./lateFeeService.js', () => ({
+  lateFeeService: {
+    ensurePaymentRecord: vi.fn((dealId, period) => `pmt-${dealId}-${period}`),
+    applyLateFee: vi.fn().mockReturnValue({ applied: true, lateFeeAmountNgn: 2000 }),
+    getEffectiveAmount: vi.fn(() => 102000),
+  }
+}))
 
 describe('LatePaymentEscalationService', () => {
   const mockConfig: LatePaymentConfig = {
@@ -17,14 +23,16 @@ describe('LatePaymentEscalationService', () => {
     lateFeeDay: 4,
     atRiskDay: 7,
     adminEscalationDay: 14,
-    lateFeePercentage: 0.02,
+    defaultDay: 30,
+    lateFeeRate: 0.02,
+    jobPollIntervalMs: 6 * 60 * 60 * 1000,
   }
 
   let service: LatePaymentEscalationService
 
-  beforeEach(() => {
+  beforeEach(async () => {
     service = new LatePaymentEscalationService(mockConfig)
-    dealStore.clear()
+    await dealStore.clear()
     latePaymentEscalationStore.clear()
     adminTaskStore.clear()
     vi.clearAllMocks()
@@ -33,12 +41,12 @@ describe('LatePaymentEscalationService', () => {
   it('sends due-today reminder at dpd=0', async () => {
     const dueDate = new Date('2024-01-01')
     const now = new Date('2024-01-01')
-    const deal = createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
+    const deal = await createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
 
     await service.processAllActiveDeals(now)
 
     expect(latePaymentNotifier.sendLatePaymentNotification).toHaveBeenCalledWith(
-      expect.objectContaining({ step: 't0_due_today' }),
+      expect.objectContaining({ title: 'Payment due today' }),
     )
   })
 
@@ -46,12 +54,12 @@ describe('LatePaymentEscalationService', () => {
     const dueDate = new Date('2024-01-01')
     const now = new Date('2024-01-02')
 
-    const deal = createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
+    const deal = await createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
 
     await service.processAllActiveDeals(now)
 
     expect(latePaymentNotifier.sendLatePaymentNotification).toHaveBeenCalledWith(
-      expect.objectContaining({ step: 't_grace_reminder' }),
+      expect.objectContaining({ title: 'Payment reminder' }),
     )
   })
 
@@ -59,7 +67,7 @@ describe('LatePaymentEscalationService', () => {
     const dueDate = new Date('2024-01-01')
     const feeDay = new Date('2024-01-05')
 
-    const deal = createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
+    const deal = await createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
 
     await service.processAllActiveDeals(feeDay)
     expect(lateFeeService.applyLateFee).toHaveBeenCalledOnce()
@@ -74,12 +82,12 @@ describe('LatePaymentEscalationService', () => {
     const dueDate = new Date('2024-01-01')
     const atRiskDate = new Date('2024-01-08')
 
-    const deal = createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
+    const deal = await createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
     expect(deal.status).toBe(DealStatus.ACTIVE)
 
     await service.processAllActiveDeals(atRiskDate)
 
-    const updated = dealStore.getById(deal.id)
+    const updated = await dealStore.findById(deal.dealId)
     expect(updated?.status).toBe(DealStatus.AT_RISK)
   })
 
@@ -87,29 +95,29 @@ describe('LatePaymentEscalationService', () => {
     const dueDate = new Date('2024-01-01')
     const escalationDate = new Date('2024-01-15')
 
-    const deal = createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
-    const initialTaskCount = adminTaskStore.list().length
+    const deal = await createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
+    const initialTaskCount = adminTaskStore.listOpen().length
 
     await service.processAllActiveDeals(escalationDate)
 
-    const taskCount = adminTaskStore.list().length
+    const taskCount = adminTaskStore.listOpen().length
     expect(taskCount).toBeGreaterThan(initialTaskCount)
 
     vi.clearAllMocks()
     await service.processAllActiveDeals(new Date('2024-01-16'))
 
-    expect(adminTaskStore.list().length).toBe(taskCount)
+    expect(adminTaskStore.listOpen().length).toBe(taskCount)
   })
 
   it('skips COMPLETED and DEFAULTED deals', async () => {
     const now = new Date('2024-01-15')
     const dueDate = new Date('2024-01-01')
 
-    const completedDeal = createTestDeal([{ dueDate, status: ScheduleItemStatus.PAID }])
-    completedDeal.status = DealStatus.COMPLETED
+    const completedDeal = await createTestDeal([{ dueDate, status: ScheduleItemStatus.PAID }])
+    await dealStore.updateStatus(completedDeal.dealId, DealStatus.COMPLETED)
 
-    const defaultedDeal = createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
-    defaultedDeal.status = DealStatus.DEFAULTED
+    const defaultedDeal = await createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
+    await dealStore.updateStatus(defaultedDeal.dealId, DealStatus.DEFAULTED)
 
     await service.processAllActiveDeals(now)
 
@@ -120,7 +128,7 @@ describe('LatePaymentEscalationService', () => {
     const dueDate = new Date('2024-01-01')
     const atRiskDate = new Date('2024-01-08T10:00:00Z')
 
-    const deal = createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
+    const deal = await createTestDeal([{ dueDate, status: ScheduleItemStatus.PENDING }])
 
     await service.processAllActiveDeals(atRiskDate)
     const firstCallCount = vi.mocked(latePaymentNotifier.sendLatePaymentNotification).mock.calls.length
@@ -134,24 +142,28 @@ describe('LatePaymentEscalationService', () => {
   })
 })
 
-function createTestDeal(
+async function createTestDeal(
   scheduleItems: Array<{ dueDate: Date; status: ScheduleItemStatus }>,
-): DealWithSchedule {
-  const deal: DealWithSchedule = {
-    id: `deal-${Math.random()}`,
+): Promise<DealWithSchedule> {
+  const deal = await dealStore.create({
     tenantId: 'tenant-1',
     landlordId: 'landlord-1',
-    status: DealStatus.ACTIVE,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    schedule: scheduleItems.map((item, idx) => ({
-      period: idx + 1,
-      dueDate: item.dueDate,
-      status: item.status,
-      amountNgn: 100_000,
-    })),
+    listingId: `listing-${Math.random()}`,
+    annualRentNgn: 1_200_000,
+    depositNgn: 240_000,
+    termMonths: 12,
+  })
+
+  await dealStore.updateStatus(deal.dealId, DealStatus.ACTIVE)
+
+  for (let i = 0; i < scheduleItems.length; i++) {
+    const item = scheduleItems[i]
+    const period = i + 1
+    await dealStore.updateScheduleItemStatus(deal.dealId, period, item.status)
+    await dealStore.setScheduleDueDateForTest(deal.dealId, period, item.dueDate.toISOString())
   }
 
-  dealStore.save(deal)
-  return deal
+  const updated = await dealStore.findById(deal.dealId)
+  if (!updated) throw new Error('Failed to find created deal')
+  return updated
 }
