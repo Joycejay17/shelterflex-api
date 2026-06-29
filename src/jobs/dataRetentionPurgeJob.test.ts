@@ -1,10 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { dataRetentionPurgeJobHandler, DATA_RETENTION_PURGE_JOB_NAME } from './dataRetentionPurgeJob.js'
-
-const mockPurgeExpiredRecords = vi.fn()
 
 vi.mock('../services/dataRetentionService.js', () => ({
-  purgeExpiredRecords: mockPurgeExpiredRecords,
+  purgeExpiredRecords: vi.fn(),
 }))
 
 vi.mock('../utils/logger.js', () => ({
@@ -14,6 +11,11 @@ vi.mock('../utils/logger.js', () => ({
     warn: vi.fn(),
   },
 }))
+
+import { dataRetentionPurgeJobHandler, DATA_RETENTION_PURGE_JOB_NAME } from './dataRetentionPurgeJob.js'
+import { purgeExpiredRecords } from '../services/dataRetentionService.js'
+
+const mockPurgeExpiredRecords = purgeExpiredRecords as any
 
 describe('DataRetentionPurgeJob', () => {
   beforeEach(() => {
