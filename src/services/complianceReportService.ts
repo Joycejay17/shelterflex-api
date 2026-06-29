@@ -258,17 +258,22 @@ export class ComplianceReportService {
     dateTo: Date,
   ): Promise<KycRecord[]> {
     try {
-      const kycRecords = await kycRepository.findByDateRange(dateFrom, dateTo)
-      return kycRecords.map((r) => ({
-        id: r.id,
-        userId: r.userId,
-        status: r.status,
-        documentType: r.documentType,
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt,
-        provider: r.provider,
-        externalId: r.externalId,
-      }))
+      const result = await kycRepository.list({
+        page: 1,
+        pageSize: 1000,
+      })
+      return result.records
+        .filter((r) => r.createdAt >= dateFrom && r.createdAt <= dateTo)
+        .map((r) => ({
+          id: r.id,
+          userId: r.userId,
+          status: r.status,
+          documentType: r.documentType,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+          provider: r.providerId ?? undefined,
+          externalId: r.externalId ?? undefined,
+        }))
     } catch {
       return []
     }
