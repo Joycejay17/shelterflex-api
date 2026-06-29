@@ -12,20 +12,37 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { WhistleblowerReportService } from './whistleblowerReportService.js'
 import { WhistleblowerRepository, type WhistleblowerReport } from '../repositories/WhistleblowerRepository.js'
+
+// ─── isolate the module-level singleton ──────────────────────────────────────
+// WhistleblowerReportService calls `whistleblowerRepository` (the singleton)
+// directly. We proxy every call through `activeRepo` so each test gets a
+// fresh store.
+
+let activeRepo: WhistleblowerRepository
+
+vi.mock('../repositories/WhistleblowerRepository.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../repositories/WhistleblowerRepository.js')>()
+  return {
+    ...actual,
+    whistleblowerRepository: {
+      createReport:       (...a: any[]) => activeRepo.createReport(...a),
+      listReports:        (...a: any[]) => activeRepo.listReports(...a),
+      getReportById:      (...a: any[]) => activeRepo.getReportById(...a),
+      updateReportStatus: (...a: any[]) => activeRepo.updateReportStatus(...a),
+      countRecentByIp:    (...a: any[]) => activeRepo.countRecentByIp(...a),
+    },
+  }
+})
+
+const { WhistleblowerReportService } = await import('./whistleblowerReportService.js')
+
+beforeEach(() => { activeRepo = new WhistleblowerRepository() })
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 function freshRepo(): WhistleblowerRepository {
   return new WhistleblowerRepository()
-}
-
-function freshService(repo: WhistleblowerRepository): WhistleblowerReportService {
-  // Swap the module-level singleton for an isolated instance per test
-  const svc = new WhistleblowerReportService()
-  ;(svc as any).repo = repo          // inject
-  return svc
 }
 
 const VALID_SUBMISSION = {
@@ -182,9 +199,10 @@ describe('WhistleblowerReportService.submitReport', () => {
 })
 
 describe('WhistleblowerReportService.listReports', () => {
-  let svc: WhistleblowerReportService
+  let svc: InstanceType<typeof WhistleblowerReportService>
 
   beforeEach(async () => {
+    // activeRepo is already reset by the top-level beforeEach
     svc = new WhistleblowerReportService()
     await svc.submitReport({ reportType: 'fraud', description: 'A' }, '1.1.1.1')
     await svc.submitReport({ reportType: 'fraud', description: 'B' }, '2.2.2.2')
@@ -219,23 +237,6 @@ describe('WhistleblowerReportService.listReports', () => {
 })
 
 describe('WhistleblowerReportService.updateStatus', () => {
-  let svc: WhistleblowerReportService
-  let reportId: string
-
-  beforeEach(async () => {
-    // Use a fresh repository instance per test to avoid cross-test state
-    const repo = freshRepo()
-    svc = new WhistleblowerReportService()
-    ;(svc as any).whistleblowerRepository = repo
-    const created = await repo.createReport({
-      reportType: 'fraud', description: 'test',
-      referenceCode: 'WB-TEST1', ipAddress: '5.5.5.5',
-    })
-    reportId = created.id
-    // wire svc to use this repo
-    ;(svc as any).repo = repo
-  })
-
   it('updateStatus changes the report status via the repository', async () => {
     const repo = freshRepo()
     const created = await repo.createReport({
