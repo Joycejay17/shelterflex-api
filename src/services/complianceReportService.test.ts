@@ -1,17 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ComplianceReportService } from './complianceReportService.js'
 import { complianceReportStore } from '../models/complianceReportStore.js'
-import { kycRepository } from '../repositories/KYCRepository.js'
+import { kycRepository } from '../repositories/KycRepository.js'
 import { dealStore } from '../models/dealStore.js'
 import { ngnDepositStore } from '../models/ngnDepositStore.js'
 import { outboxStore } from '../outbox/index.js'
 
 // Mock dependencies
 vi.mock('../models/complianceReportStore.js')
-vi.mock('../repositories/KYCRepository.js')
-vi.mock('../models/dealStore.js')
+vi.mock('../repositories/KycRepository.js', () => ({
+  kycRepository: {
+    findByDateRange: vi.fn().mockResolvedValue([]),
+    list: vi.fn().mockResolvedValue({ records: [], total: 0, page: 1, pageSize: 50, totalPages: 0 }),
+  },
+}))
+vi.mock('../models/dealStore.js', () => ({
+  dealStore: {
+    findMany: vi.fn().mockResolvedValue({ deals: [], total: 0, page: 1, pageSize: 50, totalPages: 0 }),
+  },
+}))
 vi.mock('../models/ngnDepositStore.js')
-vi.mock('../outbox/index.js')
+vi.mock('../outbox/index.js', () => ({
+  outboxStore: {
+    create: vi.fn().mockResolvedValue({}),
+    listByDealId: vi.fn().mockResolvedValue([]),
+  },
+}))
 
 describe('ComplianceReportService', () => {
   let complianceReportService: ComplianceReportService
@@ -266,7 +280,7 @@ describe('ComplianceReportService', () => {
       const content = 'test content'
       const hash = complianceReportService.computeIntegrityHash(content)
 
-      expect(hash).toBe('916f0023250f3348e9af646067f8cc1e3e5e3d6b3c8e5e5e5e5e5e5e5e5e5e5e5')
+      expect(hash).toBe('6ae8a75555209fd6c44157c0aed8016e763ff435a19cf186f76863140143ff72')
     })
 
     it('produces different hashes for different content', () => {

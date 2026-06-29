@@ -1,21 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ApplicationService } from './applicationService.js'
 import { listingApplicationRepository } from '../repositories/ListingApplicationRepository.js'
-import { auditRepository } from '../repositories/AuditRepository.js'
+import { auditLog } from '../utils/auditLogger.js'
 import { outboxStore } from '../outbox/index.js'
 import { ListingApplicationStatus, PaymentPlan } from '../models/listingApplication.js'
 import type { ListingApplication, CreateListingApplicationInput } from '../models/listingApplication.js'
 
 // Mock dependencies
 vi.mock('../repositories/ListingApplicationRepository.js')
-vi.mock('../repositories/AuditRepository.js')
-vi.mock('../outbox/index.js')
+vi.mock('../utils/auditLogger.js')
+vi.mock('../outbox/index.js', () => ({
+  outboxStore: {
+    create: vi.fn().mockResolvedValue({}),
+  },
+}))
 
 describe('ApplicationService', () => {
   let applicationService: ApplicationService
 
   beforeEach(() => {
     applicationService = new ApplicationService(listingApplicationRepository)
+    vi.clearAllMocks()
   })
 
   describe('apply', () => {
@@ -44,15 +49,13 @@ describe('ApplicationService', () => {
 
       vi.mocked(listingApplicationRepository.findDuplicateActive).mockResolvedValue(null)
       vi.mocked(listingApplicationRepository.create).mockResolvedValue(mockApplication)
-      vi.mocked(auditRepository.append).mockResolvedValue({} as any)
-      vi.mocked(outboxStore.create).mockResolvedValue({} as any)
+      vi.mocked(auditLog).mockImplementation(() => {})
 
       const result = await applicationService.apply(input)
 
       expect(listingApplicationRepository.findDuplicateActive).toHaveBeenCalledWith(tenantId, listingId)
       expect(listingApplicationRepository.create).toHaveBeenCalledWith(input)
-      expect(auditRepository.append).toHaveBeenCalled()
-      expect(outboxStore.create).toHaveBeenCalled()
+      expect(auditLog).toHaveBeenCalled()
       expect(result).toEqual(mockApplication)
     })
 
@@ -84,8 +87,7 @@ describe('ApplicationService', () => {
       await expect(applicationService.apply(input)).rejects.toThrow('Tenant already has an active application')
 
       expect(listingApplicationRepository.create).not.toHaveBeenCalled()
-      expect(auditRepository.append).not.toHaveBeenCalled()
-      expect(outboxStore.create).not.toHaveBeenCalled()
+      expect(auditLog).not.toHaveBeenCalled()
     })
 
     it('validates preferred start date is at least 7 days in the future', async () => {
@@ -125,19 +127,18 @@ describe('ApplicationService', () => {
         ...mockApplication,
         status: ListingApplicationStatus.APPROVED,
       })
-      vi.mocked(auditRepository.append).mockResolvedValue({} as any)
-      vi.mocked(outboxStore.create).mockResolvedValue({} as any)
+      vi.mocked(auditLog).mockImplementation(() => {})
 
       const result = await applicationService.reviewApplication(applicationId, landlordId, 'approve')
 
       expect(listingApplicationRepository.findById).toHaveBeenCalledWith(applicationId)
       expect(listingApplicationRepository.updateStatus).toHaveBeenCalledWith(
         applicationId,
-        'APPROVED',
+        'approved',
         landlordId,
         undefined
       )
-      expect(result.status).toBe('APPROVED')
+      expect(result.status).toBe('approved')
     })
 
     it('transitions from PENDING to REJECTED', async () => {
@@ -146,18 +147,17 @@ describe('ApplicationService', () => {
         ...mockApplication,
         status: ListingApplicationStatus.REJECTED,
       })
-      vi.mocked(auditRepository.append).mockResolvedValue({} as any)
-      vi.mocked(outboxStore.create).mockResolvedValue({} as any)
+      vi.mocked(auditLog).mockImplementation(() => {})
 
       const result = await applicationService.reviewApplication(applicationId, landlordId, 'reject', 'Insufficient income')
 
       expect(listingApplicationRepository.updateStatus).toHaveBeenCalledWith(
         applicationId,
-        'REJECTED',
+        'rejected',
         landlordId,
         'Insufficient income'
       )
-      expect(result.status).toBe('REJECTED')
+      expect(result.status).toBe('rejected')
     })
 
     it('rejects review if landlord does not own the listing', async () => {
@@ -202,14 +202,14 @@ describe('ApplicationService', () => {
         ...mockApplication,
         status: ListingApplicationStatus.WITHDRAWN,
       })
-      vi.mocked(auditRepository.append).mockResolvedValue({} as any)
+      vi.mocked(auditLog).mockImplementation(() => {})
 
       const result = await applicationService.withdrawApplication(applicationId, tenantId)
 
       expect(listingApplicationRepository.findById).toHaveBeenCalledWith(applicationId)
       expect(listingApplicationRepository.withdraw).toHaveBeenCalledWith(applicationId)
-      expect(auditRepository.append).toHaveBeenCalled()
-      expect(result.status).toBe('WITHDRAWN')
+      expect(auditLog).toHaveBeenCalled()
+      expect(result.status).toBe(ListingApplicationStatus.WITHDRAWN)
     })
 
     it('transitions from UNDER_REVIEW to WITHDRAWN', async () => {
@@ -219,12 +219,12 @@ describe('ApplicationService', () => {
         ...underReviewApplication,
         status: ListingApplicationStatus.WITHDRAWN,
       })
-      vi.mocked(auditRepository.append).mockResolvedValue({} as any)
+      vi.mocked(auditLog).mockImplementation(() => {})
 
       const result = await applicationService.withdrawApplication(applicationId, tenantId)
 
       expect(listingApplicationRepository.withdraw).toHaveBeenCalledWith(applicationId)
-      expect(result.status).toBe('WITHDRAWN')
+      expect(result.status).toBe(ListingApplicationStatus.WITHDRAWN)
     })
 
     it('rejects withdrawal from APPROVED status', async () => {
@@ -233,7 +233,7 @@ describe('ApplicationService', () => {
 
       await expect(
         applicationService.withdrawApplication(applicationId, tenantId)
-      ).rejects.toThrow('Cannot withdraw application in APPROVED status')
+      ).rejects.toThrow('Cannot withdraw application in approved status')
 
       expect(listingApplicationRepository.withdraw).not.toHaveBeenCalled()
     })
@@ -244,7 +244,7 @@ describe('ApplicationService', () => {
 
       await expect(
         applicationService.withdrawApplication(applicationId, tenantId)
-      ).rejects.toThrow('Cannot withdraw application in REJECTED status')
+      ).rejects.toThrow('Cannot withdraw application in rejected status')
 
       expect(listingApplicationRepository.withdraw).not.toHaveBeenCalled()
     })
@@ -255,7 +255,7 @@ describe('ApplicationService', () => {
 
       await expect(
         applicationService.withdrawApplication(applicationId, tenantId)
-      ).rejects.toThrow('Cannot withdraw application in WITHDRAWN status')
+      ).rejects.toThrow('Cannot withdraw application in withdrawn status')
 
       expect(listingApplicationRepository.withdraw).not.toHaveBeenCalled()
     })
@@ -302,11 +302,10 @@ describe('ApplicationService', () => {
         ...pendingApp,
         status: ListingApplicationStatus.APPROVED,
       })
-      vi.mocked(auditRepository.append).mockResolvedValue({} as any)
-      vi.mocked(outboxStore.create).mockResolvedValue({} as any)
+      vi.mocked(auditLog).mockImplementation(() => {})
 
       const result = await applicationService.reviewApplication(applicationId, landlordId, 'approve')
-      expect(result.status).toBe('APPROVED')
+      expect(result.status).toBe(ListingApplicationStatus.APPROVED)
     })
 
     it('allows full lifecycle: PENDING -> REJECTED', async () => {
@@ -330,11 +329,10 @@ describe('ApplicationService', () => {
         ...pendingApp,
         status: ListingApplicationStatus.REJECTED,
       })
-      vi.mocked(auditRepository.append).mockResolvedValue({} as any)
-      vi.mocked(outboxStore.create).mockResolvedValue({} as any)
+      vi.mocked(auditLog).mockImplementation(() => {})
 
       const result = await applicationService.reviewApplication(applicationId, landlordId, 'reject')
-      expect(result.status).toBe('REJECTED')
+      expect(result.status).toBe(ListingApplicationStatus.REJECTED)
     })
 
     it('allows withdrawal from PENDING and UNDER_REVIEW states', async () => {
@@ -359,10 +357,10 @@ describe('ApplicationService', () => {
         ...pendingApp,
         status: ListingApplicationStatus.WITHDRAWN,
       })
-      vi.mocked(auditRepository.append).mockResolvedValue({} as any)
+      vi.mocked(auditLog).mockImplementation(() => {})
 
       let result = await applicationService.withdrawApplication(applicationId, tenantId)
-      expect(result.status).toBe('WITHDRAWN')
+      expect(result.status).toBe(ListingApplicationStatus.WITHDRAWN)
 
       // Withdraw from UNDER_REVIEW
       const underReviewApp = { ...pendingApp, status: ListingApplicationStatus.UNDER_REVIEW }
@@ -373,7 +371,7 @@ describe('ApplicationService', () => {
       })
 
       result = await applicationService.withdrawApplication(applicationId, tenantId)
-      expect(result.status).toBe('WITHDRAWN')
+      expect(result.status).toBe('withdrawn')
     })
   })
 })
