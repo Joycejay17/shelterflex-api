@@ -3,21 +3,30 @@
  * Generates lease agreement documents from deal parameters
  */
 
-import { randomUUID } from 'node:crypto'
-import { Deal } from '../models/deal.js'
-import { leaseAgreementStore, LeaseStatus } from '../models/leaseAgreementStore.js'
+import { randomUUID, createHash } from "node:crypto";
+import { Deal } from "../models/deal.js";
+import { leaseAgreementStore } from "../models/leaseAgreementStore.js";
+import { LeaseStatus } from "../models/leaseAgreement.js";
 
 export interface LeaseTemplateData {
-  tenantName: string
-  landlordName: string
-  propertyAddress: string
-  annualRentNgn: number
-  paymentType: string
-  depositAmount: number
-  termMonths: number
-  startDate: string
-  leaseDuration: string
-  platformTerms: string
+  tenantName: string;
+  landlordName: string;
+  propertyAddress: string;
+  annualRentNgn: number;
+  paymentType: string;
+  depositAmount: number;
+  termMonths: number;
+  startDate: string;
+  leaseDuration: string;
+  platformTerms: string;
+}
+
+/**
+ * Compute SHA256 hash of lease document key
+ * Used for cryptographic binding to signature requests
+ */
+export function computeLeaseDocumentHash(documentKey: string): string {
+  return createHash("sha256").update(documentKey).digest("hex");
 }
 
 /**
@@ -29,18 +38,20 @@ export async function generateLeaseDraft(
   dealId: string,
   templateData: LeaseTemplateData,
 ): Promise<{ leaseId: string; documentKey: string }> {
-  const documentKey = `lease/${dealId}/${randomUUID()}.pdf`
+  const documentKey = `lease/${dealId}/${randomUUID()}.pdf`;
 
   // Check if a non-voided lease already exists for this deal
-  const existingLease = await leaseAgreementStore.getByDealId(dealId)
+  const existingLease = await leaseAgreementStore.getByDealId(dealId);
   if (existingLease && existingLease.status !== LeaseStatus.VOIDED) {
-    throw new Error(`A lease agreement already exists for deal ${dealId}. Void the existing lease first.`)
+    throw new Error(
+      `A lease agreement already exists for deal ${dealId}. Void the existing lease first.`,
+    );
   }
 
   const lease = await leaseAgreementStore.create({
     dealId,
     documentKey,
-  })
+  });
 
   // In production, generate PDF here using pdfkit
   // For now, we just store the lease record
@@ -49,7 +60,7 @@ export async function generateLeaseDraft(
   return {
     leaseId: lease.leaseId,
     documentKey,
-  }
+  };
 }
 
 /**
@@ -65,11 +76,12 @@ export function buildLeaseTemplateData(
     landlordName: `Landlord ${deal.landlordId}`,
     propertyAddress,
     annualRentNgn: deal.annualRentNgn,
-    paymentType: deal.paymentType || 'installment',
+    paymentType: deal.paymentType || "installment",
     depositAmount: deal.depositNgn,
     termMonths: deal.termMonths,
-    startDate: new Date().toISOString().split('T')[0],
+    startDate: new Date().toISOString().split("T")[0],
     leaseDuration: `${deal.termMonths} months`,
-    platformTerms: 'This lease agreement is facilitated by Shelterflex. All payments are processed through the Shelterflex platform.',
-  }
+    platformTerms:
+      "This lease agreement is facilitated by Shelterflex. All payments are processed through the Shelterflex platform.",
+  };
 }
