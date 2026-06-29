@@ -209,7 +209,7 @@ describe('Inspector Jobs API', () => {
 
       await request(app)
         .post('/api/v1/inspector/bond/stake')
-        .send({ amount: '500' })
+        .send({ amount: '100000000' })
         .expect(200)
 
       const res = await request(app)
@@ -253,7 +253,7 @@ describe('Inspector Jobs API', () => {
       // Inspector 1 stakes and claims
       await request(app1)
         .post('/api/v1/inspector/bond/stake')
-        .send({ amount: '500' })
+        .send({ amount: '100000000' })
         .expect(200)
 
       await request(app1)
@@ -263,7 +263,7 @@ describe('Inspector Jobs API', () => {
       // Inspector 2 stakes and tries to claim same job
       await request(app2)
         .post('/api/v1/inspector/bond/stake')
-        .send({ amount: '500' })
+        .send({ amount: '100000000' })
         .expect(200)
 
       await request(app2)
@@ -464,7 +464,7 @@ describe('Inspector Jobs API', () => {
       // Inspector stakes and claims
       await request(inspectorApp)
         .post('/api/v1/inspector/bond/stake')
-        .send({ amount: '500' })
+        .send({ amount: '100000000' })
         .expect(200)
 
       await request(inspectorApp)
