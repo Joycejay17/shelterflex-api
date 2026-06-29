@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import type { KycSubmission, KycStatus, KycDocumentType } from '../schemas/kyc.js'
 import { logger } from '../utils/logger.js'
 
@@ -99,10 +100,9 @@ export class RealKycProvider implements KycProvider {
   }
 
   webhookAuthenticate(payload: Record<string, unknown>): boolean {
-    const signature = payload.signature as string | undefined
-    const expected = require('crypto')
-      .createHmac('sha256', this.apiKey)
-      .update(JSON.stringify(payload))
+    const { signature, ...rest } = payload as { signature?: string } & Record<string, unknown>
+    const expected = createHmac('sha256', this.apiKey)
+      .update(JSON.stringify(rest))
       .digest('hex')
     return signature === expected
   }

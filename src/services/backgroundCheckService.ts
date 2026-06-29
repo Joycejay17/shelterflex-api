@@ -19,6 +19,11 @@ export interface BackgroundCheckInput {
   skipEmployment?: boolean;
   skipIncome?: boolean;
   skipBankStatement?: boolean;
+  /**
+   * If provided and it matches an existing result owned by the same tenant,
+   * the run updates that result in place instead of creating a duplicate.
+   */
+  existingCheckId?: string;
 }
 
 export interface BackgroundCheckOutput {
@@ -48,6 +53,10 @@ export interface BackgroundCheckOutput {
   overallStatus: string;
   provider: string;
   createdAt: string;
+  /** Whether the application can proceed based on the verification results. */
+  eligible: boolean;
+  /** Recorded reasons for an adverse (gating) decision, empty when eligible. */
+  adverseReasons: string[];
 }
 
 export class BackgroundCheckService {
@@ -59,13 +68,29 @@ export class BackgroundCheckService {
   async runFullCheck(input: BackgroundCheckInput): Promise<BackgroundCheckOutput> {
     logger.info(`Starting full background check for tenant ${input.tenantId}`);
 
-    // Create initial record with pending status
-    const result = await backgroundCheckResultStore.create({
-      tenantId: input.tenantId,
-      applicationId: input.applicationId,
-      overallStatus: "pending",
-      provider: "mock",
-    });
+    // Re-running against an existing check id updates that result in place
+    // rather than creating a duplicate record.
+    let result = null;
+    if (input.existingCheckId) {
+      const existing = await backgroundCheckResultStore.findById(
+        input.existingCheckId,
+      );
+      if (existing && existing.tenantId === input.tenantId) {
+        result = await backgroundCheckResultStore.update(existing.id, {
+          overallStatus: "pending",
+        });
+      }
+    }
+
+    if (!result) {
+      // Create initial record with pending status
+      result = await backgroundCheckResultStore.create({
+        tenantId: input.tenantId,
+        applicationId: input.applicationId,
+        overallStatus: "pending",
+        provider: "mock",
+      });
+    }
 
     let employmentData;
     let incomeData;
@@ -145,6 +170,12 @@ export class BackgroundCheckService {
         }
       }
 
+      const adverseReasons = this.computeAdverseReasons(
+        employmentData,
+        incomeData,
+        bankData,
+      );
+
       // Update result with completed status
       const updated = await backgroundCheckResultStore.update(result.id, {
         employmentVerified: employmentData?.verified,
@@ -167,6 +198,7 @@ export class BackgroundCheckService {
         bankStatementEndDate: bankData?.statementPeriod?.endDate,
         bankVerificationDate: bankData?.verificationDate,
         overallStatus: "completed",
+        verificationMetadata: { adverseReasons },
       });
 
       logger.info(
@@ -213,6 +245,30 @@ export class BackgroundCheckService {
   }
 
   /**
+   * Derive adverse-action reasons from verification results. An empty list
+   * means the application is eligible to proceed.
+   */
+  private computeAdverseReasons(
+    employmentData?: { verified: boolean },
+    incomeData?: { incomeStability: string },
+    bankData?: { overdraftCount: number },
+  ): string[] {
+    const reasons: string[] = [];
+
+    if (employmentData && !employmentData.verified) {
+      reasons.push("Employment could not be verified");
+    }
+    if (incomeData && incomeData.incomeStability === "unstable") {
+      reasons.push("Income stability does not meet requirements");
+    }
+    if (bankData && bankData.overdraftCount > 2) {
+      reasons.push("Excessive overdraft history");
+    }
+
+    return reasons;
+  }
+
+  /**
    * Utility: Promise with timeout
    */
   private async withTimeout<T>(
@@ -231,6 +287,7 @@ export class BackgroundCheckService {
    * Map database result to output format
    */
   private mapToOutput(result: any): BackgroundCheckOutput {
+    const adverseReasons: string[] = result.verificationMetadata?.adverseReasons || [];
     const output: BackgroundCheckOutput = {
       id: result.id,
       tenantId: result.tenantId,
@@ -238,6 +295,8 @@ export class BackgroundCheckService {
       overallStatus: result.overallStatus,
       provider: result.provider,
       createdAt: result.createdAt,
+      eligible: result.overallStatus === "completed" && adverseReasons.length === 0,
+      adverseReasons,
     };
 
     if (result.employmentVerified !== undefined) {
