@@ -92,6 +92,32 @@ export class ReferralRepository {
     }
   }
 
+  async getConversionById(conversionId: string): Promise<ReferralConversion | null> {
+    const pool = await getPool()
+    if (!pool) throw new Error('Database not configured')
+
+    const { rows } = await pool.query(
+      `SELECT id, referral_code_id, referrer_tenant_id, referred_tenant_id, deal_id, reward_amount_ngn, status, created_at, updated_at
+       FROM referral_conversions WHERE id = $1`,
+      [conversionId],
+    )
+
+    if (rows.length === 0) return null
+
+    const row = rows[0]
+    return {
+      id: row.id,
+      referralCodeId: row.referral_code_id,
+      referrerTenantId: row.referrer_tenant_id,
+      referredTenantId: row.referred_tenant_id,
+      dealId: row.deal_id,
+      rewardAmountNgn: row.reward_amount_ngn,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }
+  }
+
   async getConversionsByReferrer(
     referrerTenantId: string,
   ): Promise<ReferralConversion[]> {
