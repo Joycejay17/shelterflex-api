@@ -157,6 +157,7 @@ import { createKycRouter } from "./routes/kyc.js";
 import { createAdminRolesRouter } from "./routes/adminRoles.js";
 import { createAbuseRouter } from "./routes/abuse.js";
 import { createInspectorJobsRouter, createAdminInspectorJobsRouter } from "./routes/inspectorJobs.js";
+import { createPropertyInspectionsRouter } from "./routes/propertyInspections.js";
 import { createRentGuaranteeRouter } from "./routes/rentGuarantee.js";
 import { createTenantRatingCardRouter } from "./routes/tenantRatingCard.js";
 import { createRentGuaranteeProviderFromEnv } from "./services/insurance/rentGuaranteeProviderFactory.js";
@@ -890,6 +891,9 @@ export function createApp() {
   // Inspector job routes — gated by INSPECTOR_DASHBOARD_ENABLED flag
   app.use('/api/v1/inspector', authenticateToken, requireFlag('INSPECTOR_DASHBOARD_ENABLED'), createInspectorJobsRouter(sorobanAdapter))
   app.use('/api/v1/admin/inspector', authenticateToken, requireFlag('INSPECTOR_DASHBOARD_ENABLED'), createAdminInspectorJobsRouter())
+
+  // Property inspection routes
+  app.use('/api/v1', createPropertyInspectionsRouter())
 
   // Rent guarantee insurance routes
   const rentGuaranteeProvider = createRentGuaranteeProviderFromEnv(process.env.RENT_GUARANTEE_PROVIDER)
