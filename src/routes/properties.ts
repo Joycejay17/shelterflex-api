@@ -4,12 +4,25 @@
 
 import { Router, Request, Response } from 'express'
 import { listingStore } from '../models/listingStore.js'
-import { ListingStatus } from '../models/listing.js'
+import { Listing, ListingStatus } from '../models/listing.js'
 import { propertySearchSchema } from '../schemas/listing.js'
 import { AppError } from '../errors/AppError.js'
 import { ErrorCode } from '../errors/errorCodes.js'
 
 const router = Router()
+
+function toPublicListing(listing: Listing) {
+  const {
+    whistleblowerId: _wb,
+    negotiatedLandlordRateNgn: _nr,
+    reviewedBy: _rb,
+    reviewedAt: _ra,
+    rejectionReason: _rr,
+    dealId: _di,
+    ...pub
+  } = listing
+  return pub
+}
 
 /**
  * GET /api/properties/search
@@ -26,7 +39,7 @@ router.get('/search', async (req: Request, res: Response, next) => {
 
     res.json({
       success: true,
-      data: result.listings,
+      data: result.listings.map(toPublicListing),
       total: result.total,
       page: result.page,
       pageSize: result.pageSize,
@@ -54,7 +67,7 @@ router.get('/:id', async (req: Request, res: Response, next) => {
 
     res.json({
       success: true,
-      data: listing,
+      data: toPublicListing(listing),
     })
   } catch (error) {
     next(error)
