@@ -28,6 +28,8 @@ export interface Listing {
   reviewedAt?: Date
   rejectionReason?: string
   dealId?: string
+  trustScore?: number
+  hasVerifiedInspection?: boolean
   createdAt: Date
   updatedAt: Date
 }
