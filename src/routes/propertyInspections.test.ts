@@ -2,9 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createTestAgent, expectRequestId, expectErrorShape } from '../test-helpers.js'
 import request from 'supertest'
 import { createApp } from '../app.js'
-import { propertyInspectionStore } from '../models/propertyInspectionStore.js'
-import { inspectorProfileStore } from '../models/inspectorProfileStore.js'
-import { InspectionStatus, InspectorVerificationStatus } from '../models/propertyInspection.js'
+import { InspectionStatus } from '../models/propertyInspection.js'
+import { InspectorVerificationStatus } from '../models/inspectorProfile.js'
 
 describe('Property Inspections API', () => {
   const request = createTestAgent()
