@@ -14,7 +14,7 @@ import {
 } from "../models/listingApplication.js";
 import { AppError } from "../errors/AppError.js";
 import { ErrorCode } from "../errors/errorCodes.js";
-import { auditLog } from "../repositories/AuditRepository.js";
+import { auditLog, AuditContext } from "../utils/auditLogger.js";
 import { outboxStore } from "../outbox/index.js";
 import { logger } from "../utils/logger.js";
 
@@ -60,16 +60,21 @@ export class ApplicationService {
     const application = await this.applicationRepository.create(input);
 
     // Audit log
-    await auditLog({
-      actor: input.tenantId,
-      action: "LISTING_APPLICATION_SUBMITTED",
-      resourceType: "listing_application",
-      resourceId: application.id,
-      details: {
+    auditLog(
+      "STATE_CHANGED",
+      {
+        userId: input.tenantId,
+        requestId: "unknown",
+        ip: "unknown",
+        actorType: "user",
+      },
+      {
         listingId: input.listingId,
         paymentPlan: input.paymentPlan,
+        applicationId: application.id,
+        action: "LISTING_APPLICATION_SUBMITTED",
       },
-    });
+    );
 
     // Emit event for notification
     await outboxStore.create({
@@ -140,13 +145,20 @@ export class ApplicationService {
     }
 
     // Audit log
-    await auditLog({
-      actor: landlordId,
-      action: `LISTING_APPLICATION_${decision.toUpperCase()}`,
-      resourceType: "listing_application",
-      resourceId: applicationId,
-      details: { notes },
-    });
+    auditLog(
+      decision === "approve" ? "LISTING_APPROVED" : "LISTING_REJECTED",
+      {
+        userId: landlordId,
+        requestId: "unknown",
+        ip: "unknown",
+        actorType: "user",
+      },
+      {
+        applicationId,
+        decision,
+        notes,
+      },
+    );
 
     // Emit event for notification
     await outboxStore.create({
@@ -206,13 +218,20 @@ export class ApplicationService {
     const updated = await this.applicationRepository.withdraw(applicationId);
 
     // Audit log
-    await auditLog({
-      actor: tenantId,
-      action: "LISTING_APPLICATION_WITHDRAWN",
-      resourceType: "listing_application",
-      resourceId: applicationId,
-      details: {},
-    });
+    auditLog(
+      "STATE_CHANGED",
+      {
+        userId: tenantId,
+        requestId: "unknown",
+        ip: "unknown",
+        actorType: "user",
+      },
+      {
+        applicationId,
+        fromStatus: application.status,
+        toStatus: "withdrawn",
+      },
+    );
 
     logger.info(`Application ${applicationId} withdrawn by tenant ${tenantId}`);
     return updated!;

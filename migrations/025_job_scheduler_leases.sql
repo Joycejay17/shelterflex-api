@@ -2,7 +2,8 @@
 ALTER TABLE scheduled_jobs
   ADD COLUMN IF NOT EXISTS lease_holder VARCHAR(255),
   ADD COLUMN IF NOT EXISTS lease_acquired_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS fencing_token BIGINT;
 
 -- Create index for lease queries
 CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_lease
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS job_run_history (
   duration_ms INTEGER,
   error_message TEXT,
   payload JSONB NOT NULL DEFAULT '{}',
+  fencing_token BIGINT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

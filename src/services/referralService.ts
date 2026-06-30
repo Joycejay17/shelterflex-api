@@ -10,6 +10,12 @@ const generateCode = customAlphabet(alphabet, 8)
 
 const REFERRAL_REWARD_NGN = parseInt(process.env.REFERRAL_REWARD_NGN ?? '5000', 10)
 
+const REFERRAL_VELOCITY_MAX = parseInt(process.env.REFERRAL_VELOCITY_MAX ?? '20', 10)
+const REFERRAL_VELOCITY_WINDOW_MS = parseInt(
+  process.env.REFERRAL_VELOCITY_WINDOW_MS ?? '86400000',
+  10,
+)
+
 export class ReferralService {
   /**
    * Generate a unique referral code for a tenant
@@ -81,6 +87,20 @@ export class ReferralService {
       )
     }
 
+    // Velocity cap: limit conversions per referrer in a time window
+    const conversions = await referralRepository.getConversionsByReferrer(refCode.tenantId)
+    const windowStart = Date.now() - REFERRAL_VELOCITY_WINDOW_MS
+    const recentConversions = conversions.filter(
+      (c) => new Date(c.createdAt).getTime() >= windowStart,
+    )
+    if (recentConversions.length >= REFERRAL_VELOCITY_MAX) {
+      throw new AppError(
+        ErrorCode.VALIDATION_ERROR,
+        429,
+        'This referral code has reached its usage limit. Please try again later.',
+      )
+    }
+
     // Create conversion record
     return referralRepository.createConversion(
       refCode.id,
@@ -127,30 +147,36 @@ export class ReferralService {
     referredTenantId: string,
     dealId: string,
   ): Promise<void> {
-    // Get the conversion for this referred tenant
     const conversion = await referralRepository.getConversionByReferredTenant(referredTenantId)
     if (!conversion) {
-      // No referral conversion for this tenant, nothing to do
       return
     }
 
-    // Update conversion status to credited and set deal ID
+    // Idempotent: skip if already credited or beyond
+    if (conversion.status !== 'pending') {
+      return
+    }
+
     const pool = await (await import('../db.js')).getPool()
     if (!pool) throw new Error('Database not configured')
 
     await pool.query(
-      `UPDATE referral_conversions SET status = 'credited', deal_id = $1, updated_at = NOW() WHERE id = $2`,
+      `UPDATE referral_conversions SET status = 'credited', deal_id = $1, updated_at = NOW() WHERE id = $2 AND status = 'pending'`,
       [dealId, conversion.id],
     )
   }
 
-  /**
-   * Apply credit to referrer's account
-   * This should be called when the referrer is next billed
-   */
   async applyRewardCredit(conversionId: string): Promise<void> {
-    // This method will be called from the payment flow to apply the credit
-    // For now, just update the status
+    const conversion = await referralRepository.getConversionById(conversionId)
+    if (!conversion) {
+      throw new AppError(ErrorCode.NOT_FOUND, 404, 'Referral conversion not found')
+    }
+
+    // Idempotent: skip if already applied
+    if (conversion.status === 'applied') {
+      return
+    }
+
     await referralRepository.updateConversionStatus(conversionId, 'applied')
   }
 }

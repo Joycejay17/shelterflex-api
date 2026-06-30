@@ -114,4 +114,78 @@ class PostgresCreditBureauReportStore implements ICreditBureauReportStore {
   }
 }
 
-export const creditBureauReportStore = new PostgresCreditBureauReportStore();
+/**
+ * In-memory implementation for testing
+ */
+export class InMemoryCreditBureauReportStore implements ICreditBureauReportStore {
+  private reports: Map<string, CreditBureauReportRecord> = new Map();
+  private counter = 1;
+
+  async create(
+    input: CreateCreditBureauReportInput,
+  ): Promise<CreditBureauReportRecord> {
+    const id = `CBR-${Date.now()}-${this.counter++}`;
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days TTL
+
+    const record: CreditBureauReportRecord = {
+      id,
+      tenantId: input.tenantId,
+      bvn: input.bvn,
+      nin: input.nin,
+      report: input.report,
+      cachedAt: now,
+      expiresAt,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.reports.set(id, record);
+    return record;
+  }
+
+  async findLatestByTenantId(
+    tenantId: string,
+  ): Promise<CreditBureauReportRecord | null> {
+    const matches = Array.from(this.reports.values()).filter(
+      (r) => r.tenantId === tenantId,
+    );
+    if (matches.length === 0) return null;
+    return matches.sort(
+      (a, b) => b.cachedAt.getTime() - a.cachedAt.getTime(),
+    )[0];
+  }
+
+  async findById(id: string): Promise<CreditBureauReportRecord | null> {
+    return this.reports.get(id) || null;
+  }
+
+  async deleteExpired(): Promise<number> {
+    const now = new Date();
+    let count = 0;
+    for (const [id, record] of this.reports.entries()) {
+      if (record.expiresAt < now) {
+        this.reports.delete(id);
+        count++;
+      }
+    }
+    return count;
+  }
+
+  // Test helper
+  async clear(): Promise<void> {
+    this.reports.clear();
+    this.counter = 1;
+  }
+}
+
+let creditBureauReportStore: ICreditBureauReportStore =
+  new PostgresCreditBureauReportStore();
+
+export function initCreditBureauReportStore(
+  store: ICreditBureauReportStore,
+): void {
+  creditBureauReportStore = store;
+}
+
+export { creditBureauReportStore };

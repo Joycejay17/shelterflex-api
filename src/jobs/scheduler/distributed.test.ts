@@ -56,11 +56,11 @@ describe('Distributed Job Scheduler with Lease Deduplication', () => {
 
       const workerId = 'worker-1'
       const acquired1 = await store.tryAcquireLease(job.id, workerId, 5000)
-      expect(acquired1).toBe(true)
+      expect(acquired1).toBe(1)
 
       // Same worker can renew
       const acquired2 = await store.tryAcquireLease(job.id, workerId, 5000)
-      expect(acquired2).toBe(true)
+      expect(acquired2).toBe(2)
     })
 
     it('should reject lease acquisition by different worker', async () => {
@@ -77,10 +77,10 @@ describe('Distributed Job Scheduler with Lease Deduplication', () => {
       const worker2 = 'worker-2'
 
       const acquired1 = await store.tryAcquireLease(job.id, worker1, 5000)
-      expect(acquired1).toBe(true)
+      expect(acquired1).toBe(1)
 
       const acquired2 = await store.tryAcquireLease(job.id, worker2, 5000)
-      expect(acquired2).toBe(false)
+      expect(acquired2).toBeNull()
     })
   })
 
@@ -107,7 +107,7 @@ describe('Distributed Job Scheduler with Lease Deduplication', () => {
 
       // Another worker should now be able to acquire
       const acquired = await store.tryAcquireLease(job.id, 'worker-2', 5000)
-      expect(acquired).toBe(true)
+      expect(acquired).toBe(1)
     })
 
     it('should not recover active leases', async () => {
@@ -128,7 +128,7 @@ describe('Distributed Job Scheduler with Lease Deduplication', () => {
 
       // Original worker should still hold the lease
       const acquired = await store.tryAcquireLease(job.id, 'worker-2', 5000)
-      expect(acquired).toBe(false)
+      expect(acquired).toBeNull()
     })
   })
 

@@ -102,18 +102,18 @@ export class JobScheduler {
     }
 
     // Try to acquire lease before executing
-    const leaseAcquired = await store.tryAcquireLease(job.id, this.workerId, this.leaseTtlMs)
-    if (!leaseAcquired) {
+    const fencingToken = await store.tryAcquireLease(job.id, this.workerId, this.leaseTtlMs)
+    if (fencingToken === null) {
       logger.debug('Job lease already held by another worker, skipping', { jobId: job.id, workerId: this.workerId })
       return
     }
 
-    logger.info('Job lease acquired', { jobId: job.id, workerId: this.workerId })
+    logger.info('Job lease acquired', { jobId: job.id, workerId: this.workerId, fencingToken })
 
-    // Record job run start
+    // Record job run start with fencing token
     let runId: string | null = null
     try {
-      runId = await store.recordJobRun(job.id, job.name, job.handler, this.workerId, job.payload)
+      runId = await store.recordJobRun(job.id, job.name, job.handler, this.workerId, job.payload, fencingToken)
     } catch (err) {
       logger.error('Failed to record job run', { jobId: job.id, error: err instanceof Error ? err.message : String(err) })
     }

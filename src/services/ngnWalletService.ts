@@ -195,6 +195,14 @@ export class NgnWalletService {
     const wallet = await this.getOrCreateWallet(userId)
     const release = await ngnWalletStore.acquireLock(wallet.walletId)
     try {
+      const entries = await ngnWalletStore.getLedgerEntriesByWalletId(wallet.walletId)
+      const alreadyCredited = entries.some(
+        (e) => e.type === 'TOPUP_CONFIRMED' && e.referenceId === reference,
+      )
+      if (alreadyCredited) {
+        return
+      }
+
       await ngnWalletStore.createLedgerEntry({
         walletId: wallet.walletId,
         type: 'TOPUP_CONFIRMED',
@@ -248,12 +256,41 @@ export class NgnWalletService {
   }
 
   async creditTopUp(userId: string, depositId: string, amountNgn: number, reference: string): Promise<{ credited: boolean; newBalance: NgnBalanceResponse }> {
-    if (this.creditedDeposits.has(depositId)) {
-      return { credited: false, newBalance: await this.getBalance(userId) }
+    const wallet = await this.getOrCreateWallet(userId)
+    const release = await ngnWalletStore.acquireLock(wallet.walletId)
+    try {
+      if (this.creditedDeposits.has(depositId)) {
+        return { credited: false, newBalance: await this.getBalance(userId) }
+      }
+
+      const entries = await ngnWalletStore.getLedgerEntriesByWalletId(wallet.walletId)
+      const alreadyCredited = entries.some(
+        (e) => e.type === 'TOPUP_CONFIRMED' && e.referenceId === reference,
+      )
+      if (alreadyCredited) {
+        this.creditedDeposits.add(depositId)
+        return { credited: false, newBalance: await this.getBalance(userId) }
+      }
+
+      await ngnWalletStore.createLedgerEntry({
+        walletId: wallet.walletId,
+        type: 'TOPUP_CONFIRMED',
+        amountNgn,
+        referenceType: 'deposit',
+        referenceId: reference
+      })
+      this.creditedDeposits.add(depositId)
+
+      const balance = await this.getBalance(userId)
+      const riskState = await userRiskStateStore.getByUserId(userId)
+      if (riskState?.isFrozen && riskState.freezeReason === 'NEGATIVE_BALANCE' && balance.totalNgn >= 0) {
+        await userRiskStateStore.unfreeze(userId, `Auto-unfrozen after top-up. Balance restored to ${balance.totalNgn} NGN`)
+      }
+
+      return { credited: true, newBalance: balance }
+    } finally {
+      await release()
     }
-    await this.processTopUp(userId, amountNgn, reference)
-    this.creditedDeposits.add(depositId)
-    return { credited: true, newBalance: await this.getBalance(userId) }
   }
 
   async reverseTopUp(userId: string, depositId: string, amountNgn: number, reference: string): Promise<{ reversed: boolean; newBalance: NgnBalanceResponse }> {
@@ -280,6 +317,17 @@ export class NgnWalletService {
     const wallet = await this.getOrCreateWallet(userId)
     const release = await ngnWalletStore.acquireLock(wallet.walletId)
     try {
+      const entries = await ngnWalletStore.getLedgerEntriesByWalletId(wallet.walletId)
+      const alreadyReserved = entries.some(
+        (e) =>
+          e.type === 'STAKE_RESERVE' &&
+          e.referenceType === externalRefSource &&
+          e.referenceId === externalRef,
+      )
+      if (alreadyReserved) {
+        return { reserved: false, newBalance: await this.getBalance(userId) }
+      }
+
       const balance = await this.getBalance(userId)
       if (balance.availableNgn < amountNgn) {
         throw new AppError(ErrorCode.VALIDATION_ERROR, 409, `Insufficient available balance. Available: ${balance.availableNgn}, Requested: ${amountNgn}`)
@@ -333,10 +381,6 @@ export class NgnWalletService {
 
   async initiateWithdrawal(userId: string, request: WithdrawalRequest): Promise<WithdrawalResponse> {
     await this.requireNotFrozen(userId)
-    const balance = await this.getBalance(userId)
-    if (request.amountNgn > balance.availableNgn) {
-      throw new AppError(ErrorCode.VALIDATION_ERROR, 400, `Insufficient balance. Available: ${balance.availableNgn}, Requested: ${request.amountNgn}`)
-    }
 
     const withdrawalId = `wd-${Date.now()}`
     const reference = `WD-${Date.now()}`
@@ -354,6 +398,11 @@ export class NgnWalletService {
     const wallet = await this.getOrCreateWallet(userId)
     const release = await ngnWalletStore.acquireLock(wallet.walletId)
     try {
+      const balance = await this.getBalance(userId)
+      if (request.amountNgn > balance.availableNgn) {
+        throw new AppError(ErrorCode.VALIDATION_ERROR, 400, `Insufficient balance. Available: ${balance.availableNgn}, Requested: ${request.amountNgn}`)
+      }
+
       await ngnWalletStore.createLedgerEntry({
         walletId: wallet.walletId,
         type: 'WITHDRAWAL_PENDING',

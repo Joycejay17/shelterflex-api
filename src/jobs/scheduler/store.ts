@@ -13,12 +13,13 @@ export interface JobStore {
   markDead(id: string, error: string): Promise<void>
   reschedule(id: string, nextRunAt: Date): Promise<void>
   cancel(id: string): Promise<void>
-  // Lease-based deduplication
-  tryAcquireLease(id: string, workerId: string, leaseTtlMs: number): Promise<boolean>
+  // Lease-based deduplication with fencing tokens
+  /** Acquire lease and return fencing token; if successful, token increments. Returns null if lease cannot be acquired. */
+  tryAcquireLease(id: string, workerId: string, leaseTtlMs: number): Promise<number | null>
   releaseLease(id: string, workerId: string): Promise<void>
   recoverStaleLeases(): Promise<number>
   // Job run history
-  recordJobRun(jobId: string, jobName: string, handler: string, workerId: string, payload: Record<string, unknown>): Promise<string>
+  recordJobRun(jobId: string, jobName: string, handler: string, workerId: string, payload: Record<string, unknown>, fencingToken: number): Promise<string>
   completeJobRun(runId: string, status: JobRunStatus, errorMessage?: string): Promise<void>
   getJobRunHistory(jobId: string, limit?: number): Promise<JobRunHistory[]>
 }
@@ -51,6 +52,7 @@ export class InMemoryJobStore implements JobStore {
       leaseHolder: null,
       leaseAcquiredAt: null,
       leaseExpiresAt: null,
+      fencingToken: null,
     }
     this.jobs.set(job.id, job)
     return { ...job }
@@ -134,24 +136,26 @@ export class InMemoryJobStore implements JobStore {
     job.updatedAt = new Date()
   }
 
-  async tryAcquireLease(id: string, workerId: string, leaseTtlMs: number): Promise<boolean> {
+  async tryAcquireLease(id: string, workerId: string, leaseTtlMs: number): Promise<number | null> {
     const job = this.jobs.get(id)
-    if (!job) return false
+    if (!job) return null
 
     const now = new Date()
     // Check if lease is already held by another worker and not expired
     if (job.leaseHolder && job.leaseExpiresAt && job.leaseExpiresAt > now) {
       if (job.leaseHolder !== workerId) {
-        return false
+        return null
       }
     }
 
-    // Acquire or renew lease
+    // Acquire or renew lease with incremented fencing token
+    const newToken = (job.fencingToken ?? 0) + 1
     job.leaseHolder = workerId
     job.leaseAcquiredAt = now
     job.leaseExpiresAt = new Date(now.getTime() + leaseTtlMs)
+    job.fencingToken = newToken
     job.updatedAt = now
-    return true
+    return newToken
   }
 
   async releaseLease(id: string, workerId: string): Promise<void> {
@@ -161,6 +165,7 @@ export class InMemoryJobStore implements JobStore {
       job.leaseHolder = null
       job.leaseAcquiredAt = null
       job.leaseExpiresAt = null
+      job.fencingToken = null
       job.updatedAt = new Date()
     }
   }
@@ -173,6 +178,7 @@ export class InMemoryJobStore implements JobStore {
         job.leaseHolder = null
         job.leaseAcquiredAt = null
         job.leaseExpiresAt = null
+        job.fencingToken = null
         job.updatedAt = now
         recovered++
       }
@@ -180,7 +186,7 @@ export class InMemoryJobStore implements JobStore {
     return recovered
   }
 
-  async recordJobRun(jobId: string, jobName: string, handler: string, workerId: string, payload: Record<string, unknown>): Promise<string> {
+  async recordJobRun(jobId: string, jobName: string, handler: string, workerId: string, payload: Record<string, unknown>, fencingToken: number): Promise<string> {
     const runId = crypto.randomUUID()
     const run: JobRunHistory = {
       id: runId,
@@ -194,6 +200,7 @@ export class InMemoryJobStore implements JobStore {
       durationMs: null,
       errorMessage: null,
       payload,
+      fencingToken,
       createdAt: new Date(),
     }
     this.runHistory.set(runId, run)
@@ -242,6 +249,7 @@ function rowToJob(row: Record<string, unknown>): ScheduledJob {
     leaseHolder: (row.lease_holder as string | null) ?? null,
     leaseAcquiredAt: row.lease_acquired_at ? new Date(row.lease_acquired_at as string) : null,
     leaseExpiresAt: row.lease_expires_at ? new Date(row.lease_expires_at as string) : null,
+    fencingToken: (row.fencing_token as number | null) ?? null,
   }
 }
 
@@ -378,24 +386,25 @@ export class PostgresJobStore implements JobStore {
     )
   }
 
-  async tryAcquireLease(id: string, workerId: string, leaseTtlMs: number): Promise<boolean> {
+  async tryAcquireLease(id: string, workerId: string, leaseTtlMs: number): Promise<number | null> {
     const pool = await getPool()
-    if (!pool) return false
+    if (!pool) return null
 
     const result = await pool.query(
       `UPDATE scheduled_jobs
        SET lease_holder = $2,
            lease_acquired_at = NOW(),
            lease_expires_at = NOW() + ($3 * INTERVAL '1 millisecond'),
+           fencing_token = COALESCE(fencing_token, 0) + 1,
            updated_at = NOW()
        WHERE id = $1
          AND (lease_holder IS NULL
               OR lease_holder = $2
               OR lease_expires_at <= NOW())
-       RETURNING id`,
+       RETURNING fencing_token`,
       [id, workerId, leaseTtlMs],
     )
-    return result.rows.length > 0
+    return result.rows.length > 0 ? (result.rows[0].fencing_token as number) : null
   }
 
   async releaseLease(id: string, workerId: string): Promise<void> {
@@ -406,6 +415,7 @@ export class PostgresJobStore implements JobStore {
        SET lease_holder = NULL,
            lease_acquired_at = NULL,
            lease_expires_at = NULL,
+           fencing_token = NULL,
            updated_at = NOW()
        WHERE id = $1 AND lease_holder = $2`,
       [id, workerId],
@@ -421,6 +431,7 @@ export class PostgresJobStore implements JobStore {
        SET lease_holder = NULL,
            lease_acquired_at = NULL,
            lease_expires_at = NULL,
+           fencing_token = NULL,
            updated_at = NOW()
        WHERE lease_holder IS NOT NULL
          AND lease_expires_at <= NOW()
@@ -429,15 +440,15 @@ export class PostgresJobStore implements JobStore {
     return result.rowCount ?? 0
   }
 
-  async recordJobRun(jobId: string, jobName: string, handler: string, workerId: string, payload: Record<string, unknown>): Promise<string> {
+  async recordJobRun(jobId: string, jobName: string, handler: string, workerId: string, payload: Record<string, unknown>, fencingToken: number): Promise<string> {
     const pool = await getPool()
     if (!pool) throw new Error('Database not available')
 
     const result = await pool.query(
-      `INSERT INTO job_run_history (job_id, job_name, handler, worker_id, status, payload)
-       VALUES ($1, $2, $3, $4, 'started', $5)
+      `INSERT INTO job_run_history (job_id, job_name, handler, worker_id, status, payload, fencing_token)
+       VALUES ($1, $2, $3, $4, 'started', $5, $6)
        RETURNING id`,
-      [jobId, jobName, handler, workerId, JSON.stringify(payload)],
+      [jobId, jobName, handler, workerId, JSON.stringify(payload), fencingToken],
     )
     return result.rows[0].id as string
   }
