@@ -79,6 +79,9 @@ export const listingFiltersSchema = z.object({
 
 export type ListingFiltersRequest = z.infer<typeof listingFiltersSchema>
 
+export const propertySearchSchema = listingFiltersSchema.omit({ status: true })
+export type PropertySearchRequest = z.infer<typeof propertySearchSchema>
+
 export const listingSuggestSchema = z.object({
   q: z.string().trim().min(1).max(100),
 })
