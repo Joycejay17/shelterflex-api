@@ -25,6 +25,7 @@ interface ListingStorePort {
     reviewedBy: string,
     rejectionReason?: string,
   ): Promise<Listing | null>
+  updateTrustScore(listingId: string, trustScore: number, hasVerifiedInspection: boolean): Promise<Listing | null>
   clear(): Promise<void>
 }
 
@@ -215,6 +216,17 @@ class InMemoryListingStore implements ListingStorePort {
     return listing
   }
 
+  async updateTrustScore(listingId: string, trustScore: number, hasVerifiedInspection: boolean): Promise<Listing | null> {
+    const listing = this.listings.get(listingId)
+    if (!listing) return null
+
+    listing.trustScore = trustScore
+    listing.hasVerifiedInspection = hasVerifiedInspection
+    listing.updatedAt = new Date()
+    this.listings.set(listingId, listing)
+    return listing
+  }
+
   async clear(): Promise<void> {
     this.listings.clear()
     this.whistleblowerMonthlyReports.clear()
@@ -240,6 +252,8 @@ type ListingRow = {
   reviewed_at: Date | null
   rejection_reason: string | null
   deal_id: string | null
+  trust_score: number | null
+  has_verified_inspection: boolean | null
   created_at: Date
   updated_at: Date
 }
@@ -497,6 +511,22 @@ class PostgresListingStore implements ListingStorePort {
     return this.mapRow(rows[0] as ListingRow)
   }
 
+  async updateTrustScore(listingId: string, trustScore: number, hasVerifiedInspection: boolean): Promise<Listing | null> {
+    const pool = await this.pool()
+    const { rows } = await pool.query(
+      `UPDATE whistleblower_listings
+       SET trust_score = $2,
+           has_verified_inspection = $3,
+           updated_at = NOW()
+       WHERE listing_id = $1
+       RETURNING *`,
+      [listingId, trustScore, hasVerifiedInspection],
+    )
+
+    if (rows.length === 0) return null
+    return this.mapRow(rows[0] as ListingRow)
+  }
+
   async clear(): Promise<void> {
     const pool = await this.pool()
     if (process.env.NODE_ENV !== 'test') {
@@ -532,6 +562,8 @@ class PostgresListingStore implements ListingStorePort {
       reviewedAt: row.reviewed_at ? new Date(row.reviewed_at) : undefined,
       rejectionReason: row.rejection_reason ?? undefined,
       dealId: row.deal_id ?? undefined,
+      trustScore: row.trust_score ?? undefined,
+      hasVerifiedInspection: row.has_verified_inspection ?? undefined,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
     }
@@ -617,6 +649,11 @@ class HybridListingStore implements ListingStorePort {
   ): Promise<Listing | null> {
     const adapter = await this.adapter()
     return adapter.moderate(listingId, status, reviewedBy, rejectionReason)
+  }
+
+  async updateTrustScore(listingId: string, trustScore: number, hasVerifiedInspection: boolean): Promise<Listing | null> {
+    const adapter = await this.adapter()
+    return adapter.updateTrustScore(listingId, trustScore, hasVerifiedInspection)
   }
 
   async clear(): Promise<void> {
