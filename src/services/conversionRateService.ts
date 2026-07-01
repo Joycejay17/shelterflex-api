@@ -130,27 +130,22 @@ export class ConversionRateService {
     }
 
     // Cache miss - fetch fresh rate
-    try {
-      const quote = await this.provider.getRate()
+    const quote = await this.provider.getRate()
 
-      // Validate rate bounds
-      this.validateRateBounds(quote.rate)
+    // Validate rate bounds
+    this.validateRateBounds(quote.rate)
 
-      const fetchedAt = new Date(now)
-      const expiresAt = new Date(now + this.getCacheTtlMs())
+    const fetchedAt = new Date(now)
+    const expiresAt = new Date(now + this.getCacheTtlMs())
 
-      this.cache = {
-        rate: quote.rate,
-        source: quote.source,
-        fetchedAt: fetchedAt.toISOString(),
-        expiresAt: expiresAt.toISOString(),
-      }
-
-      return this.cache
-    } catch (error) {
-      // No cache available - rethrow
-      throw error
+    this.cache = {
+      rate: quote.rate,
+      source: quote.source,
+      fetchedAt: fetchedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
     }
+
+    return this.cache
   }
 
   /** Clears cache (for tests). */
