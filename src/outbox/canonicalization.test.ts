@@ -12,7 +12,7 @@ import {
  import { resolve } from 'node:path'
 
 // Golden test vectors - shared with contract tests
-const goldenVectorsPath = resolve(process.cwd(), '..', 'test-vectors.json')
+const goldenVectorsPath = resolve(process.cwd(), 'test-vectors.json')
 const goldenVectors = JSON.parse(readFileSync(goldenVectorsPath, 'utf8'))
 
 describe('buildCanonicalString', () => {

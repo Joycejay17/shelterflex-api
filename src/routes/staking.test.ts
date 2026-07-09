@@ -14,7 +14,7 @@ describe('Staking API', () => {
   let app: any
   let authToken: string
 
-  const goldenVectorsPath = resolve(process.cwd(), '..', 'test-vectors.json')
+  const goldenVectorsPath = resolve(process.cwd(), 'test-vectors.json')
   const goldenVectors = JSON.parse(readFileSync(goldenVectorsPath, 'utf8'))
   const expectedTxIdByCanonical = new Map<string, string>(
     (goldenVectors.golden_test_vectors ?? [])
