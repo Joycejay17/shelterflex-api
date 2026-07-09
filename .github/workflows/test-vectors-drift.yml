@@ -1,0 +1,34 @@
+# shelterflex-api  ->  .github/workflows/test-vectors-drift.yml
+# Fails if the vendored test-vectors.json drifts from the canonical copy in platform.
+name: Test Vectors Drift
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Check test-vectors.json against platform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch canonical vectors from platform
+        run: |
+          curl -sSL --fail \
+            "https://raw.githubusercontent.com/Shelterflex/shelterflex-platform/main/test-vectors.json" \
+            -o /tmp/canonical.json
+
+      - name: Diff against vendored copy
+        run: |
+          if ! diff -u /tmp/canonical.json test-vectors.json; then
+            echo "::error::test-vectors.json has drifted from the canonical copy in shelterflex-platform."
+            echo "Update this repo's copy to match, or change the canonical copy in platform first."
+            exit 1
+          fi
+          echo "test-vectors.json is in sync with platform."
