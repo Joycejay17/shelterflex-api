@@ -100,6 +100,7 @@ import { createAdminUnderwritingRouter } from "./routes/adminUnderwriting.js"
 import { PostgresRewardsDataLayer } from "./services/postgres-rewards-data-layer.js"
 import { createReceiptRepository, createTimelockRepository } from "./indexer/repositoryBootstrap.js"
 import { createLandlordPropertiesRouter } from "./routes/landlordProperties.js";
+import { createPropertiesRouter } from "./routes/properties.js";
 import { createLandlordRouter } from "./routes/landlord.js";
 import { createAdminLandlordVerificationRouter, createLandlordVerificationRouter } from "./routes/landlordVerification.js";
 import { authenticateToken } from "./middleware/auth.js";
@@ -848,6 +849,7 @@ export function createApp() {
   app.use("/api/v1/deposits", createDepositsRouter(conversionService));
   app.use("/api/v1/gas-metrics", createGasMetricsRouter());
   app.use("/api/v1", createPropertyPhotosRouter());
+  app.use("/api/v1/properties", createPropertiesRouter());
   app.use("/api/v1/landlord/properties", createLandlordPropertiesRouter());
   app.use(
     "/api/v1/landlord/partner-applications",

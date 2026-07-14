@@ -1,6 +1,9 @@
 -- Landlord Payout Schedule
 -- Stores scheduled payouts with deductions, delay reasons, and channel info
 
+-- Must exist before the column default below references it
+CREATE SEQUENCE IF NOT EXISTS landlord_payouts_seq;
+
 CREATE TABLE IF NOT EXISTS landlord_payouts (
   id VARCHAR(128) PRIMARY KEY DEFAULT CONCAT('PAY-', EXTRACT(EPOCH FROM NOW())::bigint, '-', nextval('landlord_payouts_seq')),
   landlord_id VARCHAR(128) NOT NULL,
@@ -20,8 +23,6 @@ CREATE TABLE IF NOT EXISTS landlord_payouts (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE SEQUENCE IF NOT EXISTS landlord_payouts_seq;
 
 CREATE INDEX IF NOT EXISTS idx_landlord_payouts_landlord_id ON landlord_payouts (landlord_id);
 CREATE INDEX IF NOT EXISTS idx_landlord_payouts_property_id ON landlord_payouts (property_id);

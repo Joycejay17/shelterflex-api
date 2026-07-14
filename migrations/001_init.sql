@@ -51,19 +51,5 @@ CREATE INDEX rewards_status_idx ON rewards (status);
 
 -- OUTBOX
 
-CREATE TABLE outbox_items (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    aggregate_type TEXT NOT NULL,
-    aggregate_id UUID NOT NULL,
-    event_type TEXT NOT NULL,
-    payload JSONB NOT NULL,
-    status TEXT NOT NULL DEFAULT 'PENDING',
-    retry_count INTEGER NOT NULL DEFAULT 0,
-    next_retry_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    processed_at TIMESTAMPTZ
-);
-
-CREATE INDEX outbox_status_idx ON outbox_items (status);
-CREATE INDEX outbox_next_retry_idx ON outbox_items (next_retry_at);
-CREATE INDEX outbox_aggregate_idx ON outbox_items (aggregate_id);
+-- outbox_items is defined in 005_outbox.sql (superseded this early stub before any
+-- intervening migration referenced it)

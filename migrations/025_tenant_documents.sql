@@ -1,6 +1,9 @@
 -- Tenant Document Vault
 -- Stores uploaded documents for tenants with metadata, tags, and expiration tracking
 
+-- Auto-increment sequence for ID generation (must exist before the column default below references it)
+CREATE SEQUENCE IF NOT EXISTS tenant_documents_seq;
+
 CREATE TABLE IF NOT EXISTS tenant_documents (
   id VARCHAR(128) PRIMARY KEY DEFAULT CONCAT('DOC-', EXTRACT(EPOCH FROM NOW())::bigint, '-', nextval('tenant_documents_seq')),
   user_id VARCHAR(128) NOT NULL,
@@ -15,9 +18,6 @@ CREATE TABLE IF NOT EXISTS tenant_documents (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
--- Auto-increment sequence for ID generation
-CREATE SEQUENCE IF NOT EXISTS tenant_documents_seq;
 
 -- Index for user-scoped queries (most common access pattern)
 CREATE INDEX IF NOT EXISTS idx_tenant_documents_user_id ON tenant_documents (user_id);
