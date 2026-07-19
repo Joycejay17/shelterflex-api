@@ -236,4 +236,4 @@ If you're migrating from the old admin secret usage:
 
 - [Soroban Integration Tests](./soroban-integration-tests.md)
 - [Webhook Signature Verification](./WEBHOOK_SIGNATURE_VERIFICATION.md)
-- [Contract Conventions](../docs/specs/contracts/CONVENTIONS.md)
+- [Contract Conventions](https://github.com/Shelterflex/shelterflex-contracts/blob/main/docs/specs/contracts/CONVENTIONS.md)
