@@ -14,8 +14,11 @@ assessment, Soroban RPC integration, observability, and monitoring.
 - Keep PRs small and focused — 1 issue per PR.
 - Link the issue you're addressing (e.g. `Fixes #123`).
 - Update the OpenAPI spec (`openapi.yml`) when you change routes.
-- Add/adjust tests; keep `test-vectors.json` in sync with platform (a CI drift check enforces this).
+- Add/adjust tests; keep `test-vectors.json` in sync with platform (a scheduled drift check catches divergence).
 - Never commit secrets (`.env*` files, keys, seed phrases).
+- Do not modify anything under `.github/` — CI, workflows and issue templates are
+  maintainer-owned. If an issue seems to need a pipeline change, deliver the script
+  or test it calls for and say so in the PR; a maintainer wires it up.
 
 ## Development setup
 
