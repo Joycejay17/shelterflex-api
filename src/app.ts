@@ -9,6 +9,7 @@ import { traceResponseMiddleware } from "./middleware/traceResponse.js"
 import { createLogger } from "./middleware/logger.js"
 import { logger } from "./utils/logger.js"
 import { apiVersioning } from "./middleware/apiVersioning.js"
+import { createLegacyApiRedirect } from "./middleware/legacyApiRedirect.js"
 import { createHealthRouter } from "./routes/health.js"
 import { createPrometheusMetricsRouter } from "./routes/prometheusMetrics.js"
 import { mountOpenApiDocs } from "./docs/openApiRegistry.js"
@@ -941,27 +942,7 @@ export function createApp() {
 
   // Backward compatibility redirect from /api/* to /api/v1/*
   // In test mode, also mount routes at /api/ to avoid breaking existing tests
-  app.use('/api', (req, res, next) => {
-    // Skip if already on /api/v1 path
-    if (req.path.startsWith('/v1')) {
-      return next()
-    }
-    
-    // In test mode, allow /api/ to work by not redirecting
-    // Routes will be mounted at both /api/ and /api/v1/ in test mode
-    if (env.NODE_ENV === 'test') {
-      return next()
-    }
-    
-    // Redirect to /api/v1/* with deprecation headers
-    const newPath = `/api/v1${req.path}`
-    res.setHeader('Deprecation', 'true')
-    const sunsetDate = new Date()
-    sunsetDate.setMonth(sunsetDate.getMonth() + 6)
-    res.setHeader('Sunset', sunsetDate.toISOString().split('T')[0])
-    res.setHeader('Link', '</api/v1>; rel="successor-version"')
-    res.redirect(307, newPath)
-  })
+  app.use('/api', createLegacyApiRedirect(app, { bypass: env.NODE_ENV === 'test' }))
 
   // 404 catch-all — must be after all routes, before errorHandler
   app.use("*", (_req, _res, next) => {
