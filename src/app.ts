@@ -148,7 +148,6 @@ import { createTenantOnboardingRouter } from "./routes/tenantOnboarding.js";
 import { createAdminTenantCreditScoreRouter } from "./routes/adminTenantCreditScore.js";
 import { createTenantDocumentVaultRouter } from "./routes/tenantDocumentVault.js";
 import { createTenantDocumentsPresignRouter } from "./routes/tenantDocumentsPresign.js";
-import { createTenantDocumentsRouter } from "./routes/tenantDocuments.js";
 import { createReferralsRouter } from "./routes/referrals.js";
 import { createLandlordPayoutScheduleRouter } from "./routes/landlordPayoutSchedule.js";
 import { createDocsRouter } from "./routes/docs.js";
@@ -158,6 +157,13 @@ import { createKycRouter } from "./routes/kyc.js";
 import { createAdminRolesRouter } from "./routes/adminRoles.js";
 import { createAbuseRouter } from "./routes/abuse.js";
 import { createInspectorJobsRouter, createAdminInspectorJobsRouter } from "./routes/inspectorJobs.js";
+import { createQuoteRouter } from "./routes/quote.js";
+import { createPaymentDisputeRouter } from "./routes/paymentDispute.js";
+import { createAdminQuotaRouter } from "./routes/adminQuota.js";
+import { backgroundCheckRouter } from "./routes/backgroundCheck.js";
+import creditBureauRouter from "./routes/creditBureau.js";
+import { createContractEventsRouter } from "./routes/contractEvents.js";
+import { createLeaseAgreementsRouter } from "./routes/leaseAgreements.js";
 import { createPropertyInspectionsRouter } from "./routes/propertyInspections.js";
 import { createRentGuaranteeRouter } from "./routes/rentGuarantee.js";
 import { createTenantRatingCardRouter } from "./routes/tenantRatingCard.js";
@@ -879,6 +885,7 @@ export function createApp() {
   app.use("/api/tenant/credit-score", createCreditScoreRouter());
   app.use("/api/tenant/onboarding", createTenantOnboardingRouter());
   app.use("/api/tenant/vault", createTenantDocumentVaultRouter());
+  app.use("/api/documents", createTenantDocumentsPresignRouter());
   app.use("/api/listings", createListingsRouter());
   app.use("/api", listingApplicationsRouter);
   app.use("/api/landlord/payout-schedule", createLandlordPayoutScheduleRouter());
@@ -903,6 +910,31 @@ export function createApp() {
 
   // Tenant rating card routes
   app.use('/api/v1', createTenantRatingCardRouter(sorobanAdapter))
+
+  // Pricing calculator (public, no auth)
+  app.use('/api/v1/quote', createQuoteRouter())
+
+  // Payment dispute routes (auth + RBAC applied per-route inside the router)
+  app.use('/api/v1/disputes', createPaymentDisputeRouter())
+
+  // Referral program: tenant self-service view, public apply-code, admin view
+  app.use('/api/v1', createReferralsRouter())
+
+  // Admin: per-user/endpoint rate limit overrides (RBAC applied per-route)
+  app.use('/api/admin/quota', createAdminQuotaRouter())
+
+  // Admin: tenant background checks (RBAC applied per-route)
+  app.use('/api/admin', backgroundCheckRouter)
+
+  // Admin: credit bureau report pulls (RBAC applied per-route)
+  app.use('/api', creditBureauRouter)
+
+  // Admin: indexed Soroban contract event browser (RBAC applied per-route)
+  app.use('/api', createContractEventsRouter())
+
+  // Lease agreement generation + e-signature — gated off by default; PDF
+  // generation and the e-signature provider are still mock/in-memory stubs.
+  app.use('/api/v1', requireFlag('LEASE_AGREEMENTS_ENABLED'), createLeaseAgreementsRouter())
 
   // Interactive API documentation
   app.use("/docs", createDocsRouter());
