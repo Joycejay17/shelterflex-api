@@ -45,6 +45,14 @@ paths:
                     type: number
                     format: int64
                     example: 3600
+                  redisStatus:
+                    type: string
+                    enum: [ready, connecting, unavailable, disabled]
+                    description: >
+                      Synchronous Redis connection status. Never blocks this
+                      endpoint — reports "unavailable" instead of hanging
+                      when Redis is unreachable.
+                    example: ready
         "429":
           $ref: "#/components/responses/TooManyRequests"
         default:
